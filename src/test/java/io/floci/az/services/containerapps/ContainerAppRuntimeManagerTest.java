@@ -8,6 +8,7 @@ import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.services.containerapps.ContainerAppsModels.ContainerAppState;
 import io.floci.az.services.containerapps.ContainerAppsModels.RevisionState;
+import io.floci.az.services.keyvault.KeyVaultHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -49,6 +50,7 @@ class ContainerAppRuntimeManagerTest {
     private ContainerBuilder.Builder builder;
     private ContainerLifecycleManager lifecycleManager;
     private ContainerAppRuntimeManager runtimeManager;
+    private KeyVaultHandler keyVault;
 
     @BeforeEach
     void setUp() {
@@ -59,7 +61,41 @@ class ContainerAppRuntimeManagerTest {
         builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
         lifecycleManager = mock(ContainerLifecycleManager.class);
         when(containerBuilder.newContainer(any())).thenReturn(builder);
-        runtimeManager = new ContainerAppRuntimeManager(containerBuilder, lifecycleManager, config);
+        keyVault = mock(KeyVaultHandler.class);
+        runtimeManager = new ContainerAppRuntimeManager(containerBuilder, lifecycleManager, config, keyVault);
+    }
+
+    @Test
+    void aKeyVaultReferenceSecretResolvesFromTheVault() throws Exception {
+        when(keyVault.secretValue("kv-repro", "token", null)).thenReturn(Optional.of("hello"));
+        when(keyVault.secretValue("kv-repro", "token", "0123abcd")).thenReturn(Optional.of("pinned"));
+        when(keyVault.secretValue("localvault", "db", null)).thenReturn(Optional.of("local"));
+
+        Map<String, String> secrets = runtimeManager.secrets(MAPPER.readTree("""
+                {"secrets": [
+                  {"name": "plain", "value": "inline"},
+                  {"name": "token", "keyVaultUrl": "https://KV-Repro.vault.azure.net/secrets/token", "identity": "System"},
+                  {"name": "pinned", "keyVaultUrl": "https://kv-repro.vault.azure.net:4577/secrets/token/0123abcd"},
+                  {"name": "db", "keyVaultUrl": "http://localhost:4577/localvault-keyvault/secrets/db"}
+                ]}
+                """));
+
+        assertEquals(Map.of("plain", "inline", "token", "hello", "pinned", "pinned", "db", "local"), secrets);
+    }
+
+    @Test
+    void aKeyVaultReferenceThatResolvesToNothingIsLeftOut() throws Exception {
+        when(keyVault.secretValue(any(), any(), any())).thenReturn(Optional.empty());
+
+        Map<String, String> secrets = runtimeManager.secrets(MAPPER.readTree("""
+                {"secrets": [
+                  {"name": "missing", "keyVaultUrl": "https://kv.vault.azure.net/secrets/absent"},
+                  {"name": "notavault", "keyVaultUrl": "https://example.com/secrets/absent"},
+                  {"name": "notasecret", "keyVaultUrl": "https://kv.vault.azure.net/keys/absent"}
+                ]}
+                """));
+
+        assertTrue(secrets.isEmpty(), secrets.toString());
     }
 
     @Test

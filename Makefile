@@ -72,8 +72,10 @@ SERVICEBUS_EMULATOR_ENV = -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
 JAVA_SERVICEBUS_EMULATOR_ENV = $(SERVICEBUS_EMULATOR_ENV) \
 	-e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5
 # AksCompatibilityTest drives the mocked AKS control plane; real mode would start a k3s container.
+# Container Apps run real revisions, so ContainerAppsKeyVaultSecretCompatibilityTest sees what a replica starts with.
 JAVA_EMULATOR_ENV = $(JAVA_SERVICEBUS_EMULATOR_ENV) \
-	-e FLOCI_AZ_SERVICES_AKS_MOCKED=true
+	-e FLOCI_AZ_SERVICES_AKS_MOCKED=true \
+	-e FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED=false
 # The Testcontainers shape: floci-az in a container with the host's Docker socket and published endpoint mode, where
 # it must still reach its own brokers over the container network. Only the messaging tests run against it.
 JAVA_PUBLISHED_EMULATOR_ENV = $(JAVA_EMULATOR_ENV) \

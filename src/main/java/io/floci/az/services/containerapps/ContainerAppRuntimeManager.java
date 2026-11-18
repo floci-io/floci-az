@@ -8,6 +8,7 @@ import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.services.containerapps.ContainerAppsModels.ContainerAppState;
 import io.floci.az.services.containerapps.ContainerAppsModels.RevisionState;
+import io.floci.az.services.keyvault.KeyVaultHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -36,15 +37,18 @@ public class ContainerAppRuntimeManager {
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
     private final EmulatorConfig config;
+    private final KeyVaultHandler keyVault;
     private final Map<String, RevisionRuntime> runtimes = new ConcurrentHashMap<>();
 
     @Inject
     public ContainerAppRuntimeManager(ContainerBuilder containerBuilder,
                                       ContainerLifecycleManager lifecycleManager,
-                                      EmulatorConfig config) {
+                                      EmulatorConfig config,
+                                      KeyVaultHandler keyVault) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.config = config;
+        this.keyVault = keyVault;
     }
 
     public synchronized void startRevision(ContainerAppState app, RevisionState revision,
@@ -219,11 +223,31 @@ public class ContainerAppRuntimeManager {
         }
     }
 
-    private static Map<String, String> secrets(JsonNode configuration) {
+    /**
+     * The app's secrets by name. A secret given as a Key Vault reference ({@code keyVaultUrl}, with an
+     * {@code identity} that is accepted and not checked, as no data-plane request checks identities) is read from
+     * floci-az's own vault when the revision starts, as Azure resolves it then. One that does not resolve is left
+     * out, so an env var naming it fails the revision.
+     */
+    Map<String, String> secrets(JsonNode configuration) {
         Map<String, String> result = new HashMap<>();
         for (JsonNode secret : configuration.path("secrets")) {
-            if (secret.hasNonNull("name") && secret.has("value")) {
-                result.put(secret.path("name").asText(), secret.path("value").asText());
+            if (!secret.hasNonNull("name")) {
+                continue;
+            }
+            String name = secret.path("name").asText();
+            if (secret.has("value")) {
+                result.put(name, secret.path("value").asText());
+            } else if (secret.hasNonNull("keyVaultUrl")) {
+                String url = secret.path("keyVaultUrl").asText();
+                Optional<String> value = KeyVaultSecretReference.parse(url)
+                        .flatMap(ref -> keyVault.secretValue(ref.vault(), ref.name(), ref.version()));
+                if (value.isPresent()) {
+                    result.put(name, value.get());
+                } else {
+                    LOG.warnv("Container App secret {0} references {1}, which names no enabled Key Vault secret",
+                            name, url);
+                }
             }
         }
         return result;
