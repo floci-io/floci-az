@@ -29,6 +29,8 @@ class ApiManagementDeletedServicesTest {
             + "/providers/Microsoft.ApiManagement/service/" + SERVICE;
     private static final String DELETED = "/subscriptions/" + SUB
             + "/providers/Microsoft.ApiManagement/locations/westus/deletedservices/" + SERVICE;
+    private static final String SERVICE_BODY = "{\"location\":\"westus\",\"sku\":{\"name\":\"Developer\",\"capacity\":1},"
+            + "\"properties\":{\"publisherEmail\":\"admin@contoso.com\",\"publisherName\":\"Contoso\"}}";
 
     @BeforeEach
     void reset() {
@@ -135,10 +137,33 @@ class ApiManagementDeletedServicesTest {
         given().when().get(SERVICE_ID + "/apis" + API).then().statusCode(200).body("value", empty());
     }
 
+    @Test
+    void aDeletedServiceKeepsItsNameFromEveryOtherScopeUntilItIsPurged() {
+        createService();
+        createApi();
+        given().when().delete(SERVICE_ID + API).then().statusCode(200);
+
+        String otherGroup = "/subscriptions/" + SUB + "/resourceGroups/test-rg-other"
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE;
+        String otherSubscription = "/subscriptions/another-sub/resourceGroups/test-rg-apim-deleted"
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE;
+        // A restore aimed at another group would bring the service back where it was, under the name the request
+        // did not ask for, so the name gate refuses it like any other create of a taken name.
+        given().contentType("application/json").body("{\"location\":\"westus\",\"properties\":{\"restore\":true}}")
+                .when().put(otherGroup + API)
+                .then().statusCode(409).body("error.code", equalTo("ServiceAlreadyExists"));
+        given().contentType("application/json").body(SERVICE_BODY).when().put(otherSubscription + API)
+                .then().statusCode(409).body("error.code", equalTo("ServiceAlreadyExists"));
+        given().when().get(DELETED + API).then().statusCode(200);
+
+        given().when().delete(DELETED + API).then().statusCode(200);
+        given().contentType("application/json").body(SERVICE_BODY).when().put(otherSubscription + API)
+                .then().statusCode(200);
+        given().when().get(otherSubscription + "/apis" + API).then().statusCode(200).body("value", empty());
+    }
+
     private static void createService() {
-        given().contentType("application/json")
-                .body("{\"location\":\"westus\",\"sku\":{\"name\":\"Developer\",\"capacity\":1},"
-                        + "\"properties\":{\"publisherEmail\":\"admin@contoso.com\",\"publisherName\":\"Contoso\"}}")
+        given().contentType("application/json").body(SERVICE_BODY)
                 .when().put(SERVICE_ID + API)
                 .then().statusCode(200);
     }

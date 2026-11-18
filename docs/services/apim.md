@@ -63,8 +63,11 @@ APIs, operations, policies, products, subscriptions, named values and backends:
   nothing to purge; Azure answers `202` and completes the purge later.
 - A create with `properties.restore: true` brings the service back as it was deleted, with its child resources; the
   other properties of the request are ignored, as the spec says.
-- A plain create over a deleted name is not refused: the deleted service and its child resources go, and a new service
-  is created.
+- A plain create of the deleted service (the same subscription, resource group and name) is not refused: the deleted
+  service and its child resources go, and a new service is created.
+- The deleted service keeps its `azure-api.net` name until it is purged or its 48 hours pass. A create of that name in
+  any other resource group or subscription, a restore included, answers `409 ServiceAlreadyExists`, and
+  `checkNameAvailability` answers `AlreadyExists`.
 
 While a service is soft-deleted, its child resources answer `404`. `azd down --purge` and the azurerm provider (with
 `purge_soft_delete_on_destroy`, on by default) purge the deleted service after deleting it.

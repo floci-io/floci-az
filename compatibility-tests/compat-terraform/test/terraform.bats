@@ -431,4 +431,9 @@ setup() {
     run curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer fake" \
         "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/providers/Microsoft.KeyVault/locations/eastus/deletedVaults/${KV_NAME}?api-version=2023-02-01"
     assert_output "404"
+
+    # The destroy purges the soft-deleted API Management service too (purge_soft_delete_on_destroy).
+    run curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/providers/Microsoft.ApiManagement/locations/eastus/deletedservices/floci-test-apim?api-version=2022-08-01"
+    assert_output "404"
 }
