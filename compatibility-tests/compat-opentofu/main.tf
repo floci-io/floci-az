@@ -229,7 +229,7 @@ resource "azurerm_postgresql_flexible_server" "pg" {
   administrator_password        = "FlociAz_Strong123!"
   storage_mb                    = 32768
   sku_name                      = "B_Standard_B1ms"
-  public_network_access_enabled = true
+  public_network_access_enabled = false
 
   lifecycle {
     ignore_changes = [zone]
@@ -356,11 +356,12 @@ output "key_vault_uri" {
 }
 
 resource "azurerm_container_registry" "acr" {
-  name                = "flocitestacr"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
-  sku                 = "Basic"
-  admin_enabled       = true
+  name                 = "flocitestacr"
+  resource_group_name  = azurerm_resource_group.rg.name
+  location             = azurerm_resource_group.rg.location
+  sku                  = "Basic"
+  admin_enabled        = true
+  role_assignment_mode = "AbacRepositoryPermissions"
 }
 
 output "acr_login_server" {

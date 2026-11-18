@@ -315,7 +315,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                     skuName, skuTier, storageGB,
                     null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
-                    Instant.now(), authConfig, new ConcurrentHashMap<>(), generatedLogin);
+                    Instant.now(), authConfig, new ConcurrentHashMap<>(), generatedLogin, network(props.path("network")));
                 // The gate reserved the name already for an ARM create (this finds it OWNED); a create outside the
                 // gate reserves it here, so an ARM create in flight and this one cannot both claim it.
                 GlobalNameRegistry.Reservation reservation = names.reserve(cloud(request), CloudSuffix.POSTGRES,
@@ -365,6 +365,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                 String skuTier  = sku.path("tier").asText(live.skuTier());
                 Map<String, String> mergedTags = body.has("tags") ? tags : live.tags();
                 PostgresState.AuthConfig authConfig = updatedAuthConfig(props.path("authConfig"), live.authConfig(), isPatch);
+                PostgresState.Network network = updatedNetwork(props.path("network"), live.network(), isPatch);
 
                 // Azure takes administratorLogin "the first time that you enable password based authentication",
                 // and never changes it after (2025-08-01). A server created with password sign-in off carries
@@ -396,7 +397,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                     skuName, skuTier, storageGB,
                     live.containerId(), live.hostPort(), live.host(), mergedTags,
                     live.databases(), live.firewallRules(), live.configurations(),
-                    live.createdAt(), authConfig, live.administrators(), live.generatedLogin() && !firstPasswordEnable);
+                    live.createdAt(), authConfig, live.administrators(), live.generatedLogin() && !firstPasswordEnable,
+                    network);
                 // Delete does not take the start lock, so the server can go away while the
                 // rotation runs. Writing it back would resurrect a name another scope may claim.
                 if (!state.replaceServer(live, updated)) {
@@ -734,7 +736,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         props.put("state", ready ? "Ready" : "Creating");
         props.put("provisioningState", ready ? "Succeeded" : "Creating");
         props.put("storage", Map.of("storageSizeGB", s.storageSizeGB()));
-        props.put("network", Map.of("publicNetworkAccess", "Enabled"));
+        props.put("network", networkResponse(s.network()));
         // floci-az convenience — not in the real spec. This is the reachable port (the published
         // host port for host networking, or the in-network container port when floci-az runs in a
         // container). Prefer the /connect endpoint, which returns the matching reachable host.
@@ -803,6 +805,45 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             sent.activeDirectoryAuth() != null ? sent.activeDirectoryAuth() : stored.activeDirectoryAuth(),
             sent.passwordAuth() != null ? sent.passwordAuth() : stored.passwordAuth(),
             sent.tenantId() != null ? sent.tenantId() : stored.tenantId());
+    }
+
+    private static PostgresState.Network network(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        return new PostgresState.Network(node.path("delegatedSubnetResourceId").asText(null),
+            node.path("privateDnsZoneArmResourceId").asText(null), node.path("publicNetworkAccess").asText(null));
+    }
+
+    /** The network an update leaves: a PUT replaces it, a PATCH merges what it sends, an omitted one is kept. */
+    private static PostgresState.Network updatedNetwork(JsonNode node, PostgresState.Network stored, boolean isPatch) {
+        PostgresState.Network sent = network(node);
+        if (sent == null) {
+            return stored;
+        }
+        if (!isPatch || stored == null) {
+            return sent;
+        }
+        return new PostgresState.Network(
+            sent.delegatedSubnetResourceId() != null ? sent.delegatedSubnetResourceId() : stored.delegatedSubnetResourceId(),
+            sent.privateDnsZoneArmResourceId() != null
+                ? sent.privateDnsZoneArmResourceId() : stored.privateDnsZoneArmResourceId(),
+            sent.publicNetworkAccess() != null ? sent.publicNetworkAccess() : stored.publicNetworkAccess());
+    }
+
+    /**
+     * {@code properties.network} as stored. A server created without one, or without {@code publicNetworkAccess},
+     * reads back public access on, which is what floci-az answered for every server before it stored the block.
+     */
+    private static Map<String, Object> networkResponse(PostgresState.Network network) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (network != null) {
+            putIfPresent(result, "delegatedSubnetResourceId", network.delegatedSubnetResourceId());
+            putIfPresent(result, "privateDnsZoneArmResourceId", network.privateDnsZoneArmResourceId());
+        }
+        String publicAccess = network == null ? null : network.publicNetworkAccess();
+        result.put("publicNetworkAccess", publicAccess != null ? publicAccess : "Enabled");
+        return result;
     }
 
     private static boolean passwordAuthDisabled(PostgresState.AuthConfig authConfig) {

@@ -390,6 +390,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, StoreIndexSo
                         current.setLocation(location);
                         current.setSkuName(sku.path("name").asText("Basic"));
                         current.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
+                        current.setRoleAssignmentMode(props.path("roleAssignmentMode").asText(null));
                         current.setTags(parseStringMap(body.path("tags")));
                         current.setLoginServer(loginServer(registryName));
                         if (mocked) {
@@ -456,6 +457,9 @@ public class AcrHandler implements AzureServiceHandler, Resettable, StoreIndexSo
             JsonNode props = body.path("properties");
             if (props.has("adminUserEnabled")) {
                 registry.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean());
+            }
+            if (props.hasNonNull("roleAssignmentMode")) {
+                registry.setRoleAssignmentMode(props.path("roleAssignmentMode").asText());
             }
             store.put(registry);
             return Response.ok(toArmResponse(registry)).type("application/json").build();
@@ -637,6 +641,9 @@ public class AcrHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         }
         props.put("provisioningState", registry.getProvisioningState());
         props.put("adminUserEnabled", registry.isAdminUserEnabled());
+        // Writable, with the spec default LegacyRegistryPermissions (2025-11-01); azurerm reads it back.
+        props.put("roleAssignmentMode", registry.getRoleAssignmentMode() != null
+                ? registry.getRoleAssignmentMode() : "LegacyRegistryPermissions");
         props.put("publicNetworkAccess", "Enabled");
         props.put("anonymousPullEnabled", false);
         // The azurerm provider dereferences these without nil checks (e.g. *props.ZoneRedundancy),

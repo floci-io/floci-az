@@ -362,7 +362,8 @@ public class PostgresState {
             stored.createdAt(),
             stored.authConfig(),
             new ConcurrentHashMap<>(stored.administrators()),
-            stored.generatedLogin());
+            stored.generatedLogin(),
+            stored.network());
     }
 
     // ── Key helper ───────────────────────────────────────────────────────────
@@ -403,7 +404,8 @@ public class PostgresState {
             // administratorLogin is the superuser floci-az generated for an Entra-only create: no password login
             // has been set yet, so the first update that enables password sign-in sets one. A record stored
             // before this field existed reads false, a login the client chose.
-            boolean generatedLogin
+            boolean generatedLogin,
+            Network network                       // null when the create named none: public access, no VNet
     ) {
         /** A record stored before administrators existed reads none. */
         public ServerEntry {
@@ -419,7 +421,7 @@ public class PostgresState {
                            Instant createdAt) {
             this(serverName, subscriptionId, resourceGroupName, location, version, administratorLogin,
                 administratorLoginPassword, skuName, skuTier, storageSizeGB, containerId, hostPort, host, tags,
-                databases, firewallRules, configurations, createdAt, null, new ConcurrentHashMap<>(), false);
+                databases, firewallRules, configurations, createdAt, null, new ConcurrentHashMap<>(), false, null);
         }
 
         /** Whether password sign-in is off, so Azure returns no {@code administratorLogin}. */
@@ -438,7 +440,7 @@ public class PostgresState {
                 location, version, administratorLogin, administratorLoginPassword,
                 skuName, skuTier, storageSizeGB,
                 id, port, reachableHost, tags, databases, firewallRules, configurations, createdAt,
-                authConfig, administrators, generatedLogin);
+                authConfig, administrators, generatedLogin, network);
         }
 
         /** This server's own fields over the container and child resources of {@code stored}. */
@@ -448,7 +450,7 @@ public class PostgresState {
                 skuName, skuTier, storageSizeGB,
                 stored.containerId(), stored.hostPort(), stored.host(), tags,
                 stored.databases(), stored.firewallRules(), stored.configurations(), createdAt,
-                authConfig, stored.administrators(), generatedLogin);
+                authConfig, stored.administrators(), generatedLogin, network);
         }
 
         /**
@@ -488,6 +490,14 @@ public class PostgresState {
      */
     @RegisterForReflection
     public record AuthConfig(String activeDirectoryAuth, String passwordAuth, String tenantId) {}
+
+    /**
+     * A server's {@code properties.network} (2025-08-01): the delegated subnet and private DNS zone of a VNet-integrated
+     * server, and whether public access is on. All three are writable and stored as sent.
+     */
+    @RegisterForReflection
+    public record Network(String delegatedSubnetResourceId, String privateDnsZoneArmResourceId,
+                          String publicNetworkAccess) {}
 
     /** A Microsoft Entra administrator, {@code administrators/{objectId}}. */
     @RegisterForReflection
