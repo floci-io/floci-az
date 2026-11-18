@@ -49,8 +49,6 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     private static final Logger LOGGER = Logger.getLogger(TableServiceHandler.class);
 
     private static final String NS_PREFIX = "__ns__:";
-    private static final StoredObject NS_SENTINEL =
-            new StoredObject("", new byte[0], Map.of(), Instant.EPOCH, "");
     private static final DateTimeFormatter ISO_TIMESTAMP = DateTimeFormatter
             .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
             .withZone(ZoneId.of("UTC"));
@@ -71,6 +69,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
         this.config = config;
         this.store = storageFactory.create("table");
         TableEntityKeys.migrateLegacyKeys(store, NS_PREFIX, objectMapper);
+        TableEntityKeys.migrateTableNameCase(store, NS_PREFIX);
     }
 
     @Override
@@ -271,7 +270,9 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 return new AzureErrorResponse("TableAlreadyExists", "The table specified already exists.")
                         .toODataResponse(Response.Status.CONFLICT.getStatusCode());
             }
-            store.put(key, NS_SENTINEL);
+            // Azure table names "preserve the case with which they were created, but are case-insensitive when
+            // used": the key is lowercase, and the record keeps the created spelling for Query Tables.
+            store.put(key, new StoredObject(req.TableName(), new byte[0], Map.of(), Instant.EPOCH, ""));
             return Response.status(Response.Status.CREATED)
                     .type(MediaType.APPLICATION_JSON)
                     .entity(new TableModel.TableItem(req.TableName()))
@@ -283,11 +284,13 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
 
     private Response listTables(AzureRequest request) {
         String nsFilter = NS_PREFIX + request.accountName() + "/";
-        List<TableModel.TableItem> tables = store.keys().stream()
-                .filter(k -> k.startsWith(nsFilter))
-                .map(k -> k.substring(nsFilter.length()))
-                .map(TableModel.TableItem::new)
-                .collect(Collectors.toList());
+        List<TableModel.TableItem> tables = new ArrayList<>();
+        for (String key : store.keys()) {
+            if (key.startsWith(nsFilter) && TableEntityKeys.isLiveTableSegment(key.substring(nsFilter.length()))) {
+                store.get(key).ifPresent(record -> tables.add(new TableModel.TableItem(
+                        record.key() == null || record.key().isEmpty() ? key.substring(nsFilter.length()) : record.key())));
+            }
+        }
 
         return Response.ok(new TableModel.TableListResponse(tables))
                 .type(MediaType.APPLICATION_JSON)
@@ -344,13 +347,15 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             return SignedIdentifiers.invalidXmlDocument().toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
         }
         String key = nsKey(request.accountName(), tableName);
-        if (store.get(key).isEmpty()) {
+        Optional<StoredObject> table = store.get(key);
+        if (table.isEmpty()) {
             return tableNotFound().toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
         }
         byte[] acl = identifiers.isEmpty()
                 ? new byte[0]
                 : SignedIdentifiers.toXml(identifiers).getBytes(StandardCharsets.UTF_8);
-        store.put(key, new StoredObject("", acl, Map.of(), Instant.now(), ""));
+        // The record's key is the table's created spelling, whatever casing this request used.
+        store.put(key, new StoredObject(table.get().key(), acl, Map.of(), Instant.now(), ""));
         return Response.noContent().build();
     }
 
@@ -1295,10 +1300,10 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private static String nsKey(String accountName, String tableName) {
-        return NS_PREFIX + accountName + "/" + tableName;
+        return NS_PREFIX + accountName + "/" + TableEntityKeys.tableSegment(tableName);
     }
 
     private static String objKey(String accountName, String tableName, String key) {
-        return accountName + "/" + tableName + "/" + key;
+        return accountName + "/" + TableEntityKeys.tableSegment(tableName) + "/" + key;
     }
 }

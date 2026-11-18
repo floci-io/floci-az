@@ -23,6 +23,7 @@ import org.junit.jupiter.api.TestInstance;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -72,6 +73,26 @@ class TableCompatibilityTest {
 
         List<String> after = client.listTables().stream().map(t -> t.getName()).toList();
         assertFalse(after.contains(name));
+    }
+
+    @Test
+    @DisplayName("table names are case-insensitive and keep their created spelling")
+    void tableNamesAreCaseInsensitive() {
+        String name = "Mixed" + tableName();
+        client.createTable(name);
+        try {
+            TableClient lower = client.getTableClient(name.toLowerCase(Locale.ROOT));
+            lower.upsertEntity(new TableEntity("p1", "r1").addProperty("Value", "through-lowercase"));
+
+            TableClient upper = client.getTableClient(name.toUpperCase(Locale.ROOT));
+            assertEquals("through-lowercase", upper.getEntity("p1", "r1").getProperty("Value"));
+
+            List<String> tables = client.listTables().stream().map(t -> t.getName()).toList();
+            assertTrue(tables.contains(name), "tables: " + tables);
+            assertFalse(tables.contains(name.toLowerCase(Locale.ROOT)), "tables: " + tables);
+        } finally {
+            client.deleteTable(name);
+        }
     }
 
     @Test
