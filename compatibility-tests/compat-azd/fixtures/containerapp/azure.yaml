@@ -1,0 +1,8 @@
+name: floci-azd-containerapp
+services:
+  web:
+    host: containerapp
+    # A published image azd deploys as is: no Docker build or push, so the suite needs no daemon.
+    image: docker.io/library/nginx:1.27-alpine
+    docker:
+      imagePassthrough: true
