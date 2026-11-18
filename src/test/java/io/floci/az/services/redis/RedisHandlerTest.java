@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -114,20 +115,38 @@ class RedisHandlerTest {
     }
 
     @Test
-    @DisplayName("DELETE cache returns 202 and subsequent GET returns 404")
-    void deleteCacheReturns202() {
+    @DisplayName("DELETE cache returns 202 with a Location monitor, and subsequent GET returns 404")
+    void deleteCacheReturns202WithALocationMonitor() {
         given()
             .contentType("application/json").body(CREATE_BODY)
             .put(BASE + "/redis/del-cache" + API)
             .then().statusCode(201);
 
-        given()
+        String monitor = given()
             .when().delete(BASE + "/redis/del-cache" + API)
-            .then().statusCode(202);
+            .then().statusCode(202)
+            .header("Retry-After", "1")
+            .header("Location", allOf(
+                containsString("/subscriptions/" + SUB + "/providers/Microsoft.Cache/locations/eastus/operationresults/"),
+                endsWith(API)))
+            .extract().header("Location");
+
+        URI uri = URI.create(monitor);
+        given()
+            .when().get(uri.getRawPath() + "?" + uri.getRawQuery())
+            .then().statusCode(204);
 
         given()
             .when().get(BASE + "/redis/del-cache" + API)
             .then().statusCode(404);
+    }
+
+    @Test
+    @DisplayName("DELETE of a cache that does not exist returns 204")
+    void deletingAMissingCacheReturnsNoContent() {
+        given()
+            .when().delete(BASE + "/redis/never-created" + API)
+            .then().statusCode(204).header("Location", nullValue());
     }
 
     @Test

@@ -514,12 +514,14 @@ public class AksHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         }
 
         if ("DELETE".equals(method)) {
+            // AgentPools_Delete (2025-10-01) is a long-running operation declaring 202 with the monitor headers, and
+            // 204 when the pool does not exist. A bare 202 is what the Java ARM poller reads as a failed operation.
             boolean removed = pools.removeIf(p -> poolName.equals(p.getName()));
             if (!removed) {
-                return notFound("Agent pool '" + poolName + "' not found.");
+                return Response.noContent().build();
             }
             store.put(cluster);
-            return Response.status(202).build();
+            return acceptedDelete(req, sub, cluster.getLocation());
         }
 
         return methodNotAllowed();

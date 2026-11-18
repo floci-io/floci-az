@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
@@ -184,6 +185,12 @@ public class RedisHandler implements AzureServiceHandler, Resettable, StoreIndex
 
         String tail = extractRedisPath(fullPath);
 
+        // ── LRO monitor handed out by DELETE: locations/{loc}/operationresults/{opId} ──
+        // Redis_Delete's final state is read from Location; the cache is already gone, so the operation is done.
+        if ("GET".equals(method) && tail.matches("(?i)locations/[^/]+/operationresults/[^/]+")) {
+            return Response.noContent().build();
+        }
+
         // ── Name availability (Redis_CheckNameAvailability) ──────────────────
         if (tail.equalsIgnoreCase("checkNameAvailability") && "POST".equals(method)) {
             return handleCheckNameAvailability(req);
@@ -219,7 +226,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, StoreIndex
                 case "GET"    -> handleGet(sub, rg, cacheName);
                 case "PUT"    -> handleCreateOrUpdate(sub, rg, cacheName, req);
                 case "PATCH"  -> handlePatch(sub, rg, cacheName, req);
-                case "DELETE" -> handleDelete(sub, rg, cacheName);
+                case "DELETE" -> handleDelete(sub, rg, cacheName, req);
                 default       -> methodNotAllowed();
             };
         }
@@ -339,17 +346,36 @@ public class RedisHandler implements AzureServiceHandler, Resettable, StoreIndex
         }
     }
 
-    private Response handleDelete(String sub, String rg, String cacheName) {
+    /**
+     * {@code Redis_Delete} (2024-11-01) is a long-running operation with {@code final-state-via: location}: 202 with a
+     * {@code Location} monitor, or 204 when the cache does not exist. A bare 202 is what the Java ARM poller reads as
+     * a failed operation.
+     */
+    private Response handleDelete(String sub, String rg, String cacheName, AzureRequest req) {
         ArmResourceId id = cacheId(sub, rg, cacheName);
         Optional<RedisCache> found = getCache(id);
         if (found.isEmpty()) {
-            return notFound("Redis cache '" + cacheName + "' not found.");
+            return Response.noContent().build();
         }
         if (!config.services().redis().mocked()) {
             stopQuietly(found.get());
         }
         store.delete(id);
-        return Response.status(202).build();
+        return acceptedDelete(req, sub, found.get().getLocation());
+    }
+
+    private Response acceptedDelete(AzureRequest req, String sub, String location) {
+        String loc = (location == null || location.isBlank()) ? defaults.defaultLocation(req.scope()) : location;
+        // Built from the caller's own scheme and host, as the AKS monitors are: a client that reached us over TLS
+        // refuses to send credentials to a downgraded http:// poll URL.
+        String apiVersion = req.queryParams() == null ? null : req.queryParams().get("api-version");
+        String query = apiVersion == null || apiVersion.isBlank() ? "" : "?api-version=" + apiVersion;
+        String monitor = RequestUrls.resolveBaseUrl(req, config) + "/subscriptions/" + sub
+                + "/providers/Microsoft.Cache/locations/" + loc + "/operationresults/" + UUID.randomUUID() + query;
+        return Response.status(202)
+                .header("Location", monitor)
+                .header("Retry-After", "1")
+                .build();
     }
 
     /**
