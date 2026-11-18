@@ -126,6 +126,7 @@ Rule: copy an existing service pattern before introducing a new one.
 | Azure Functions | HTTP REST | `/{account}-functions/` | ZIP deploy, HTTP trigger invoke |
 | App Configuration | Azure App Config REST | `/{account}-appconfig/` | JSON, ETags, labels |
 | Key Vault | Azure Key Vault REST | `/{account}-keyvault/` | JSON, Bearer auth challenge |
+| Azure AI Search | Azure AI Search REST | `/{account}-search/` | JSON / OData, `api-key` header, ETags |
 | Event Hubs | AMQP 1.0 (Artemis) | port 5672 | Direct sidecar, not proxied through 4577 |
 | Event Hubs Kafka | Kafka (Redpanda) | port 9093 | Optional, direct sidecar |
 
@@ -237,16 +238,16 @@ make stop
 ```
 compatibility-tests/
   sdk-test-python/      : Azure SDK for Python (pytest): blob/queue/table, cosmos, vm, redis, acr,
-                          managed identity, plus appconfig/ and keyvault/ sub-suites
+                          managed identity, search (indexes), plus appconfig/ and keyvault/ sub-suites
   sdk-test-java/        : Azure SDK for Java (BOM; the primary compat target): blob/queue/table,
                           cosmos + all engines, functions, keyvault, appconfig, eventhub,
                           servicebus, eventgrid, apim, sql, postgres, vm, datalake,
-                          managed identity
+                          managed identity, search (indexes)
   sdk-test-node/        : Azure SDK for JS (jest): blob, queue, table, cosmos, appconfig,
-                          keyvault, eventhub, servicebus, managed identity
+                          keyvault, eventhub, servicebus, managed identity, search (indexes)
   sdk-test-dotnet/      : Azure SDK for .NET (TUnit): blob service SAS, cosmos (+ bracket properties,
                           point partition, transactional batch), keyvault (+ certificates, timestamps),
-                          servicebus (+ lock renewal, metadata, peek-lock), signalr. The only suite
+                          servicebus (+ lock renewal, metadata, peek-lock), search (indexes), signalr. The only suite
                           covering SignalR
   sdk-test-cpp/         : Azure SDK for C++ (GoogleTest via vcpkg): blob, queue. Built from source, so ~6 min cold
   compat-terraform/     : hashicorp/azurerm Terraform provider (BATS)

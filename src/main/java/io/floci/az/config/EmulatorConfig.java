@@ -188,6 +188,15 @@ public interface EmulatorConfig {
     }
 
     /**
+     * Whether the data plane of a search service checks its caller: the service must exist, and an {@code api-key}
+     * must be one of its admin keys. On from {@code parity: strict};
+     * {@code parity-overrides.strict-search-keys} overrides it either way.
+     */
+    default boolean strictSearchKeys() {
+        return parityOverrides().strictSearchKeys().orElse(parity().includes(ParityLevel.STRICT));
+    }
+
+    /**
      * {@code floci-az.parity-overrides}: each switch is unset by default and then follows {@link #parity()}.
      * Later phases add their own switches here.
      */
@@ -224,6 +233,9 @@ public interface EmulatorConfig {
 
         /** Default: on from {@code parity: azure}. Read through {@link EmulatorConfig#tenantScoping()}. */
         Optional<Boolean> tenantScoping();
+
+        /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictSearchKeys()}. */
+        Optional<Boolean> strictSearchKeys();
     }
 
     /** The cloud a tenant lives in when nothing else names one. */

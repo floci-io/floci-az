@@ -81,7 +81,8 @@ public class SearchArmService {
             "semanticSearch", List.of("disabled", "free", "standard"),
             "knowledgeRetrieval", List.of("free", "standard"),
             "networkRuleSet.bypass", List.of("None", "AzureServices", "AzurePortal"),
-            "encryptionWithCmk.enforcement", List.of("Disabled", "Enabled", "Unspecified"));
+            "encryptionWithCmk.enforcement", List.of("Disabled", "Enabled", "Unspecified"),
+            "authOptions.aadOrApiKey.aadAuthFailureMode", List.of("http403", "http401WithBearerChallenge"));
     private static final List<String> DATA_EXFILTRATION_PROTECTIONS = List.of("BlockAll");
     /** {@code IdentityType} (2025-05-01). */
     private static final String IDENTITY_NONE = "None";
@@ -119,7 +120,8 @@ public class SearchArmService {
     /** A dedicated service has at most 36 search units, replicas times partitions. */
     private static final int MAX_SEARCH_UNITS = 36;
     private static final String HIGH_DENSITY = "HighDensity";
-    private static final String HIGH_DENSITY_SKU = "standard3";
+    /** The only SKU that can run in {@code HighDensity} mode; the data plane's index quota reads it too. */
+    static final String HIGH_DENSITY_SKU = "standard3";
     /** A {@code standard3} service in {@code HighDensity} hosting mode has at most three partitions (2025-05-01). */
     private static final int MAX_HIGH_DENSITY_PARTITIONS = 3;
 
@@ -132,15 +134,17 @@ public class SearchArmService {
     private final GlobalNameRegistry names;
     private final CloudDefaults defaults;
     private final ManagedIdentityStore identities;
+    private final SearchIndexes indexes;
 
     @Inject
     public SearchArmService(StorageFactory storageFactory, GlobalNameRegistry names, CloudDefaults defaults,
-                            ManagedIdentityStore identities) {
+                            ManagedIdentityStore identities, SearchIndexes indexes) {
         this.services = ArmResourceStore.create(storageFactory, STORE, SearchModels.SEARCH_SERVICES,
                 SearchServiceResource.class, SearchServiceResource::id, key -> false);
         this.names = names;
         this.defaults = defaults;
         this.identities = identities;
+        this.indexes = indexes;
     }
 
     /** Serves one request under {@code /providers/Microsoft.Search/}. */
@@ -180,7 +184,7 @@ public class SearchArmService {
                 case "GET" -> services.get(id.get()).map(stored -> ok(stored.value().toArm()))
                         .orElseGet(() -> serviceNotFound(id.get()));
                 case "PATCH" -> update(req, id.get());
-                case "DELETE" -> delete(id.get());
+                case "DELETE" -> delete(req, id.get());
                 default -> methodNotAllowed();
             };
         }
@@ -298,12 +302,16 @@ public class SearchArmService {
         }
     }
 
-    /** {@code Services_Delete}: {@code 200} for a service that existed, {@code 204} for one that did not. */
-    private Response delete(ArmResourceId id) {
+    /**
+     * {@code Services_Delete}: {@code 200} for a service that existed, {@code 204} for one that did not. The
+     * indexes of the service go with it.
+     */
+    private Response delete(AzureRequest req, ArmResourceId id) {
         Optional<ArmResourceStore.Stored<SearchServiceResource>> removed = services.delete(id);
         if (removed.isEmpty()) {
             return Response.noContent().build();
         }
+        indexes.deleteAll(cloud(req).name(), removed.get().value().name());
         LOG.infov("ARM: deleted search service {0}", removed.get().value().id());
         return Response.ok().build();
     }
@@ -430,6 +438,16 @@ public class SearchArmService {
         return services.get(owner).filter(stored -> name.equalsIgnoreCase(stored.id().name())).isPresent();
     }
 
+    /**
+     * The service named {@code name}, in whichever subscription and resource group it lives: the global name
+     * registry knows its owner, so only that one resource is read.
+     */
+    public Optional<SearchServiceResource> findByName(AzureRequest req, String name) {
+        return names.owner(cloud(req), CloudSuffix.SEARCH, name)
+                .flatMap(services::get)
+                .map(ArmResourceStore.Stored::value);
+    }
+
     /** Forgets every search service: {@code POST /_admin/reset}. */
     public void clear() {
         services.clear();
@@ -538,6 +556,8 @@ public class SearchArmService {
                         Map.class, "an object"),
                 new Shape("disableLocalAuth", properties.get("disableLocalAuth"), Boolean.class, "a boolean"),
                 new Shape("authOptions", properties.get("authOptions"), Map.class, "an object"),
+                new Shape("authOptions.aadOrApiKey", ArmJson.cast(properties.get("authOptions")).get("aadOrApiKey"),
+                        Map.class, "an object"),
                 new Shape("networkRuleSet", networkRuleSet, Map.class, "an object"),
                 new Shape("networkRuleSet.ipRules", ArmJson.cast(networkRuleSet).get("ipRules"), List.class,
                         "an array"),
@@ -572,6 +592,8 @@ public class SearchArmService {
         checked.put("knowledgeRetrieval", properties.get("knowledgeRetrieval"));
         checked.put("networkRuleSet.bypass", networkRuleSet.get("bypass"));
         checked.put("encryptionWithCmk.enforcement", encryption.get("enforcement"));
+        checked.put("authOptions.aadOrApiKey.aadAuthFailureMode",
+                ArmJson.cast(ArmJson.cast(properties.get("authOptions")).get("aadOrApiKey")).get("aadAuthFailureMode"));
         for (Map.Entry<String, Object> property : checked.entrySet()) {
             if (property.getValue() != null && !isOneOf(property.getValue(), ENUMS.get(property.getKey()))) {
                 return Optional.of(invalid("The '" + property.getKey() + "' value '" + property.getValue()
@@ -855,7 +877,7 @@ public class SearchArmService {
         return Optional.of(new ArmScope(req.scope().subscriptionId(), req.scope().resourceGroup()));
     }
 
-    private static CloudProfile cloud(AzureRequest req) {
+    static CloudProfile cloud(AzureRequest req) {
         return req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : req.scope().cloud();
     }
 

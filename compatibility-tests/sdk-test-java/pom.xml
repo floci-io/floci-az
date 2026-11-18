@@ -112,6 +112,10 @@
         </dependency>
         <dependency>
             <groupId>com.azure</groupId>
+            <artifactId>azure-search-documents</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.azure</groupId>
             <artifactId>azure-containers-containerregistry</artifactId>
         </dependency>
         <!-- azure-containers-containerregistry still serializes through azure-core's JacksonAdapter,

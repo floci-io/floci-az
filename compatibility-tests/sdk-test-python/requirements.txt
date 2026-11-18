@@ -8,6 +8,7 @@ azure-cosmos==4.17.1
 azure-appconfiguration==1.10.0
 azure-keyvault-secrets==4.12.0
 azure-keyvault-keys==4.11.3
+azure-search-documents==12.1.0
 azure-identity==1.27.0
 azure-core==1.41.0
 # 7.15.0 decodes AMQP frames with omitted trailing fields (as Artemis sends them); earlier releases can't connect. Pre-release until 7.15.0 ships.

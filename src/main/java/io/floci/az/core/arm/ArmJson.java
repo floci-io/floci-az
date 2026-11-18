@@ -73,11 +73,17 @@ public final class ArmJson {
         if (bytes.length == 0) {
             return Map.of();
         }
+        Map<String, Object> parsed;
         try {
-            return MAPPER.readValue(bytes, Map.class);
+            parsed = MAPPER.readValue(bytes, Map.class);
         } catch (IOException e) {
             throw new InvalidBodyException(e);
         }
+        if (parsed == null) {
+            // The JSON literal null parses to no map at all, which is not an object either.
+            throw new InvalidBodyException(new IOException("The request body is the JSON literal null."));
+        }
+        return parsed;
     }
 
     @SuppressWarnings("unchecked")

@@ -5,7 +5,6 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
-import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmScope;
@@ -28,8 +27,8 @@ import java.util.Map;
  * <p>{@code Microsoft.Search/searchServices} and their admin and query keys, served by {@link SearchArmService}.
  *
  * <h2>Data plane</h2>
- * <p>The handler claims {@code {service}.search.windows.net} and the {@code /{service}-search/} path prefix, but
- * serves no data-plane operation yet: indexes, documents and queries answer {@code 404}.
+ * <p>Requests to {@code {service}.search.windows.net} and to the {@code /{service}-search/} path prefix, served by
+ * {@link SearchDataPlane}: index management so far.
  */
 @ApplicationScoped
 public class SearchHandler implements AzureServiceHandler, Resettable, StoreIndexSource, GlobalNameSource {
@@ -44,11 +43,16 @@ public class SearchHandler implements AzureServiceHandler, Resettable, StoreInde
 
     private final EmulatorConfig config;
     private final SearchArmService arm;
+    private final SearchDataPlane dataPlane;
+    private final SearchIndexes indexes;
 
     @Inject
-    public SearchHandler(EmulatorConfig config, SearchArmService arm) {
+    public SearchHandler(EmulatorConfig config, SearchArmService arm, SearchDataPlane dataPlane,
+                         SearchIndexes indexes) {
         this.config = config;
         this.arm = arm;
+        this.dataPlane = dataPlane;
+        this.indexes = indexes;
     }
 
     @Override
@@ -78,7 +82,7 @@ public class SearchHandler implements AzureServiceHandler, Resettable, StoreInde
         if (ArmPaths.hasProvider(path, SearchArmSurface.NAMESPACE)) {
             return arm.handle(req);
         }
-        return ArmErrors.notFound("The Azure AI Search data plane is not served yet: " + path);
+        return dataPlane.handle(req);
     }
 
     // ── Resource index ───────────────────────────────────────────────────────
@@ -105,9 +109,10 @@ public class SearchHandler implements AzureServiceHandler, Resettable, StoreInde
         return suffix == CloudSuffix.SEARCH && arm.holds(name, owner);
     }
 
-    /** Wipes the search services: {@code POST /_admin/reset}. */
+    /** Wipes the search services and their indexes: {@code POST /_admin/reset}. */
     @Override
     public void clear() {
         arm.clear();
+        indexes.clear();
     }
 }
