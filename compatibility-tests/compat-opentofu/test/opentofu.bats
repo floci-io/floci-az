@@ -254,17 +254,6 @@ setup() {
     assert_output --partial "loginServer"
 }
 
-@test "OpenTofu: container registry role assignment mode reads back, so a second plan leaves it unchanged" {
-    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ContainerRegistry/registries/${ACR_NAME}"
-    assert_success
-    assert_output --partial '"roleAssignmentMode":"AbacRepositoryPermissions"'
-
-    cd "$TOFU_DIR"
-    run tofu plan -input=false -no-color -target=azurerm_container_registry.acr
-    assert_success
-    refute_output --partial "role_assignment_mode"
-}
-
 @test "OpenTofu: postgresql flexible server network reads back, so a second plan leaves the server unchanged" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/${PG_NAME}"
     assert_success

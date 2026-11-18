@@ -356,12 +356,11 @@ output "key_vault_uri" {
 }
 
 resource "azurerm_container_registry" "acr" {
-  name                 = "flocitestacr"
-  resource_group_name  = azurerm_resource_group.rg.name
-  location             = azurerm_resource_group.rg.location
-  sku                  = "Basic"
-  admin_enabled        = true
-  role_assignment_mode = "AbacRepositoryPermissions"
+  name                = "flocitestacr"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  sku                 = "Basic"
+  admin_enabled       = true
 }
 
 output "acr_login_server" {

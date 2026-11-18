@@ -94,6 +94,18 @@ class PostgresHandlerMockedTest {
             .body("properties.network.delegatedSubnetResourceId", equalTo(subnet))
             .body("properties.network.privateDnsZoneArmResourceId", equalTo(zone))
             .body("properties.network.publicNetworkAccess", equalTo("Enabled"));
+
+        // A PUT replaces the network: the ids it leaves out are gone, unlike a PATCH.
+        given().contentType("application/json")
+            .body(SERVER_BODY.replace("\"version\":\"16\",",
+                "\"version\":\"16\",\"network\":{\"publicNetworkAccess\":\"Disabled\"},"))
+            .when().put(BASE + "/flexibleServers/pgvnet" + API)
+            .then().statusCode(202);
+        given().when().get(BASE + "/flexibleServers/pgvnet" + API)
+            .then().statusCode(200)
+            .body("properties.network.publicNetworkAccess", equalTo("Disabled"))
+            .body("properties.network", not(hasKey("delegatedSubnetResourceId")))
+            .body("properties.network", not(hasKey("privateDnsZoneArmResourceId")));
     }
 
     @Test

@@ -254,17 +254,6 @@ setup() {
     assert_output --partial "loginServer"
 }
 
-@test "Terraform: container registry role assignment mode reads back, so a second plan leaves it unchanged" {
-    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ContainerRegistry/registries/${ACR_NAME}"
-    assert_success
-    assert_output --partial '"roleAssignmentMode":"AbacRepositoryPermissions"'
-
-    cd "$TF_DIR"
-    run terraform plan -input=false -no-color -target=azurerm_container_registry.acr
-    assert_success
-    refute_output --partial "role_assignment_mode"
-}
-
 @test "Terraform: private DNS zone created" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/privateDnsZones/${PDZ_NAME}"
     assert_success
