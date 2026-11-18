@@ -75,6 +75,89 @@ class TableEntityKeysTest {
         assertTrue(store.get("acct/Orders/x").isPresent());
     }
 
+    @Test
+    void migrationLowercasesTableSegmentsAndKeepsTheSpelling() {
+        InMemoryStorage<String, StoredObject> store = new InMemoryStorage<>();
+        store.put(NS_PREFIX + "acct/Orders", namespaceRecord(""));
+        store.put("acct/Orders/" + TableEntityKeys.entityKey("p", "r"), entity("p", "r", "etag-1"));
+        store.put(NS_PREFIX + "acct/lower", namespaceRecord(""));
+
+        assertEquals(1, TableEntityKeys.migrateTableNameCase(store, NS_PREFIX));
+
+        assertEquals("Orders", store.get(NS_PREFIX + "acct/orders").orElseThrow().key());
+        assertEquals("etag-1",
+                store.get("acct/orders/" + TableEntityKeys.entityKey("p", "r")).orElseThrow().etag());
+        assertTrue(store.get(NS_PREFIX + "acct/Orders").isEmpty());
+        assertTrue(store.get("acct/Orders/" + TableEntityKeys.entityKey("p", "r")).isEmpty());
+        assertTrue(store.get(NS_PREFIX + "acct/lower").isPresent());
+        assertEquals(3, store.keys().size());
+    }
+
+    @Test
+    void tableNameMigrationIsIdempotent() {
+        InMemoryStorage<String, StoredObject> store = new InMemoryStorage<>();
+        store.put(NS_PREFIX + "acct/Orders", namespaceRecord(""));
+
+        assertEquals(1, TableEntityKeys.migrateTableNameCase(store, NS_PREFIX));
+        assertEquals(0, TableEntityKeys.migrateTableNameCase(store, NS_PREFIX));
+        assertEquals("Orders", store.get(NS_PREFIX + "acct/orders").orElseThrow().key());
+    }
+
+    @Test
+    void migrationLeavesTheLoserOfACaseCollisionInPlace() {
+        InMemoryStorage<String, StoredObject> store = new InMemoryStorage<>();
+        store.put(NS_PREFIX + "acct/MyTable", namespaceRecord(""));
+        store.put("acct/MyTable/" + TableEntityKeys.entityKey("p", "a"), entity("p", "a", "etag-a"));
+        store.put(NS_PREFIX + "acct/MYTABLE", namespaceRecord(""));
+        store.put("acct/MYTABLE/" + TableEntityKeys.entityKey("p", "b"), entity("p", "b", "etag-b"));
+
+        assertEquals(1, TableEntityKeys.migrateTableNameCase(store, NS_PREFIX));
+
+        // "MYTABLE" sorts before "MyTable", so it wins; MyTable's records stay where they were.
+        assertEquals("MYTABLE", store.get(NS_PREFIX + "acct/mytable").orElseThrow().key());
+        assertEquals("etag-b",
+                store.get("acct/mytable/" + TableEntityKeys.entityKey("p", "b")).orElseThrow().etag());
+        assertTrue(store.get(NS_PREFIX + "acct/MyTable").isPresent());
+        assertTrue(store.get("acct/MyTable/" + TableEntityKeys.entityKey("p", "a")).isPresent());
+        assertTrue(store.get("acct/mytable/" + TableEntityKeys.entityKey("p", "a")).isEmpty());
+    }
+
+    @Test
+    void aTableAlreadyAtTheLowercaseSegmentWinsACaseCollision() {
+        InMemoryStorage<String, StoredObject> store = new InMemoryStorage<>();
+        store.put(NS_PREFIX + "acct/mytable", namespaceRecord(""));
+        store.put(NS_PREFIX + "acct/MyTable", namespaceRecord(""));
+
+        assertEquals(0, TableEntityKeys.migrateTableNameCase(store, NS_PREFIX));
+        assertTrue(store.get(NS_PREFIX + "acct/MyTable").isPresent());
+        assertEquals(2, store.keys().size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"persistent", "hybrid", "wal"})
+    void tablesMovedToLowercaseSurviveARestartOfDurableStorage(String mode, @TempDir Path dir) {
+        StorageBackend<String, StoredObject> beforeUpgrade = open(mode, dir);
+        beforeUpgrade.put(NS_PREFIX + "acct/Orders", namespaceRecord(""));
+        beforeUpgrade.put("acct/Orders/" + TableEntityKeys.entityKey("p", "r"), entity("p", "r", "etag-1"));
+        close(beforeUpgrade);
+
+        StorageBackend<String, StoredObject> upgraded = open(mode, dir);
+        assertEquals(1, TableEntityKeys.migrateTableNameCase(upgraded, NS_PREFIX));
+        close(upgraded);
+
+        StorageBackend<String, StoredObject> restarted = open(mode, dir);
+        assertEquals(0, TableEntityKeys.migrateTableNameCase(restarted, NS_PREFIX));
+        assertEquals("Orders", restarted.get(NS_PREFIX + "acct/orders").orElseThrow().key());
+        assertEquals("etag-1",
+                restarted.get("acct/orders/" + TableEntityKeys.entityKey("p", "r")).orElseThrow().etag());
+        assertEquals(2, restarted.keys().size());
+        close(restarted);
+    }
+
+    private static StoredObject namespaceRecord(String spelling) {
+        return new StoredObject(spelling, new byte[0], Map.of(), Instant.EPOCH, "");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"persistent", "hybrid", "wal"})
     void migratedEntitiesSurviveARestartOfDurableStorage(String mode, @TempDir Path dir) {

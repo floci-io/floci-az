@@ -17,6 +17,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
@@ -585,6 +586,95 @@ public class TableServiceTest {
                 .append("</AccessPolicy></SignedIdentifier>");
         }
         return xml.append("</SignedIdentifiers>").toString();
+    }
+
+    // Azure table names "preserve the case with which they were created, but are case-insensitive when used".
+
+    @Test
+    void anEntityWrittenThroughOneCasingIsReadThroughAnother() {
+        createTable("MixedCase");
+
+        insertEntity("mixedcase", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"v\":1}").then().statusCode(201);
+        given()
+            .when().get("/{account}/MIXEDCASE(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(200).body("v", equalTo(1));
+        given()
+            .when().get("/{account}/MIXEDCASE()", ACCOUNT)
+            .then().statusCode(200).body("value", hasSize(1));
+        given()
+            .contentType("application/json").body("{\"w\":2}")
+            .when().request("MERGE", "/{account}/mixedCase(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(204);
+        given()
+            .when().get("/{account}/MixedCase(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(200).body("v", equalTo(1)).body("w", equalTo(2));
+        given()
+            .header("If-Match", "*")
+            .when().delete("/{account}/mixedCase(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(204);
+        given()
+            .when().get("/{account}/MixedCase()", ACCOUNT)
+            .then().statusCode(200).body("value", hasSize(0));
+    }
+
+    @Test
+    void aBatchReachesATableThroughAnyCasing() {
+        createTable("BatchCase");
+
+        submitBatch(batchOperation("POST", "batchcase", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\"}"))
+            .then().statusCode(202);
+        given()
+            .when().get("/{account}/BatchCase(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(200);
+    }
+
+    @Test
+    void createTableInAnotherCasingIsTableAlreadyExists() {
+        createTable("DupCase");
+
+        given()
+            .contentType("application/json")
+            .body("{\"TableName\":\"dupcase\"}")
+            .when().post("/{account}/Tables", ACCOUNT)
+            .then().statusCode(409).body("'odata.error'.code", equalTo("TableAlreadyExists"));
+    }
+
+    @Test
+    void listTablesKeepsTheCreatedSpellingAfterAnAclSetThroughAnotherCasing() {
+        createTable("SpelledThisWay");
+
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(1, "r"))
+            .when().put("/{account}/spelledthisway?comp=acl", ACCOUNT)
+            .then().statusCode(204);
+        given()
+            .when().get("/{account}/SPELLEDTHISWAY?comp=acl", ACCOUNT)
+            .then().statusCode(200).body(containsString("<SignedIdentifier>"));
+
+        given()
+            .when().get("/{account}/Tables", ACCOUNT)
+            .then().statusCode(200)
+            .body("value.TableName", hasItem("SpelledThisWay"))
+            .body("value.TableName", not(hasItem("spelledthisway")));
+    }
+
+    @Test
+    void deleteTableThroughAnotherCasingRemovesItsEntities() {
+        createTable("GoneCase");
+        insertEntity("GoneCase", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\"}").then().statusCode(201);
+
+        given()
+            .when().delete("/{account}/Tables('gonecase')", ACCOUNT)
+            .then().statusCode(204);
+
+        given()
+            .when().get("/{account}/GoneCase(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(404).body("'odata.error'.code", equalTo("TableNotFound"));
+        createTable("GoneCase");
+        given()
+            .when().get("/{account}/GoneCase()", ACCOUNT)
+            .then().statusCode(200).body("value", hasSize(0));
     }
 
     private static void createTable(String name) {
