@@ -234,13 +234,18 @@ public final class ServiceBusExpiryPlugin
             long now,
             long delayMillis) {
         ExpiryKey key = new ExpiryKey(queue.getName().toString(), messageId);
+        ExpiryDeadline deadline = new ExpiryDeadline(
+                saturatingAdd(now, delayMillis), settings.deadLetterAddress());
         synchronized (scheduledExpirations) {
-            if (expiryDeadlines.putIfAbsent(key, new ExpiryDeadline(
-                    saturatingAdd(now, delayMillis), settings.deadLetterAddress())) != null) {
+            if (expiryDeadlines.putIfAbsent(key, deadline) != null) {
                 return;
             }
             ScheduledFuture<?> task = activeServer.getScheduledPool().schedule(() -> {
                 synchronized (scheduledExpirations) {
+                    // defer() or clearExpiry() may have run while this task waited for the monitor.
+                    if (expiryDeadlines.get(key) != deadline) {
+                        return;
+                    }
                     scheduledExpirations.remove(key);
                     if (isDelivering(queue, messageId)) {
                         return;

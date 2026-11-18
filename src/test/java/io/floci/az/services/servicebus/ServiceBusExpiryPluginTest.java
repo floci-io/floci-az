@@ -15,6 +15,7 @@ import org.apache.qpid.proton.message.Message;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import javax.management.MBeanServerFactory;
 import java.net.URL;
@@ -43,6 +44,7 @@ class ServiceBusExpiryPluginTest {
     private ActiveMQServerPlugin plugin;
     private final Queue queue = mock(Queue.class);
     private final ScheduledFuture<?> scheduled = mock(ScheduledFuture.class);
+    private final ScheduledExecutorService pool = mock(ScheduledExecutorService.class);
 
     @BeforeEach
     void loadPlugin() throws Exception {
@@ -55,7 +57,6 @@ class ServiceBusExpiryPluginTest {
 
         when(queue.getName()).thenReturn(SimpleString.of("orders"));
         when(queue.moveReference(anyLong(), any(), any(), anyBoolean())).thenReturn(true);
-        ScheduledExecutorService pool = mock(ScheduledExecutorService.class);
         doReturn(scheduled).when(pool).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
         ActiveMQServer server = mock(ActiveMQServer.class);
         when(server.getMBeanServer()).thenReturn(MBeanServerFactory.newMBeanServer());
@@ -97,6 +98,20 @@ class ServiceBusExpiryPluginTest {
 
         assertFalse((boolean) invoke("expireIfDue", "orders", MESSAGE_ID));
         verify(queue, never()).moveReference(anyLong(), any(), any(), anyBoolean());
+    }
+
+    @Test
+    void anExpiryTaskAlreadyRunningWhenTheMessageIsDeferredLeavesItAlone() throws Exception {
+        configure(60_000);
+        route(message());
+        ArgumentCaptor<Runnable> task = ArgumentCaptor.forClass(Runnable.class);
+        verify(pool).schedule(task.capture(), anyLong(), any(TimeUnit.class));
+
+        invoke("defer", "orders", MESSAGE_ID);
+        task.getValue().run();
+
+        verify(queue, never()).moveReference(anyLong(), any(), any(), anyBoolean());
+        verify(queue, never()).expireReference(anyLong());
     }
 
     @Test
