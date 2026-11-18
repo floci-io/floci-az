@@ -1,8 +1,11 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
 import org.apache.activemq.artemis.api.core.SimpleString;
+import org.apache.activemq.artemis.core.server.ActiveMQServer;
 import org.apache.activemq.artemis.core.server.MessageReference;
+import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
+import org.apache.activemq.artemis.core.server.impl.AckReason;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;
 import org.apache.qpid.proton.amqp.Symbol;
 import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
@@ -17,10 +20,13 @@ import org.slf4j.LoggerFactory;
 import java.nio.ByteBuffer;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -178,6 +184,65 @@ public final class ServiceBusMessageLockSupport {
       locks.values().forEach(lock -> lock.timer.cancel(false));
       locks.clear();
       ACTIVE.remove(this);
+   }
+
+   /**
+    * Called when the client closes the receiver (link detach, session or connection close), before Artemis closes the
+    * consumer. Service Bus keeps an unsettled message locked until its lock expires, then makes it available again
+    * with its delivery count incremented. Stock Artemis would instead return every delivering message at once with
+    * its count decremented. So each locked reference is taken off the consumer here, and handed back to its queue at
+    * the lock deadline exactly as an expired lock is: cancelled as failed, which keeps the count and applies
+    * max-delivery and dead-lettering. The lock itself cannot be renewed or settled any more: its link is gone.
+    */
+   public void park() {
+      ActiveMQServer server = connection.getProtocolManager().getServer();
+      ScheduledExecutorService pool = server.getScheduledPool();
+      long now = System.currentTimeMillis();
+      for (Map.Entry<Delivery, MessageLock> entry : List.copyOf(locks.entrySet())) {
+         MessageLock lock = entry.getValue();
+         locks.remove(entry.getKey());
+         lock.timer.cancel(false);
+         if (entry.getKey().isSettled()) {
+            continue;
+         }
+         MessageReference reference;
+         try {
+            reference = lock.consumer.removeReferenceByID(lock.reference.getMessageID());
+         } catch (Exception e) {
+            LOGGER.warn("Could not keep a closed receiver's Service Bus message locked", e);
+            continue;
+         }
+         if (reference == null) {
+            continue;   // already acknowledged or cancelled
+         }
+         long delay = lock.until - now;
+         if (delay <= 0) {
+            releaseParked(server, reference);
+            continue;
+         }
+         try {
+            // Not through connection.runLater: the connection is closing, and its executor may never run again.
+            pool.schedule(() -> releaseParked(server, reference), delay, TimeUnit.MILLISECONDS);
+         } catch (RejectedExecutionException e) {
+            releaseParked(server, reference);   // broker stopping
+         }
+      }
+      ACTIVE.remove(this);
+   }
+
+   static void releaseParked(ActiveMQServer server, MessageReference reference) {
+      Queue queue = reference.getQueue();
+      try {
+         if (server.locateQueue(queue.getName()) != queue) {
+            // Deleted, or deleted and recreated, while parked: drop the message's record as the delete would have.
+            queue.acknowledge(null, reference, AckReason.KILLED, null, true);
+            return;
+         }
+         queue.cancel(reference, System.currentTimeMillis());
+         queue.deliverAsync();
+      } catch (Exception e) {
+         LOGGER.error("Could not release a closed receiver's Service Bus message lock", e);
+      }
    }
 
    /** Large messages stream their body from disk, so replace only their outgoing metadata. */

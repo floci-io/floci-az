@@ -92,4 +92,86 @@ public sealed class ServiceBusPeekLockCompatibilityTests
             else await admin.DeleteTopicAsync(entity, cancellationToken);
         }
     }
+
+    // Service Bus keeps a message locked until its lock expires even when the receiver that holds it closes, then
+    // makes it available again with its delivery count incremented. The second axis closes the whole connection.
+    [Test]
+    [Arguments("queue", false)]
+    [Arguments("large-queue", false)]
+    [Arguments("subscription", false)]
+    [Arguments("session-dlq", false)]
+    [Arguments("queue", true)]
+    [Timeout(90_000)]
+    public async Task ClosedReceiverKeepsLocksUntilExpiry(string entityKind, bool closeConnection, CancellationToken cancellationToken)
+    {
+        string endpoint = Environment.GetEnvironmentVariable("FLOCI_AZ_ENDPOINT") ?? "http://localhost:4577";
+        string host = Environment.GetEnvironmentVariable("SERVICEBUS_HOST") ?? "localhost";
+        string port = Environment.GetEnvironmentVariable("SERVICEBUS_AMQP_PORT") ?? "5673";
+        const string credentials = "SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+        string connectionString = $"Endpoint=sb://{host}:{port};{credentials}";
+        var clientOptions = new ServiceBusClientOptions { RetryOptions = { MaxRetries = 0, TryTimeout = TimeSpan.FromSeconds(10) } };
+        var admin = new ServiceBusAdministrationClient($"Endpoint=sb://{new Uri(endpoint).Authority};{credentials}");
+        await using var client = new ServiceBusClient(connectionString, clientOptions);
+        string entity = $"closelock-{Guid.NewGuid():N}";
+        bool queue = entityKind.EndsWith("queue");
+        bool deadLetter = entityKind == "session-dlq";
+        TimeSpan lockDuration = TimeSpan.FromSeconds(4);
+        if (queue)
+        {
+            await admin.CreateQueueAsync(new CreateQueueOptions(entity)
+            {
+                LockDuration = lockDuration, MaxDeliveryCount = 4
+            }, cancellationToken);
+        }
+        else
+        {
+            await admin.CreateTopicAsync(entity, cancellationToken);
+            await admin.CreateSubscriptionAsync(new CreateSubscriptionOptions(entity, "consumer")
+            {
+                RequiresSession = deadLetter, LockDuration = lockDuration, MaxDeliveryCount = 4
+            }, cancellationToken);
+        }
+        try
+        {
+            await using ServiceBusSender sender = client.CreateSender(entity);
+            string body = entityKind == "large-queue" ? new string('x', 200_000) : "stays-locked";
+            await sender.SendMessageAsync(new ServiceBusMessage(body)
+            {
+                MessageId = "stays-locked", SessionId = deadLetter ? "session" : null
+            }, cancellationToken);
+            if (deadLetter)
+            {
+                await using ServiceBusSessionReceiver session = await client.AcceptSessionAsync(
+                    entity, "consumer", "session", cancellationToken: cancellationToken);
+                ServiceBusReceivedMessage poison = (await session.ReceiveMessageAsync(TimeSpan.FromSeconds(5), cancellationToken))!;
+                await Assert.That(poison).IsNotNull();
+                await session.DeadLetterMessageAsync(poison, cancellationToken: cancellationToken);
+            }
+
+            var options = new ServiceBusReceiverOptions { SubQueue = deadLetter ? SubQueue.DeadLetter : SubQueue.None };
+            ServiceBusClient ownerClient = closeConnection ? new ServiceBusClient(connectionString, clientOptions) : client;
+            ServiceBusReceiver owner = queue ? ownerClient.CreateReceiver(entity, options) : ownerClient.CreateReceiver(entity, "consumer", options);
+            ServiceBusReceivedMessage first = (await owner.ReceiveMessageAsync(TimeSpan.FromSeconds(5), cancellationToken))!;
+            await Assert.That(first).IsNotNull();
+            if (closeConnection) await ownerClient.DisposeAsync();
+            else await owner.DisposeAsync();
+
+            await using ServiceBusReceiver competitor = queue ? client.CreateReceiver(entity, options) : client.CreateReceiver(entity, "consumer", options);
+            await Assert.That(await competitor.ReceiveMessageAsync(TimeSpan.FromSeconds(1), cancellationToken)).IsNull();
+
+            TimeSpan untilExpiry = first.LockedUntil - DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1);
+            if (untilExpiry > TimeSpan.Zero) await Task.Delay(untilExpiry, cancellationToken);
+            ServiceBusReceivedMessage redelivered = (await competitor.ReceiveMessageAsync(TimeSpan.FromSeconds(5), cancellationToken))!;
+            await Assert.That(redelivered).IsNotNull();
+            await Assert.That(redelivered.SequenceNumber).IsEqualTo(first.SequenceNumber);
+            await Assert.That(redelivered.Body.ToString()).IsEqualTo(body);
+            await Assert.That(redelivered.DeliveryCount).IsEqualTo(first.DeliveryCount + 1);
+            await competitor.CompleteMessageAsync(redelivered, cancellationToken);
+        }
+        finally
+        {
+            if (queue) await admin.DeleteQueueAsync(entity, cancellationToken);
+            else await admin.DeleteTopicAsync(entity, cancellationToken);
+        }
+    }
 }

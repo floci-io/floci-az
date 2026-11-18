@@ -301,8 +301,11 @@ dead-lettered once its delivery count exceeds the entity's `MaxDeliveryCount`.
 `LockDuration` is enforced for session locks and individual non-session
 peek-lock deliveries, including dead-letter queues. Expired messages become
 available to other receivers while the original receiver remains open; late
-settlement returns `MessageLockLost`. Entities that omit either property fall
-back to the configured defaults above.
+settlement returns `MessageLockLost`. Closing a receiver, or its connection, with
+unsettled peek-locked messages does not release them: each stays locked until its
+`LockDuration` runs out and then returns with its delivery count incremented, as on
+Azure. Session entities still release their messages when the session closes.
+Entities that omit either property fall back to the configured defaults above.
 
 ## Received message metadata
 

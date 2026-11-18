@@ -447,6 +447,14 @@
                                     token="messageWriter.close();"
                                     value="messageLocks.close(); messageWriter.close();"
                                     failOnNoReplacements="true" />
+                                <!-- close(boolean) is the client-initiated close (link detach, session or connection close). Park
+                                     the unsettled peek-locked messages before Artemis closes the consumer, which would return them
+                                     at once; they come back at their lock deadline instead, as on Service Bus. -->
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
+                                    token="closed = true;&#10;&#10;         // MessageReferences are sent to the Connection executor"
+                                    value="closed = true;&#10;         messageLocks.park();&#10;&#10;         // MessageReferences are sent to the Connection executor"
+                                    failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/AMQPMessageWriter.java"
                                     token="final ReadableBuffer sendBuffer = amqpMessage.getSendBuffer(messageReference.getDeliveryCount(), messageReference);"
