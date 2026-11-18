@@ -49,8 +49,13 @@ app_get() {
     assert_output --partial "SERVICE_WEB_IMAGE_NAME=\"${SERVICE_IMAGE}\""
 }
 
+revision_names() {
+    arm_get "$(app_path)/revisions?api-version=2025-01-01" | jq -r '[.value[].name] | sort | join(" ")'
+}
+
 @test "azd deploy (container app): a second deploy adds another revision" {
     before="$(app_get | jq -r '.properties.latestRevisionName')"
+    revisions_before="$(revision_names)"
     # azd's revision suffix has one-second granularity; two deploys in the same second would reuse the name.
     sleep 1
     run azd deploy web --no-prompt
@@ -58,6 +63,11 @@ app_get() {
     after="$(app_get | jq -r '.properties.latestRevisionName')"
     [[ "${after}" =~ --azd-[0-9]+$ ]]
     [[ "${after}" != "${before}" ]]
+    # The earlier revisions are kept and the new one joins them.
+    revisions_after="$(revision_names)"
+    [[ "$(wc -w <<<"${revisions_after}")" -eq "$(( $(wc -w <<<"${revisions_before}") + 1 ))" ]]
+    [[ " ${revisions_after} " == *" ${before} "* ]]
+    [[ " ${revisions_after} " == *" ${after} "* ]]
 }
 
 @test "azd down (container app): removes the group" {
