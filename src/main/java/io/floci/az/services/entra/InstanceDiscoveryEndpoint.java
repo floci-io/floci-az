@@ -23,8 +23,8 @@ import java.util.Set;
  * MSAL reads ({@code AadInstanceDiscoveryResponse} in MSAL4J, {@code tenant_discovery_endpoint} in MSAL Python and
  * msal-js): the tenant's OpenID configuration on the request's own base URL, and one metadata entry for the request
  * host. Azure lists every public cloud there, but {@code preferred_network} is the host MSAL then sends its token
- * requests to, so the entry names the emulator's host, with the sibling authority hosts of its catalog cloud as
- * aliases. Azure's {@code invalid_instance} error for an unknown authority is not modelled.
+ * requests to, so the entry names the emulator's host (and port, when the request carried one), with the sibling
+ * authority hosts of its catalog cloud as aliases. Azure's {@code invalid_instance} error for an unknown authority is not modelled.
  */
 @ApplicationScoped
 public class InstanceDiscoveryEndpoint implements EntraEndpoint {
@@ -48,12 +48,13 @@ public class InstanceDiscoveryEndpoint implements EntraEndpoint {
     @Override
     public Response handle(EntraRequest request) {
         String authorizeEndpoint = request.request().queryParams().get("authorization_endpoint");
-        String host = hostOf(request.baseUrl());
+        URI base = URI.create(request.baseUrl());
+        String authority = authorityOf(base);
 
         Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("preferred_network", host);
-        entry.put("preferred_cache", host);
-        entry.put("aliases", List.copyOf(aliases(host)));
+        entry.put("preferred_network", authority);
+        entry.put("preferred_cache", authority);
+        entry.put("aliases", List.copyOf(aliases(authority, base.getHost())));
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("tenant_discovery_endpoint", tenantDiscoveryEndpoint(request.baseUrl(), authorizeEndpoint));
@@ -83,15 +84,15 @@ public class InstanceDiscoveryEndpoint implements EntraEndpoint {
         return baseUrl + "/" + tenant + (v2 ? "/v2.0" : "") + "/.well-known/openid-configuration";
     }
 
-    /** The request host, then the other authority hosts of the catalog cloud that lists it, if one does. */
-    private static Set<String> aliases(String host) {
+    /** The request's own authority, then the other authority hosts of the catalog cloud that lists its host, if one does. */
+    private static Set<String> aliases(String authority, String host) {
         Set<String> aliases = new LinkedHashSet<>();
-        aliases.add(host);
+        aliases.add(authority);
         for (CloudProfile cloud : CloudCatalog.all()) {
             List<String> authorityHosts = cloud.endpoints().authorityHosts();
-            if (authorityHosts.stream().anyMatch(authority -> authority.equalsIgnoreCase(host))) {
-                for (String authority : authorityHosts) {
-                    aliases.add(authority.toLowerCase(Locale.ROOT));
+            if (host != null && authorityHosts.stream().anyMatch(known -> known.equalsIgnoreCase(host))) {
+                for (String known : authorityHosts) {
+                    aliases.add(known.toLowerCase(Locale.ROOT));
                 }
             }
         }
@@ -108,8 +109,16 @@ public class InstanceDiscoveryEndpoint implements EntraEndpoint {
         }
     }
 
-    private static String hostOf(String baseUrl) {
-        String host = URI.create(baseUrl).getHost();
-        return host == null ? baseUrl : host.toLowerCase(Locale.ROOT);
+    /**
+     * The host, with the port when the request carried one: msal-js puts {@code preferred_network} in place of its
+     * authority's host and port ({@code Authority.resolveEndpointsAsync}), so a dropped port would send it elsewhere.
+     */
+    private static String authorityOf(URI base) {
+        String host = base.getHost();
+        if (host == null) {
+            return base.toString();
+        }
+        String lower = host.toLowerCase(Locale.ROOT);
+        return base.getPort() < 0 ? lower : lower + ":" + base.getPort();
     }
 }

@@ -99,6 +99,22 @@ class InstanceDiscoveryEndpointTest {
     }
 
     @Test
+    void aPortTheRequestCarriedIsKeptInTheMetadata() {
+        given()
+            .header("Host", "localhost:4577")
+            .queryParam("api-version", "1.1")
+            .queryParam("authorization_endpoint", "http://localhost:4577/" + TENANT + "/oauth2/v2.0/authorize")
+          .when().get("/common/discovery/instance")
+          .then()
+            .statusCode(200)
+            .body("tenant_discovery_endpoint",
+                is("http://localhost:4577/" + TENANT + "/v2.0/.well-known/openid-configuration"))
+            .body("metadata[0].preferred_network", is("localhost:4577"))
+            .body("metadata[0].preferred_cache", is("localhost:4577"))
+            .body("metadata[0].aliases", contains("localhost:4577"));
+    }
+
+    @Test
     void instanceDiscoveryIsNotServedUnderASpecificTenant() {
         given()
             .queryParam("api-version", "1.1")
