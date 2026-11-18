@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -54,6 +55,13 @@ import java.util.concurrent.ConcurrentMap;
  * lock, and on a session entity both operations require the caller to hold the session. One reply
  * carries at most what a peek reply does.
  *
+ * <p>A deferred message does not expire while it is deferred: as in Azure, its expiry is checked
+ * only when it is received by sequence number, and an expired one is then removed, or dead-lettered
+ * when its entity dead-letters on expiration, and is not found. The expiry plugin
+ * (ServiceBusExpiryPlugin) owns the deadline. It is built apart from this patch, so it is found
+ * among the broker's plugins by name and called reflectively; its MBean cannot be used from here,
+ * since Artemis authorises every MBean call and the connection's event loop has no subject.
+ *
  * <p>Deferral is per entity: a topic message deferred on one subscription is still delivered on
  * the others, which hold their own reference to the same broker message. The state is held in
  * memory, so a broker restart makes deferred messages deliverable again.
@@ -72,6 +80,7 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
    private static final Symbol MESSAGE_LOCK_LOST = Symbol.valueOf("com.microsoft:message-lock-lost");
    private static final Symbol INVALID_FIELD = Symbol.valueOf("amqp:invalid-field");
    private static final UnsignedInteger RECEIVE_AND_DELETE = UnsignedInteger.ZERO;
+   private static final String EXPIRY_PLUGIN = "io.floci.az.artemis.ServiceBusExpiryPlugin";
 
    private static final Symbol SESSION_LOCK_LOST = Symbol.valueOf("com.microsoft:session-lock-lost");
    /** The bound peek applies to one reply (ServiceBusManagementPlugin): 250 messages and about 1 MiB. */
@@ -84,11 +93,46 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
     */
    private static final ConcurrentMap<DeferredKey, DeferredState> DEFERRED = new ConcurrentHashMap<>();
 
-   /** Called when a receiver defers a delivery: a modified outcome with undeliverable-here. */
-   public static void defer(ServerConsumer consumer, long messageId) {
+   /** The broker this plugin is registered with; null until it is. */
+   private static volatile ActiveMQServer broker;
+
+   @Override
+   public void registered(ActiveMQServer server) {
+      broker = server;
+   }
+
+   @Override
+   public void unregistered(ActiveMQServer server) {
+      broker = null;
+   }
+
+   /**
+    * Called when a receiver defers a delivery: a modified outcome with undeliverable-here.
+    *
+    * <p>The message's expiry is held until it is received by sequence number. The expiry plugin
+    * stops its schedule, and the broker's own expiry scan is turned off for the message by clearing
+    * its in-memory expiration, which leaves the expiry the client sees on the wire untouched. A topic
+    * message is shared by its subscriptions, so this also clears the scan for the others; the expiry
+    * plugin still expires them on its own schedule.
+    */
+   // Qualified: the Artemis and Proton message types share a simple name.
+   public static void defer(ServerConsumer consumer, org.apache.activemq.artemis.api.core.Message message) {
       Queue queue = consumer.getQueue();
-      if (lockDurationMillis(queue) > 0) {
-         DEFERRED.put(new DeferredKey(queue.getName().toString(), messageId), DeferredState.AVAILABLE);
+      if (lockDurationMillis(queue) <= 0) {
+         return;
+      }
+      String queueName = queue.getName().toString();
+      long messageId = message.getMessageID();
+      DEFERRED.put(new DeferredKey(queueName, messageId), DeferredState.AVAILABLE);
+      try {
+         expiry("defer", queueName, messageId);
+         if (message instanceof AMQPMessage amqpMessage) {
+            amqpMessage.reloadExpiration(0);
+         }
+      } catch (ReflectiveOperationException | RuntimeException e) {
+         // Deferral itself has succeeded; failing here would close the receiver's link.
+         LOGGER.warn("Could not hold the expiry of deferred message {} on {}; it expires on its time to live",
+            messageId, queueName, e);
       }
    }
 
@@ -181,11 +225,25 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
          DeferredState claim = new DeferredState(new DeferredLock(UUID.randomUUID(), now + duration, duration,
             sessionId, AmqpReplyRouting.connectionId(connection), linkName), receiveAndDelete);
          if (DEFERRED.computeIfPresent(key, (ignored, current) -> current.claimable(now) ? claim : current) != claim) {
-            claimed.forEach((claimedReference, claimedState) -> DEFERRED.replace(
-               new DeferredKey(queueName, claimedReference.getMessageID()), claimedState, DeferredState.AVAILABLE));
+            release(queueName, claimed);
             return messageNotFound(List.of(reference.getMessageID()));
          }
          claimed.put(reference, claim);
+      }
+
+      // Only now is a deferred message checked for expiry, as Azure does: one that has expired is
+      // removed or dead-lettered, and is not found. A message locked by another receiver was not
+      // claimed above, so its expiry is not checked.
+      List<Long> expired;
+      try {
+         expired = expireDue(queueName, claimed);
+      } catch (Exception e) {
+         release(queueName, claimed);
+         throw e;
+      }
+      if (!expired.isEmpty()) {
+         release(queueName, claimed);
+         return messageNotFound(expired);
       }
 
       List<Map<String, Object>> messages = new ArrayList<>(claimed.size());
@@ -205,6 +263,43 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
          messages.add(entry);
       }
       return Reply.ok(Map.of("messages", messages));
+   }
+
+   /** Expires the claimed messages whose time to live has passed, and drops them from the claims. */
+   private static List<Long> expireDue(String queueName, Map<MessageReference, DeferredState> claimed)
+      throws ReflectiveOperationException {
+      List<Long> expired = new ArrayList<>();
+      Iterator<MessageReference> references = claimed.keySet().iterator();
+      while (references.hasNext()) {
+         long messageId = references.next().getMessageID();
+         if (Boolean.TRUE.equals(expiry("expireIfDue", queueName, messageId))) {
+            DEFERRED.remove(new DeferredKey(queueName, messageId));
+            references.remove();
+            expired.add(messageId);
+         }
+      }
+      return expired;
+   }
+
+   private static void release(String queueName, Map<MessageReference, DeferredState> claimed) {
+      claimed.forEach((reference, state) -> DEFERRED.replace(
+         new DeferredKey(queueName, reference.getMessageID()), state, DeferredState.AVAILABLE));
+   }
+
+   /** Invokes an operation of the broker's expiry plugin; null when the broker has none. */
+   private static Object expiry(String operation, String queueName, long messageId)
+      throws ReflectiveOperationException {
+      ActiveMQServer server = broker;
+      if (server == null) {
+         return null;
+      }
+      for (Object plugin : server.getBrokerPlugins()) {
+         if (plugin.getClass().getName().equals(EXPIRY_PLUGIN)) {
+            return plugin.getClass().getMethod(operation, String.class, long.class)
+               .invoke(plugin, queueName, messageId);
+         }
+      }
+      return null;
    }
 
    /**

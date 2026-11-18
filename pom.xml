@@ -416,7 +416,7 @@
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
                                     token="message.rejectConsumer(brokerConsumer.sequentialID());"
-                                    value="ServiceBusDeferralSupport.defer(brokerConsumer, message.getMessageID()); message.rejectConsumer(brokerConsumer.sequentialID());"
+                                    value="ServiceBusDeferralSupport.defer(brokerConsumer, message); message.rejectConsumer(brokerConsumer.sequentialID());"
                                     failOnNoReplacements="true" />
                                 <!-- Broker ingress timestamps and dead-letter properties can be newer than
                                      the large-message file. Copy the current metadata before streaming its body. -->

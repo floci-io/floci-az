@@ -335,12 +335,11 @@ Deferral is tracked per entity, so a topic message deferred on one subscription 
 on the others. The deferred state is held in broker memory: after a broker restart, deferred
 messages are delivered to receivers again.
 
-Deferred messages expire on their time to live like any other message: once it passes, the message
-is removed, or moved to the dead-letter queue when the entity dead-letters on expiration, even if
-no one asks for it. Azure instead
-[keeps a deferred message until a client tries to receive it](https://learn.microsoft.com/en-us/azure/service-bus-messaging/message-deferral),
-and only then checks its expiry and dead-letters it. A deferred message received after its time to
-live has passed is therefore already gone in floci-az, and receiving it fails with `MessageNotFound`.
+A deferred message does not expire while it is deferred. As in
+[Azure](https://learn.microsoft.com/en-us/azure/service-bus-messaging/message-deferral), its expiry
+is checked only when a client receives it by sequence number: if its time to live has passed by
+then, it is removed, or moved to the dead-letter queue when the entity dead-letters on expiration,
+and receiving it fails with `MessageNotFound`.
 
 ## Out of scope (future work)
 

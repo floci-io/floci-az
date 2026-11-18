@@ -1,10 +1,15 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
+import io.floci.az.services.servicebus.ServiceBusNamespaceManager;
 import org.apache.activemq.artemis.api.core.SimpleString;
+import org.apache.activemq.artemis.core.postoffice.RoutingStatus;
 import org.apache.activemq.artemis.core.security.SecurityAuth;
+import org.apache.activemq.artemis.core.server.ActiveMQServer;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.Queue;
+import org.apache.activemq.artemis.core.server.RoutingContext;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerPlugin;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
 import org.apache.activemq.artemis.utils.collections.LinkedListIterator;
 import org.apache.qpid.proton.Proton;
@@ -16,8 +21,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import javax.management.MBeanServerFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -27,6 +34,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -40,8 +50,11 @@ import static org.mockito.Mockito.*;
 class ServiceBusDeferralSupportTest {
 
     private static final long SEQUENCE_NUMBER = 42L;
+    private static final String DEAD_LETTER_ADDRESS = "orders/$deadletterqueue";
 
     private URLClassLoader loader;
+    private URLClassLoader extensionLoader;
+    private final ScheduledFuture<?> scheduledExpiry = mock(ScheduledFuture.class);
     private Class<?> type;
     private Object plugin;
     private Queue queue;
@@ -61,6 +74,9 @@ class ServiceBusDeferralSupportTest {
     @AfterEach
     void closePatchJar() throws Exception {
         loader.close();
+        if (extensionLoader != null) {
+            extensionLoader.close();
+        }
     }
 
     @Test
@@ -382,8 +398,98 @@ class ServiceBusDeferralSupportTest {
         assertEquals(0L, renew(lockToken, connection("another-connection"), null));
     }
 
+    @Test
+    void deferringAMessageHoldsItsExpiryAndTurnsOffTheBrokerScanForIt() throws Exception {
+        MessageReference timed = reference(queue, SEQUENCE_NUMBER, "deferred", 60_000L);
+        AMQPStandardMessage message = (AMQPStandardMessage) timed.getMessage();
+        registerExpiry(message);
+        assertTrue(message.getExpiration() > 0);
+
+        defer(queue, timed);
+
+        verify(scheduledExpiry).cancel(false);
+        assertEquals(0, message.getExpiration());
+        assertEquals(60_000L, message.getHeader().getTtl().longValue(), "the client still sees its time to live");
+    }
+
+    @Test
+    void anExpiredDeferredMessageIsDeadLetteredWhenReceivedAndIsNotFound() throws Exception {
+        ((AMQPStandardMessage) reference.getMessage()).setExpiration(System.currentTimeMillis() - 1_000);
+        registerExpiry((AMQPStandardMessage) reference.getMessage());
+        defer(queue);
+        verify(queue, never()).moveReference(anyLong(), any(), any(), anyBoolean());
+
+        Object reply = receive(Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER}));
+
+        assertEquals(404, status(reply));
+        assertEquals(Symbol.valueOf("com.microsoft:message-not-found"), properties(reply).get("errorCondition"));
+        verify(queue).moveReference(SEQUENCE_NUMBER, SimpleString.of(DEAD_LETTER_ADDRESS), null, false);
+        verify(reference, never()).incrementDeliveryCount();
+        assertTrue(canAccept(consumer(queue), reference), "an expired message is no longer deferred");
+    }
+
+    @Test
+    void aDeferredMessageWithinItsTimeToLiveIsReceived() throws Exception {
+        registerExpiry((AMQPStandardMessage) reference.getMessage());
+        defer(queue);
+
+        assertEquals(200, status(receive(Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER}))));
+        verify(queue, never()).moveReference(anyLong(), any(), any(), anyBoolean());
+    }
+
+    @Test
+    void aDeferredMessageLockedByAnotherReceiverIsNotExpired() throws Exception {
+        AMQPStandardMessage message = (AMQPStandardMessage) reference.getMessage();
+        message.setExpiration(System.currentTimeMillis() + 300);
+        registerExpiry(message);
+        defer(queue);
+        UUID lockToken = receiveLocked();
+        Thread.sleep(400);
+
+        assertEquals(404, status(receive(Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER}))));
+
+        verify(queue, never()).moveReference(anyLong(), any(), any(), anyBoolean());
+        assertEquals(200, status(updateDisposition(complete(lockToken))));
+    }
+
     private void defer(Queue target) throws Exception {
-        type.getMethod("defer", ServerConsumer.class, long.class).invoke(null, consumer(target), SEQUENCE_NUMBER);
+        defer(target, reference);
+    }
+
+    private void defer(Queue target, MessageReference deferred) throws Exception {
+        type.getMethod("defer", ServerConsumer.class, org.apache.activemq.artemis.api.core.Message.class)
+                .invoke(null, consumer(target), deferred.getMessage());
+    }
+
+    /**
+     * Registers the real expiry plugin, from the broker extension jar, with the broker this
+     * plugin sees, and routes the message through it with a one-minute default time to live.
+     */
+    private void registerExpiry(AMQPStandardMessage message) throws Exception {
+        URL jar = ServiceBusDeferralSupportTest.class.getResource(ServiceBusNamespaceManager.ARTEMIS_EXTENSION_RESOURCE);
+        assertNotNull(jar, "Jar not found: " + ServiceBusNamespaceManager.ARTEMIS_EXTENSION_RESOURCE);
+        extensionLoader = new URLClassLoader(new URL[]{jar}, ServiceBusDeferralSupportTest.class.getClassLoader());
+        Class<?> expiryType = Class.forName("io.floci.az.artemis.ServiceBusExpiryPlugin", true, extensionLoader);
+        ActiveMQServerPlugin expiry = (ActiveMQServerPlugin) expiryType.getConstructor().newInstance();
+
+        ScheduledExecutorService pool = mock(ScheduledExecutorService.class);
+        doReturn(scheduledExpiry).when(pool).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
+        ActiveMQServer server = mock(ActiveMQServer.class);
+        when(server.getMBeanServer()).thenReturn(MBeanServerFactory.newMBeanServer());
+        when(server.getScheduledPool()).thenReturn(pool);
+        when(server.locateQueue(SimpleString.of("orders"))).thenReturn(queue);
+        when(server.getBrokerPlugins()).thenReturn(List.of(expiry));
+        when(queue.moveReference(anyLong(), any(), any(), anyBoolean())).thenReturn(true);
+        expiry.registered(server);
+        type.getMethod("registered", ActiveMQServer.class).invoke(plugin, server);
+
+        expiryType.getMethod("configure", String.class, long.class, String.class)
+                .invoke(expiry, "orders", 60_000L, DEAD_LETTER_ADDRESS);
+        RoutingContext context = mock(RoutingContext.class);
+        when(context.getAddress()).thenReturn(SimpleString.of("orders"));
+        when(context.getDurableQueues(any())).thenReturn(List.of(queue));
+        when(context.getNonDurableQueues(any())).thenReturn(List.of());
+        expiry.afterMessageRoute(message, context, false, false, RoutingStatus.OK);
     }
 
     private boolean canAccept(ServerConsumer consumer, MessageReference candidate) throws Exception {
@@ -491,11 +597,19 @@ class ServiceBusDeferralSupportTest {
     }
 
     private static MessageReference reference(Queue queue, long messageId, String body) {
+        return reference(queue, messageId, body, 0);
+    }
+
+    private static MessageReference reference(Queue queue, long messageId, String body, long ttlMillis) {
         org.apache.qpid.proton.message.Message encoded = Proton.message();
         encoded.setBody(new AmqpValue(body));
+        if (ttlMillis > 0) {
+            encoded.setTtl(ttlMillis);
+        }
         byte[] bytes = new byte[body.length() + 1024];
         int length = encoded.encode(bytes, 0, bytes.length);
         AMQPStandardMessage message = new AMQPStandardMessage(0, Arrays.copyOf(bytes, length), null);
+        message.setMessageID(messageId);
         MessageReference reference = mock(MessageReference.class);
         when(reference.getMessageID()).thenReturn(messageId);
         when(reference.getMessage()).thenReturn(message);
@@ -510,7 +624,7 @@ class ServiceBusDeferralSupportTest {
         for (long messageId = 1; messageId <= count; messageId++) {
             references.add(reference(queue, messageId, "x".repeat(size)));
             sequenceNumbers.add(messageId);
-            type.getMethod("defer", ServerConsumer.class, long.class).invoke(null, consumer(queue), messageId);
+            defer(queue, references.get(references.size() - 1));
         }
         when(queue.browserIterator()).thenAnswer(call -> iterator(references));
         return sequenceNumbers;
