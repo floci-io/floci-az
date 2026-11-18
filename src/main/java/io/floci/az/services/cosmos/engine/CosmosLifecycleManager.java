@@ -160,10 +160,13 @@ public class CosmosLifecycleManager {
         ContainerLifecycleManager.ContainerInfo info = containerManager.createAndStart(spec);
 
         ContainerLifecycleManager.EndpointInfo endpoint = info.getEndpoint(engine.defaultPort());
-        int mappedPort = endpoint != null ? endpoint.port() : hostPort;
-        // Published mode reports the Docker daemon's host, which a remote daemon needs; auto mode
-        // keeps reporting localhost.
-        String host = containerManager.publishedEndpoints() && endpoint != null ? endpoint.host() : "localhost";
+        // Published mode reports the Docker daemon's host and published port, which a remote daemon needs, even when
+        // floci-az itself reaches the engine over the container network; auto mode keeps reporting localhost.
+        boolean published = containerManager.publishedEndpoints() && endpoint != null;
+        int mappedPort = published
+            ? info.publishedHostPort(engine.defaultPort()).orElse(endpoint.port())
+            : endpoint != null ? endpoint.port() : hostPort;
+        String host = published ? containerManager.daemonHost() : "localhost";
 
         CosmosConnectionInfo connInfo = engine.buildConnectionInfo(host, mappedPort);
         running.put(api, new RunningEngine(info.containerId(), connInfo));

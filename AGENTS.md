@@ -318,6 +318,8 @@ Suite container (`SUITE_ENV_*` ↔ `extra_env`):
 | `sdk-test-java` | `-e SERVICEBUS_AMQPS_PORT=5671` | ✓ |
 | `sdk-test-java` | `-e SERVICEBUS_NAMESPACE=default` | ✓ |
 | `sdk-test-java` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
+| `sdk-test-java-published` | everything `sdk-test-java` sets (`SUITE_ENV_JAVA`) | ✓ |
+| `sdk-test-java-published` | `-e MAVEN_ARGS=-Dtest=<the Service Bus and Event Hubs classes>` (`SUITE_ENV_JAVA_PUBLISHED`) | ✓ |
 | `sdk-test-dotnet` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
 | `sdk-test-dotnet` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
 | `sdk-test-python` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
@@ -338,6 +340,7 @@ Emulator container (6th `COMPAT_SESSION` argument ↔ `emulator_env`):
 | `sdk-test-java` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`JAVA_EMULATOR_ENV`) | ✓ |
 | `sdk-test-java` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5` | ✓ |
 | `sdk-test-java` | `-e FLOCI_AZ_SERVICES_AKS_MOCKED=true` | ✓ |
+| `sdk-test-java-published` | everything `sdk-test-java` sets, plus `-e FLOCI_AZ_DOCKER_ENDPOINT_MODE=published` (`JAVA_PUBLISHED_EMULATOR_ENV`) | ✓ |
 | `sdk-test-dotnet` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-python` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-python` | `-e FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true` (`REDIS_TLS_EMULATOR_ENV`, in `PYTHON_EMULATOR_ENV`) | ✓ |

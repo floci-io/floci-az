@@ -48,9 +48,10 @@ public class EventHubNamespaceManager {
      * Immutable snapshot of a running namespace.
      *
      * @param containerId  Docker container ID (null when mocked)
-     * @param amqpHost     host the broker's AMQP and AMQPS ports are reached at, as resolved for the
-     *                     sidecar: localhost on the host, the container IP when floci-az runs in a
-     *                     container, the Docker daemon's host in published mode (null when mocked)
+     * @param amqpHost     host floci-az reaches the broker's AMQP and AMQPS ports at: localhost on the
+     *                     host, the container IP when floci-az runs in a container (also in published
+     *                     mode with a local Docker socket), the Docker daemon's host in published mode
+     *                     otherwise (null when mocked)
      * @param clientHost   host reported to clients for those ports: the Docker daemon's host in
      *                     published mode, otherwise localhost. Never the container IP, which the
      *                     broker certificate does not name (null when mocked)
@@ -197,7 +198,7 @@ public class EventHubNamespaceManager {
         // every message twice.
 
         NamespaceState state = new NamespaceState(
-                containerId, amqpEndpoint.host(), clientHost(amqpEndpoint.host()),
+                containerId, amqpEndpoint.host(), clientHost(),
                 amqpEndpoint.port(), amqpsEndpoint.port(),
                 // Every broker port is bound, so these are present; a 0 here would mean the
                 // broker is not reachable from the host, not that it is on the container port.
@@ -287,13 +288,13 @@ public class EventHubNamespaceManager {
     }
 
     /**
-     * The host clients are told to reach the broker at. The resolved host is the right answer only
-     * in published endpoint mode, where it is the Docker daemon's host and {@link #tlsHosts} puts
-     * it in the certificate; in auto mode it can be a container IP, known only after the
-     * certificate is generated, so clients keep getting localhost.
+     * The host clients are told to reach the broker at: the Docker daemon's host in published
+     * endpoint mode, which {@link #tlsHosts} puts in the certificate, and localhost otherwise. Never
+     * the host floci-az itself dials, which can be a container IP known only after the certificate
+     * is generated.
      */
-    String clientHost(String resolvedHost) {
-        return lifecycleManager.publishedEndpoints() ? resolvedHost : "localhost";
+    String clientHost() {
+        return lifecycleManager.publishedEndpoints() ? lifecycleManager.daemonHost() : "localhost";
     }
 
     String containerName(String namespaceName) {

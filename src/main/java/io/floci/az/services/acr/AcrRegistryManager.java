@@ -99,7 +99,7 @@ public class AcrRegistryManager {
             this.publishedPort = chosenPort;
 
             ContainerLifecycleManager.EndpointInfo ep = info.getEndpoint(REGISTRY_PORT);
-            if (containerDetector.isRunningInContainer() && !lifecycleManager.publishedEndpoints()) {
+            if (containerDetector.isRunningInContainer() && !lifecycleManager.connectsAtPublishedPorts()) {
                 this.internalEndpoint =
                         ContainerLifecycleManager.containerNetworkEndpoint(spec, info, REGISTRY_PORT).toString();
             } else {

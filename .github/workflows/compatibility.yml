@@ -158,6 +158,8 @@ jobs:
         test:
           - sdk-test-python
           - sdk-test-java
+          # The Java messaging tests against an emulator in published endpoint mode (the Testcontainers shape).
+          - sdk-test-java-published
           - sdk-test-dotnet
           - sdk-test-node
           - sdk-test-cpp
@@ -199,6 +201,23 @@ jobs:
               -e SERVICEBUS_AMQPS_PORT=5671
               -e SERVICEBUS_NAMESPACE=default
               -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
+          # suite: the compatibility-tests/ directory a leg builds and runs, when its name is not one.
+          - test: sdk-test-java-published
+            suite: sdk-test-java
+            min_tests: 25
+            emulator_env: >-
+              -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
+              -e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5
+              -e FLOCI_AZ_SERVICES_AKS_MOCKED=true
+              -e FLOCI_AZ_DOCKER_ENDPOINT_MODE=published
+            extra_env: >-
+              --add-host devstoreaccount1.dfs.core.windows.net:127.0.0.1
+              -e FLOCI_AZ_ABFS_LOOPBACK=true
+              -e SERVICEBUS_HOST=floci-az-servicebus-default
+              -e SERVICEBUS_AMQPS_PORT=5671
+              -e SERVICEBUS_NAMESPACE=default
+              -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
+              -e MAVEN_ARGS=-Dtest=ServiceBusCompatibilityTest,ServiceBusLazyStartTest,ServiceBusRuleCompatibilityTest,ServiceBusSessionExpiryCompatibilityTest,EventHubCompatibilityTest,EventHubNamespaceManagementTest,EventHubSdkCompatibilityTest,EventHubStreamCompatibilityTest
           - test: sdk-test-dotnet
             min_tests: 20
             emulator_env: >-
@@ -294,15 +313,15 @@ jobs:
       - name: Build test image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: compatibility-tests/${{ matrix.test }}
+          context: compatibility-tests/${{ matrix.suite || matrix.test }}
           load: true
           # Same repo-prefixed tag as the Makefile's suite images.
-          tags: floci-az-${{ matrix.test }}
+          tags: floci-az-${{ matrix.suite || matrix.test }}
           # Read-only on purpose. Actions caches are ref-scoped, so a pull_request run's
           # writes land in refs/pull/N/merge, private to that PR: eight images per open PR
           # overran the repo's cache budget and evicted entries between a PR's own runs.
           # warm-compat-caches.yml populates these scopes on main; PRs read that one copy.
-          cache-from: type=gha,scope=${{ runner.os }}-${{ runner.arch }}-${{ matrix.test }}
+          cache-from: type=gha,scope=${{ runner.os }}-${{ runner.arch }}-${{ matrix.suite || matrix.test }}
 
       - name: Run tests
         id: tests
@@ -312,7 +331,7 @@ jobs:
             -e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
             ${{ matrix.extra_env }} \
             -v "$(pwd)/test-results:/results" \
-            floci-az-${{ matrix.test }}
+            floci-az-${{ matrix.suite || matrix.test }}
 
       # The container's exit code alone passes a suite whose setup aborted or whose tests all
       # skipped themselves. Counts executed test cases across the suite's JUnit reports and fails

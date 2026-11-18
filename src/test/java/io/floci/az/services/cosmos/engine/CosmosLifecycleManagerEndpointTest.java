@@ -54,6 +54,7 @@ class CosmosLifecycleManagerEndpointTest {
     @Test
     void publishedModeReportsTheDaemonHostAndPublishedPort() {
         when(containerManager.publishedEndpoints()).thenReturn(true);
+        when(containerManager.daemonHost()).thenReturn("docker");
         startedAt("docker", PUBLISHED_PORT);
 
         CosmosConnectionInfo info = start();
@@ -61,6 +62,21 @@ class CosmosLifecycleManagerEndpointTest {
         assertEquals("docker", info.host());
         assertEquals(PUBLISHED_PORT, info.port());
         assertEquals("mongodb://docker:" + PUBLISHED_PORT + "/", info.connectionString());
+    }
+
+    /** floci-az in a container with a local socket: it reaches the engine over the container network. */
+    @Test
+    void publishedModeReportsThePublishedPortWhenFlociAzConnectsOverTheContainerNetwork() {
+        when(containerManager.publishedEndpoints()).thenReturn(true);
+        when(containerManager.daemonHost()).thenReturn("localhost");
+        when(containerManager.createAndStart(any())).thenReturn(new ContainerLifecycleManager.ContainerInfo(
+                "mongo-id", Map.of(27017, new ContainerLifecycleManager.EndpointInfo("172.18.0.5", 27017)),
+                Map.of(27017, PUBLISHED_PORT)));
+
+        CosmosConnectionInfo info = start();
+
+        assertEquals("localhost", info.host());
+        assertEquals(PUBLISHED_PORT, info.port());
     }
 
     @Test

@@ -122,7 +122,8 @@ public class PostgresServerManager {
             int reachablePort;
             if (containerManager.publishedEndpoints()) {
                 reachableHost = containerManager.daemonAddress();
-                reachablePort = hostPort;
+                // The published port: floci-az itself may reach the sidecar over the container network.
+                reachablePort = info.publishedHostPort(PG_CONTAINER_PORT).orElse(hostPort);
             } else if (containerDetector.isRunningInContainer()) {
                 reachableHost = containerName;
                 reachablePort = PG_CONTAINER_PORT;
@@ -146,7 +147,7 @@ public class PostgresServerManager {
                 // The reported host is the container name, which the default bridge does not resolve;
                 // floci-az's own probe goes where it can connect.
                 ContainerLifecycleManager.EndpointInfo probe =
-                    containerDetector.isRunningInContainer() && !containerManager.publishedEndpoints()
+                    containerDetector.isRunningInContainer() && !containerManager.connectsAtPublishedPorts()
                         ? ContainerLifecycleManager.containerNetworkEndpoint(spec, info, PG_CONTAINER_PORT)
                         : new ContainerLifecycleManager.EndpointInfo(reachableHost, reachablePort);
                 waitForReady(probe.host(), probe.port(), pgConfig.startupTimeoutSeconds());
