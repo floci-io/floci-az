@@ -23,6 +23,9 @@ group) is available here too.
 | `POST /v1.0/applications` | Create a registration from the `application` object sent (`displayName` required; every writable property is stored and read back); a service principal is created with it |
 | `POST /v1.0/applications/{id}/addPassword` | Add a client secret: answers the `passwordCredential` with its `secretText` once |
 | `POST /v1.0/applications/{id}/removePassword` | Remove a client secret by `keyId` |
+| `GET /v1.0/applications/{id}/owners` | The registration's owners, typed `#microsoft.graph.user` or `#microsoft.graph.servicePrincipal` |
+| `POST /v1.0/applications/{id}/owners/$ref` | Add an owner from `{"@odata.id": ".../directoryObjects/{id}"}`; a user or service principal of the tenant |
+| `DELETE /v1.0/applications/{id}/owners/{id}/$ref` | Remove an owner |
 
 `{id}` in `users/{id}` accepts either the user's object id or its userPrincipalName, as real Graph
 does. Only **direct** membership is modeled: there is no nested-group transitivity.
@@ -118,11 +121,18 @@ dates, refusing one past its `endDateTime` with `AADSTS7000222` and one before i
 object id, the same value the app's tokens carry as `oid`. A supplied `passwordCredential` field must be
 valid (an object, string dates in order, a string `displayName`); defaults stand in for omitted fields
 only, and a `PATCH` `displayName` must be a non-empty string. A path segment after an action
-(`.../removePassword/extra`) answers `400` without touching credentials.
+(`.../removePassword/extra`) answers `400` without touching credentials. On create, the principal the
+caller's token names (`oid`, when it is a user or service principal of the tenant) becomes the first owner,
+as Graph makes the signed-in principal one, and each `directoryObjects/{id}` reference the body binds with
+`owners@odata.bind` becomes an owner after it: a user or service principal of the tenant, each once, with
+`404` and nothing registered when a reference names neither. The binding is not a property, so it is not
+stored and not read back. A client that then sets its own owners, as the Terraform `azuread_application`
+resource does when it binds the caller and its configured owners and drops the caller it did not configure,
+removes it the same way.
 
 ## Out of scope
 
 Full Graph CRUD beyond the slice above (service principals beyond discovery, users and groups
 management, directory roles, conditional access, application `keyCredentials`, API permissions and
-`requiredResourceAccess`, owners, federated identity credentials) remains open
+`requiredResourceAccess`, federated identity credentials) remains open
 ([#23](https://github.com/floci-io/floci-az/issues/23)).
