@@ -56,6 +56,8 @@ public class ScopeResolver {
 
     private static final String USER_REALM_PREFIX = "common/userrealm/";
 
+    private static final String INSTANCE_DISCOVERY_PATH = "common/discovery/instance";
+
     /** (subscription, caller's token tenant or null) to the subscription's tenant. */
     private final BiFunction<String, String, String> tenantOfSubscription;
     private final Function<String, CloudProfile> cloudOfTenant;
@@ -92,14 +94,25 @@ public class ScopeResolver {
      * Whether {@code path} is one of the Entra (OpenID Connect) endpoints served at the ARM base URL:
      * {@code {tenant}/oauth2/v2.0/authorize}, {@code {tenant}/oauth2/v2.0/token}, {@code {tenant}/oauth2/token},
      * {@code {tenant}/discovery/v2.0/keys}, {@code {tenant}[/v2.0]/.well-known/openid-configuration} and
-     * {@code common/userrealm/{username}}.
+     * {@code common/userrealm/{username}} and {@code common/discovery/instance}.
      */
     public static boolean isEntraPath(String path) {
         return "oidc/userinfo".equals(path) || path.contains("oauth2/v2.0/token") || path.endsWith("oauth2/token")
             || path.contains("oauth2/v2.0/authorize")
             || path.endsWith("discovery/v2.0/keys")
             || path.endsWith(".well-known/openid-configuration")
-            || isUserRealmPath(path);
+            || isUserRealmPath(path)
+            || isInstanceDiscoveryPath(path);
+    }
+
+    /**
+     * {@code common/discovery/instance}: instance discovery, which MSAL Go and MSAL4J call on a known
+     * authority host before each token request, and MSAL Python and msal-js on an unknown one. Entra
+     * serves it only under {@code common}, so, as with {@link #isUserRealmPath}, a storage account
+     * named {@code common} is the only path it can shadow.
+     */
+    public static boolean isInstanceDiscoveryPath(String path) {
+        return INSTANCE_DISCOVERY_PATH.equals(path);
     }
 
     /**

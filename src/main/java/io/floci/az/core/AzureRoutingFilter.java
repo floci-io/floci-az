@@ -487,6 +487,7 @@ public class AzureRoutingFilter {
      * {@code {tenant}/oauth2/v2.0/authorize}, {@code {tenant}/oauth2/v2.0/token},
      * {@code {tenant}/oauth2/token}, {@code {tenant}/discovery/v2.0/keys},
      * {@code {tenant}[/v2.0]/.well-known/openid-configuration}, {@code common/userrealm/{username}},
+     * {@code common/discovery/instance},
      * where {@code {tenant}} is a tenant id or common/organizations/consumers.
      */
     private RouteOutcome routeEntra(RoutingContext ctx) {
