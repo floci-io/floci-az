@@ -217,7 +217,10 @@ receives a PATCH.
 
 `requestContext().identity` is read from the bearer token of the request (`idtyp`, `appid`, `oid`),
 so rules that gate on the caller type behave as they do in Azure when the request carries a token
-from the emulator's Entra endpoint.
+from the emulator's Entra endpoint. When the token carries no `idtyp`, it is derived the way the rest
+of the emulator reads a caller: `user` for a token with a user name (`upn`, `unique_name`,
+`preferred_username`) or delegated scopes (`scp`), `app` for any other token that names a principal
+(`oid`, `appid` or `azp`), and absent for a token that names none.
 
 ### Inspecting what fired
 
