@@ -114,10 +114,11 @@ test("an index is created and read back with its fields and sections", async () 
   expect(fetched.etag).toBe(created.etag);
 });
 
-test("creating a name that is taken is a 409, and a missing index a 404", async () => {
+test("creating a name that is taken is a 400, and a missing index a 404", async () => {
   await client.createIndex(hotels("hotels-twice"));
 
-  expect(await statusOf(client.createIndex(hotels("hotels-twice")))).toBe(409);
+  // Azure answers 400 ResourceNameAlreadyInUse here, not 409.
+  expect(await statusOf(client.createIndex(hotels("hotels-twice")))).toBe(400);
   expect(await statusOf(client.getIndex("hotels-missing"))).toBe(404);
 });
 
@@ -148,6 +149,8 @@ test("createOrUpdate adds a field, and refuses to change an existing one", async
 
 test("onlyIfUnchanged guards an update and a delete with the index's ETag", async () => {
   const first = await client.createIndex(hotels("hotels-etag"));
+  // An update that changes nothing keeps the ETag, as on Azure, so this one adds a field.
+  first.fields.push({ name: "stars", type: "Edm.Int32", filterable: true });
   const second = await client.createOrUpdateIndex(first, { onlyIfUnchanged: true });
   expect(second.etag).not.toBe(first.etag);
 

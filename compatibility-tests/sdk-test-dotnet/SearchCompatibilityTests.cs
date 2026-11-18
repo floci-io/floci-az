@@ -68,14 +68,15 @@ public sealed class SearchCompatibilityTests
 
     [Test]
     [Timeout(60_000)]
-    public async Task AnswersConflictNotFoundAndBadRequest(CancellationToken cancellationToken)
+    public async Task AnswersBadRequestForATakenNameAndNotFoundForAMissingIndex(CancellationToken cancellationToken)
     {
         await using var service = await SearchService.CreateAsync(cancellationToken);
         var client = service.Client;
         await client.CreateIndexAsync(Hotels("hotels-twice"), cancellationToken);
 
+        // Azure answers 400 ResourceNameAlreadyInUse here, not 409.
         await Assert.That(await StatusOf(() => client.CreateIndexAsync(Hotels("hotels-twice"), cancellationToken)))
-            .IsEqualTo(409);
+            .IsEqualTo(400);
         await Assert.That(await StatusOf(() => client.GetIndexAsync("hotels-missing", cancellationToken)))
             .IsEqualTo(404);
 

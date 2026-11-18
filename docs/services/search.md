@@ -152,13 +152,18 @@ resource.
 With `floci-az.parity-overrides.strict-search-keys` (on from `parity: strict`):
 
 - a service that ARM does not hold answers `403`
-- an `api-key` must be the primary or secondary admin key of the service. A query key, an unknown key
-  and a missing key answer `403`: index management is an admin operation
+- a request with no credential answers `401` with no body and the challenge
+  `Bearer authorization="{login}/{tenant}/oauth2/authorize" resource="https://search.azure.com"`, as
+  Azure does. The authority is the emulator's own login endpoint, and the audience is the cloud's
+  (`https://search.azure.us` and `https://search.azure.cn` in the national clouds)
+- an `api-key` must be the primary or secondary admin key of the service. A query key and an unknown
+  key answer `403` with Azure's message, "The given API key doesn't match service's internal, primary
+  or secondary keys.": index management is an admin operation
 - a service whose ARM resource has `disableLocalAuth: true` refuses every `api-key` with `403`
 - an `Authorization: Bearer` token passes only when the service takes tokens: its `authOptions` is
   `aadOrApiKey`, or it has `disableLocalAuth: true`. A service with the default `apiKeyOnly` refuses
-  it with `403`, as the spec says that mode means "only the API key can be used". Azure's status code
-  for this refusal is not verified
+  it with `401`, no body and `Bearer realm="Azure Cognitive Search" error="invalid_token"`, the answer
+  Azure gives a token it cannot use
 - a token that passes is not validated: `strict-tokens` applies to ARM requests only, and no role
   assignment is checked
 
@@ -170,28 +175,56 @@ With `floci-az.parity-overrides.strict-search-keys` (on from `parity: strict`):
 
 ## Index definitions
 
-The shapes follow the data-plane spec (`2025-09-01`) and its examples:
+The shapes follow the data-plane spec (`2025-09-01`) and its examples, and a recording of a real
+service (Free tier, api-version `2025-09-01`, November 2026) where the spec is silent. The status
+codes, error `code` values, `details` and messages below are Azure's, word for word:
 
-- `POST /indexes` answers `201`, or `409 ResourceNameAlreadyInUse` for a name that is taken. `PUT`
-  answers `201` for a new index and `200` for one that exists, always with the definition
-- Every definition carries `@odata.etag`, which changes on each write. `If-Match` and `If-None-Match`
-  take the tag quoted, weak (`W/"..."`) or bare, or `*`, and a failed condition answers `412`
+- `POST /indexes` answers `201`, or `400 ResourceNameAlreadyInUse` with the detail
+  `CannotCreateExistingIndex` for a name that is taken (Azure does not answer `409`). `PUT` answers
+  `201` for a new index and `200` for one that exists, always with the definition. A `201` carries a
+  `Location` that ends in `?api-version=` and the request's version
+- Every definition carries `@odata.etag`, quoted, and the same tag in a strong `ETag` header. The
+  tag changes on each write. An update that changes nothing writes nothing: the tag stays, and the
+  `200` carries no `@odata.etag` and no `ETag`, as on Azure. `If-Match` and `If-None-Match` take the
+  tag quoted, weak (`W/"..."`) or bare, or `*`, and a failed condition answers `412` with an empty
+  `code`
+- A `GET` of a missing index answers `404` with an empty `code`. A `DELETE` of one answers `404`
+  `OperationNotAllowed` with the detail `IndexNotFoundInService`, or `412` when it carries `If-Match`,
+  even `If-Match: *`
 - A simple field is answered with `searchable`, `filterable`, `retrievable`, `stored`, `sortable`,
-  `facetable` and `key`. What the request left out gets Azure's default: `true`, except that only
-  strings and vectors are `searchable`, a multi-valued field (a collection, or any simple field under
-  a `Collection(Edm.ComplexType)`, however deep) is not `sortable`, a `Edm.GeographyPoint` is not
+  `facetable` and `key`, then `indexAnalyzer`, `searchAnalyzer`, `analyzer`, `normalizer`,
+  `dimensions`, `vectorSearchProfile` and `vectorEncoding`, `null` when unset, then `synonymMaps`.
+  What the request left out gets Azure's default: `true`, except that only strings and vectors are
+  `searchable`, a multi-valued field (a collection, or any simple field under a
+  `Collection(Edm.ComplexType)`, however deep) is not `sortable`, a `Edm.GeographyPoint` is not
   `facetable`, a vector field is neither `filterable`, `sortable` nor `facetable`, and a vector field
   is not `retrievable` (the spec: "Default is true for simple fields, false for vector fields")
+- A boolean attribute sent as the string `"true"` or `"false"` is read as the boolean, as Azure reads
+  it; any other string is refused
 - A complex field is answered with its `fields` and no attributes of its own, apart from properties a
   newer api-version adds, which come back as they were sent
-- The sections a request leaves out are answered as empty lists or `null`, and `similarity` as BM25
+- The sections a request leaves out are answered as empty lists or `null`, `description` included, and
+  `similarity` as BM25 with `null` parameters. A custom analyzer gains empty `tokenFilters` and
+  `charFilters`. `vectorSearch` is answered with `algorithms`, `profiles`, `vectorizers` and
+  `compressions`; a profile gains a `null` `vectorizer` and `compression`, and an `hnsw` algorithm the
+  default `hnswParameters` (`metric: cosine`, `m: 4`, `efConstruction: 400`, `efSearch: 500`, each
+  only where the request left it out) and a `null` `exhaustiveKnnParameters`. An `exhaustiveKnn`
+  algorithm gains `metric: cosine` and a `null` `hnswParameters`; that one is not recorded
 
-A definition is refused with `400 InvalidRequestParameter` when:
+A value that does not fit the model, such as `"fields": "id"`, a `synonymMaps` entry that is not a
+name, or a body that is not a JSON object, is refused with `400` and an empty `code`. Azure's reader
+words it as `Cannot convert the literal '3' to the expected type 'Edm.String'.`, and the body `null` as
+`An unexpected 'PrimitiveValue' node was found when reading from the JSON reader. A 'StartObject'
+node was expected.` A `PUT` whose body names another index than its URL is refused with `400` and the
+code `"400"`, as on Azure. The two names must be the same, letter for letter.
+
+Any other definition is refused with `400 OperationNotAllowed` when:
 
 - the index has no `name`, or the name is not 2 to 128 lowercase letters, digits, dashes and
   underscores, starting with a letter or digit and with no consecutive dashes or underscores, as
   Microsoft's [naming rules](https://learn.microsoft.com/rest/api/searchservice/naming-rules) set out
-- it does not have exactly one `key` field, or the key is not a top-level `Edm.String`
+- it does not have exactly one `key` field (Azure's detail `MissingKeyField`), or the key is not a
+  top-level `Edm.String`
 - a field name does not start with a letter, holds anything but letters, digits and underscores,
   begins with `azureSearch`, or is used twice at one level
 - a field type is not one the spec lists, or `Edm.Single`, `Edm.Half`, `Edm.Int16`, `Edm.SByte` or
@@ -207,24 +240,25 @@ A definition is refused with `400 InvalidRequestParameter` when:
 - a multi-valued field is `sortable`, or a `Edm.GeographyPoint` field is `facetable`
 - the key field is not `retrievable` or not `stored`
 - a field other than a vector has `stored: false`, or a field with `stored: false` is `retrievable`
-- a value has the wrong JSON type, such as `"key": "true"`, `"fields": "id"` or a `synonymMaps` entry
-  that is not a name
-- the body is not a JSON object, the literal `null` included
-- the body of a `PUT` names another index than its URL: the two must be the same, letter for letter
 
 An update may add fields, and sub-fields to a complex field. It is refused with
-`400 OperationNotAllowed` when it removes a field, changes the `type`, `key`, `searchable`,
-`filterable`, `sortable`, `facetable`, `stored`, `analyzer`, `indexAnalyzer`, `normalizer`,
-`dimensions` or `vectorEncoding` of one that exists, or changes `similarity`, which the spec says
-"can only be defined at index creation time". It is refused the same way when it adds an analyzer,
-tokenizer, token filter or char filter without `allowIndexDowntime=true`, the parameter the spec says
-"allows new analyzers, tokenizers, token filters, or char filters to be added". Sending the components
-the index already has needs no parameter, and nor does adding a field. A field it adds with `stored: false` is refused with
-`400 InvalidRequestParameter`, as `stored: false` is for index creation only. `retrievable`,
-`searchAnalyzer` and `synonymMaps` may change, as the spec allows. An update that leaves out
-`similarity` keeps the stored one, and one that leaves out `encryptionKey` or sends it as `null`
-keeps the stored key, as the spec says the service "will ignore attempts to set this property to
-null". Sending a different key rotates it.
+`400 OperationNotAllowed` when it removes a field (`Existing field(s) 'title' cannot be deleted.`,
+detail `CannotDeleteExistingField`) or changes the `type`, `key`, `searchable`, `filterable`,
+`sortable`, `facetable`, `stored`, `analyzer`, `indexAnalyzer`, `normalizer`, `dimensions`,
+`vectorSearchProfile` or `vectorEncoding` of one that exists (`Existing field 'rating' cannot be
+changed.`, detail `CannotChangeExistingField`). A field it adds with `stored: false` is refused too, as
+`stored: false` is for index creation only. `retrievable`, `searchAnalyzer` and `synonymMaps` may
+change, as the spec allows.
+
+An update that adds an analyzer, normalizer, tokenizer, token filter or char filter, or changes a
+parameter of `similarity` (such as `k1`), needs `allowIndexDowntime=true`. Without it the update is
+refused with `400`, an empty `code` and Azure's message: "An index with the name 'x' in service 'y'
+could not be updated. Index update not allowed because it would cause downtime. ...". Sending the
+components the index already has needs no parameter, and nor does adding a field. The `similarity`
+algorithm cannot change at all: `400`, "Similarity type cannot be changed on existing indexes." An
+update that leaves out `similarity` keeps the stored one, and one that leaves out `encryptionKey` or
+sends it as `null` keeps the stored key, as the spec says the service "will ignore attempts to set
+this property to null". Sending a different key rotates it.
 
 ---
 
@@ -293,21 +327,22 @@ floci-az:
   `Authorization: Bearer` and any token is served. With `strict-search-keys` the service must take
   tokens, but the token itself is still not checked, and no Search role (such as Search Service
   Contributor) is required.
-- **Data-plane error codes are not from the spec.** The spec defines the `{"error":{"code","message"}}`
-  envelope and no codes, so `ResourceNameAlreadyInUse`, `OperationNotAllowed`,
-  `InvalidRequestParameter`, `ResourceNotFound`, `PreconditionFailed`, `MissingRequiredParameter` and
-  `Forbidden` are descriptive and not verified against Azure, and so are the messages. Match on the
-  status code, as the SDKs do.
-- **A conditional `DELETE` of a missing index answers `404`.** The `If-Match` condition is not
-  evaluated when there is no index, while a conditional `PUT` of a missing index answers `412`. Which
-  one Azure answers for the delete is not verified.
-- **A vector profile may change in place.** An update may change a vector field's
-  `vectorSearchProfile` without refusal. Whether Azure refuses that change is not verified.
+- **Some data-plane errors are not recorded.** The codes and messages of the index operations above
+  are Azure's. The rest are descriptive and not verified against Azure: the refusals of a definition
+  that break a rule (`OperationNotAllowed`, with Azure's code but floci-az's words, apart from the
+  missing key field), a missing `api-version` (`MissingRequiredParameter`), an unserved path
+  (`ResourceNotFound`), a wrong method (`MethodNotAllowed`), and the `403` for a query key, an
+  undeclared service or a service with `disableLocalAuth`. Match on the status code, as the SDKs do.
+- **`Location` names no port.** Azure writes `https://{service}.search.windows.net:443/indexes(...)`
+  with the port spelled out. floci-az writes the URL the request addressed, with no port added.
 - **An index write can outlive its service's delete.** An index write that started before the
   service's ARM delete can finish after it, and leave that index behind for a service of the same
   name. Under the default lenient mode an index can be written to a service ARM does not hold anyway.
 - **An update without `similarity` keeps the stored one.** Whether Azure treats a missing `similarity`
   on an existing index as no change or refuses it is not verified.
+- **An ETag changes only on a write.** After an update with `allowIndexDowntime=true`, the recorded
+  service later answered the index under a new ETag that no request explains, presumably as the index
+  came back online. floci-az takes nothing offline, so its tag stays until the next write.
 - **`encryptionKey` is stored, not used.** Nothing is encrypted, the Key Vault key is not checked,
   and a `free` service accepts a key, although the spec says customer-managed keys are not available
   for free services.
@@ -315,9 +350,16 @@ floci-az:
   every SDK sends, so a `PUT` without it is answered the same way.
 - **Limits are reported, not enforced.** `servicestats` reports the index quota of the service's SKU
   (`standard` for a service ARM does not hold; a `standard3` service in `HighDensity` mode holds 1000
-  per partition, up to 3000) and the field limits Azure documents. Nothing stops an
-  index beyond them. The counters of every api-version are answered, `aliasesCount` and the two
-  knowledge counters included, as newer SDKs require them.
+  per partition, up to 3000) and the field limits Azure documents. A `free` service also reports the
+  quotas a real one does: 3 indexers, data sources, synonym maps and skillsets, and 52428800 bytes of
+  storage, which is also its `maxStoragePerIndex`. The other tiers report those as `null`, as they are
+  not recorded. Nothing stops an index beyond them. The counters are those of the request's
+  api-version: `aliasesCount` in the previews from `2021-04-30-Preview` and the stable versions from
+  `2026-04-01`, and the two knowledge counters from `2026-05-01-preview` and in a stable version newer
+  than `2026-04-01`. A real `2025-09-01` service answers without them. The `@odata.context` of
+  `search.stats` and `servicestats` names the api-version's model
+  (`$metadata#Microsoft.Azure.Search.V2025_09_01.ServiceStatistics`); a preview's is written
+  `V2025_11_01_Preview`, which is not recorded.
 - **Deleting a service deletes its indexes.** A resource-group delete does too when it cascades
   (`resource-group-delete`, on from `parity: azure`). Indexes belong to the cloud the request
   addressed, so a service of the same name in another cloud keeps its own.

@@ -10,8 +10,10 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.emptyString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.matchesPattern;
 
 @QuarkusTest
 @TestProfile(SearchAuthTest.StrictSearchKeys.class)
@@ -59,14 +61,20 @@ class SearchAuthTest {
     }
 
     @Test
-    void aQueryKeyAnUnknownKeyAndNoKeyAreForbidden() {
+    void aQueryKeyAndAnUnknownKeyAreForbiddenAndNoKeyIsChallenged() {
         String queryKey = given().when().post(ARM_SERVICE + "/listQueryKeys" + ARM_API).then().statusCode(200)
             .extract().path("value[0].key");
 
         given().header("api-key", queryKey).when().get(INDEXES).then().statusCode(403)
-            .body("error.code", equalTo("Forbidden"));
-        given().header("api-key", "not-a-key").when().get(INDEXES).then().statusCode(403);
-        given().when().get(INDEXES).then().statusCode(403);
+            .body("error.code", equalTo(""));
+        given().header("api-key", "not-a-key").when().get(INDEXES).then().statusCode(403)
+            .body("error.message", equalTo("The given API key doesn't match service's internal, primary or"
+                    + " secondary keys."));
+        // As on Azure: 401, no body, and a challenge naming the tenant's authority and the search audience.
+        given().when().get(INDEXES).then().statusCode(401)
+            .header("WWW-Authenticate", matchesPattern("Bearer authorization=\"http://[^\"]+/[0-9a-f-]+"
+                    + "/oauth2/authorize\" resource=\"https://search\\.azure\\.com\""))
+            .body(emptyString());
     }
 
     @Test
@@ -75,9 +83,13 @@ class SearchAuthTest {
         given().when().get(ARM_SERVICE + ARM_API).then().statusCode(200)
             .body("properties.authOptions", hasKey("apiKeyOnly"));
 
-        given().header("Authorization", "Bearer any-token").when().get(INDEXES).then().statusCode(403);
+        // Azure: 401 invalid_token with no body.
+        given().header("Authorization", "Bearer any-token").when().get(INDEXES).then().statusCode(401)
+            .header("WWW-Authenticate", equalTo("Bearer realm=\"Azure Cognitive Search\" error=\"invalid_token\""
+                    + " error_description=\"Authentication token failed validation.\""))
+            .body(emptyString());
         given().header("Authorization", "Bearer any-token").header("api-key", adminKey("primaryKey"))
-            .when().get(INDEXES).then().statusCode(403);
+            .when().get(INDEXES).then().statusCode(401);
     }
 
     @Test

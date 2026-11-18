@@ -11,7 +11,6 @@ from azure.core import MatchConditions
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import (
     HttpResponseError,
-    ResourceExistsError,
     ResourceModifiedError,
     ResourceNotFoundError,
 )
@@ -129,10 +128,12 @@ def test_create_and_get_index(index_client):
     assert fetched.e_tag == created.e_tag
 
 
-def test_a_taken_name_conflicts_and_a_missing_index_is_not_found(index_client):
+def test_a_taken_name_is_a_bad_request_and_a_missing_index_is_not_found(index_client):
     index_client.create_index(hotels("hotels-twice"))
-    with pytest.raises(ResourceExistsError):
+    # Azure answers 400 ResourceNameAlreadyInUse here, not 409.
+    with pytest.raises(HttpResponseError) as taken:
         index_client.create_index(hotels("hotels-twice"))
+    assert taken.value.status_code == 400
     with pytest.raises(ResourceNotFoundError):
         index_client.get_index("hotels-missing")
 
@@ -166,6 +167,8 @@ def test_create_or_update_adds_a_field_but_cannot_change_one(index_client):
 
 def test_etag_conditions(index_client):
     first = index_client.create_index(hotels("hotels-etag"))
+    # An update that changes nothing keeps the ETag, as on Azure, so this one adds a field.
+    first.fields.append(SimpleField(name="stars", type=SearchFieldDataType.INT32, filterable=True))
     second = index_client.create_or_update_index(first, match_condition=MatchConditions.IfNotModified)
     assert second.e_tag != first.e_tag
 

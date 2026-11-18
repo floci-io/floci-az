@@ -14,9 +14,12 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -27,6 +30,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -92,6 +96,9 @@ public class SearchIndexes {
             "facetable", "key");
     private static final List<String> STRING_ATTRIBUTES = List.of("analyzer", "searchAnalyzer", "indexAnalyzer",
             "normalizer", "vectorSearchProfile", "vectorEncoding");
+    /** The attributes Azure answers on every simple field after the flags, null when unset, in its order. */
+    private static final List<String> NULLABLE_ATTRIBUTES = List.of("indexAnalyzer", "searchAnalyzer", "analyzer",
+            "normalizer", "dimensions", "vectorSearchProfile", "vectorEncoding");
     /**
      * What a complex field may not set: the spec says each of these "must be null for complex fields", and
      * {@code synonymMaps} null or empty.
@@ -100,17 +107,23 @@ public class SearchIndexes {
             "sortable", "facetable", "analyzer", "searchAnalyzer", "indexAnalyzer", "normalizer");
     /** What an update may not change on a field that exists: the attributes that decide how it was indexed. */
     private static final List<String> IMMUTABLE = List.of("type", "key", "searchable", "filterable", "sortable",
-            "facetable", "stored", "analyzer", "indexAnalyzer", "normalizer", "dimensions", "vectorEncoding");
+            "facetable", "stored", "analyzer", "indexAnalyzer", "normalizer", "dimensions", "vectorSearchProfile",
+            "vectorEncoding");
 
     private static final List<String> LIST_SECTIONS = List.of("scoringProfiles", "suggesters", "analyzers",
             "tokenizers", "tokenFilters", "charFilters", "normalizers");
-    /** The analysis sections an update can add to only with {@code allowIndexDowntime=true}. */
-    private static final List<String> DOWNTIME_SECTIONS = List.of("analyzers", "tokenizers", "tokenFilters",
-            "charFilters");
+    /** The analysis sections an update can add to only with {@code allowIndexDowntime=true}, as Azure lists them. */
+    private static final List<String> DOWNTIME_SECTIONS = List.of("analyzers", "normalizers", "tokenizers",
+            "tokenFilters", "charFilters");
     private static final List<String> OBJECT_SECTIONS = List.of("corsOptions", "encryptionKey", "similarity",
             "semantic", "vectorSearch");
     private static final List<String> STRING_SECTIONS = List.of("description", "defaultScoringProfile");
     private static final String BM25 = "#Microsoft.Azure.Search.BM25Similarity";
+    private static final String CUSTOM_ANALYZER = "#Microsoft.Azure.Search.CustomAnalyzer";
+    /** What Azure fills into an {@code hnsw} algorithm's parameters. */
+    private static final Map<String, Object> HNSW_DEFAULTS = orderedMap("metric", "cosine", "m", 4,
+            "efConstruction", 400, "efSearch", 500);
+    private static final Map<String, Object> EXHAUSTIVE_KNN_DEFAULTS = orderedMap("metric", "cosine");
 
     private static final String ETAG = "@odata.etag";
     private static final String CONTEXT = "@odata.context";
@@ -163,17 +176,18 @@ public class SearchIndexes {
                            List<String> rest, String serviceUrl) {
         Service service = new Service(cloud, serviceName);
         String method = req.method().toUpperCase(Locale.ROOT);
+        Links links = new Links(serviceUrl, req.queryParams().get("api-version"));
         try {
             if (index.isEmpty()) {
                 return switch (method) {
-                    case "POST" -> create(req, service, serviceUrl);
+                    case "POST" -> create(req, service, links);
                     case "GET" -> list(req, service, serviceUrl);
                     default -> SearchErrors.methodNotAllowed();
                 };
             }
             if (rest.isEmpty()) {
                 return switch (method) {
-                    case "PUT" -> createOrUpdate(req, service, index.get(), serviceUrl);
+                    case "PUT" -> createOrUpdate(req, service, index.get(), links);
                     case "GET" -> read(service, index.get())
                             .map(entry -> answer(200, entry, serviceUrl))
                             .orElseGet(() -> indexNotFound(service, index.get()));
@@ -182,42 +196,53 @@ public class SearchIndexes {
                 };
             }
             if (rest.size() == 1 && rest.getFirst().equalsIgnoreCase("search.stats")) {
-                return "GET".equals(method) ? statistics(service, index.get()) : SearchErrors.methodNotAllowed();
+                return "GET".equals(method) ? statistics(service, index.get(), links)
+                        : SearchErrors.methodNotAllowed();
             }
             return SearchErrors.notFound("This index operation is not served yet: " + String.join("/", rest));
         } catch (Refused refused) {
             return refused.response();
         } catch (ArmJson.InvalidBodyException e) {
-            return SearchErrors.invalid("The request body is not a valid JSON object.");
+            return SearchErrors.invalid(nullLiteral(e)
+                    ? "An unexpected 'PrimitiveValue' node was found when reading from the JSON reader. A"
+                            + " 'StartObject' node was expected."
+                    : "The request body is not a valid JSON object.");
         }
+    }
+
+    /** The links an answer carries: the service's URL as the caller addressed it, and the api-version it used. */
+    private record Links(String serviceUrl, String apiVersion) {
     }
 
     // ── Operations ───────────────────────────────────────────────────────────
 
-    /** {@code Indexes_Create}: {@code 201}, or {@code 409} for a name that is taken. */
-    private Response create(AzureRequest req, Service service, String serviceUrl) {
+    /** {@code Indexes_Create}: {@code 201}, or {@code 400} for a name that is taken (Azure does not answer 409). */
+    private Response create(AzureRequest req, Service service, Links links) {
         Map<String, Object> definition = normalise(ArmJson.parseBodyStrict(req));
         String name = (String) definition.get("name");
         synchronized (writeLock) {
             if (read(service, name).isPresent()) {
-                return SearchErrors.error(409, "ResourceNameAlreadyInUse",
-                        "Cannot create index '" + name + "' because it already exists.");
+                String message = "Cannot create index '" + name + "' because it already exists.";
+                return SearchErrors.error(400, "ResourceNameAlreadyInUse", message, "CannotCreateExistingIndex",
+                        message);
             }
             Entry stored = write(service, definition);
             LOG.infov("Search: created index {0} in service {1}", name, service.name());
-            return created(stored, serviceUrl);
+            return created(stored, links);
         }
     }
 
     /**
      * {@code Indexes_CreateOrUpdate}: {@code 201} for a new index and {@code 200} for one that exists. The spec
-     * requires {@code Prefer: return=representation}, so the definition is always answered.
+     * requires {@code Prefer: return=representation}, so the definition is always answered. An update that changes
+     * nothing writes nothing: the ETag stays, and Azure answers such an update without one.
      */
-    private Response createOrUpdate(AzureRequest req, Service service, String name, String serviceUrl) {
+    private Response createOrUpdate(AzureRequest req, Service service, String name, Links links) {
         Map<String, Object> body = ArmJson.parseBodyStrict(req);
         if (body.get("name") instanceof String sent && !sent.equals(name)) {
-            throw refuse("The index name in the request body, '" + sent + "', is not the one in the URL, '"
-                    + name + "'.");
+            // Azure's code for this refusal is the status, as a string.
+            throw new Refused(SearchErrors.error(400, "400", "The index name '" + sent
+                    + "' in the request payload does not match the name '" + name + "' in the request URL."));
         }
         Map<String, Object> definition = normalise(body);
         synchronized (writeLock) {
@@ -226,23 +251,32 @@ public class SearchIndexes {
                 return SearchErrors.preconditionFailed();
             }
             if (existing.isPresent()) {
-                refuseIndexChanges(existing.get().definition(), body, definition, downtimeAllowed(req));
+                refuseIndexChanges(service, existing.get().definition(), body, definition, downtimeAllowed(req));
+                if (sameJson(existing.get().definition(), definition)) {
+                    return unchanged(existing.get(), links.serviceUrl());
+                }
             }
             Entry stored = write(service, definition);
             if (existing.isPresent()) {
-                return answer(200, stored, serviceUrl);
+                return answer(200, stored, links.serviceUrl());
             }
             LOG.infov("Search: created index {0} in service {1}", name, service.name());
-            return created(stored, serviceUrl);
+            return created(stored, links);
         }
     }
 
-    /** {@code Indexes_Delete}: {@code 204}, or {@code 404} for an index that does not exist. */
+    /**
+     * {@code Indexes_Delete}: {@code 204}. An index that does not exist is {@code 404}, unless the request carries
+     * {@code If-Match}, which no missing index can meet: Azure answers {@code 412} then, even for {@code *}.
+     */
     private Response delete(AzureRequest req, Service service, String name) {
         synchronized (writeLock) {
             Optional<Entry> existing = read(service, name);
-            if (existing.isEmpty()) {
-                return indexNotFound(service, name);
+            if (existing.isEmpty() && req.headers().getHeaderString("If-Match") == null) {
+                String message = "No index with the name '" + name + "' was found in a service named '"
+                        + service.name() + "'.";
+                return SearchErrors.error(404, SearchErrors.OPERATION_NOT_ALLOWED, message, "IndexNotFoundInService",
+                        message);
             }
             if (conditionsFail(req, existing)) {
                 return SearchErrors.preconditionFailed();
@@ -281,11 +315,12 @@ public class SearchIndexes {
     /**
      * {@code Indexes_GetStatistics}. No document is stored yet, so every counter is zero.
      */
-    private Response statistics(Service service, String name) {
+    private Response statistics(Service service, String name, Links links) {
         if (read(service, name).isEmpty()) {
             return indexNotFound(service, name);
         }
         Map<String, Object> body = new LinkedHashMap<>();
+        body.put(CONTEXT, links.serviceUrl() + "/$metadata#" + modelType(links.apiVersion(), "IndexStatistics"));
         body.put("documentCount", 0);
         body.put("storageSize", 0);
         body.put("vectorIndexSize", 0);
@@ -337,6 +372,12 @@ public class SearchIndexes {
         if (body.get("name") == null) {
             throw refuse("The index needs a 'name'.");
         }
+        if (!(body.get("name") instanceof String)) {
+            throw new Refused(SearchErrors.cannotConvert(body.get("name"), STRING));
+        }
+        if (body.get("fields") != null && !(body.get("fields") instanceof List<?>)) {
+            throw refuseType("'fields' must be a list of field definitions.");
+        }
         if (!(body.get("name") instanceof String name) || name.length() < MIN_NAME_LENGTH
                 || name.length() > MAX_NAME_LENGTH || !INDEX_NAME.matcher(name).matches()) {
             throw refuse("Index name must be " + MIN_NAME_LENGTH + " to " + MAX_NAME_LENGTH + " lowercase letters,"
@@ -351,20 +392,22 @@ public class SearchIndexes {
         List<Map<String, Object>> fields = normaliseFields(sentFields, true, false, vectorProfiles(body), "");
         long keys = fields.stream().filter(field -> Boolean.TRUE.equals(field.get("key"))).count();
         if (keys != 1) {
-            throw refuse("The index must have exactly one key field, and it has " + keys + ".");
+            String rule = "Found " + keys + " key fields in index '" + name + "'. Each index must have exactly one"
+                    + " key field.";
+            throw new Refused(SearchErrors.error(400, SearchErrors.OPERATION_NOT_ALLOWED,
+                    SearchErrors.INVALID_PREFIX + "index : " + rule, "MissingKeyField", rule + " Parameters: index"));
         }
 
+        // The order Azure answers the properties in.
         Map<String, Object> definition = new LinkedHashMap<>();
         definition.put("name", name);
-        if (body.get("description") != null) {
-            definition.put("description", body.get("description"));
-        }
+        definition.put("description", body.get("description"));
+        definition.put("defaultScoringProfile", body.get("defaultScoringProfile"));
         definition.put("fields", fields);
         definition.put("scoringProfiles", listOrEmpty(body, "scoringProfiles"));
-        definition.put("defaultScoringProfile", body.get("defaultScoringProfile"));
         definition.put("corsOptions", body.get("corsOptions"));
         definition.put("suggesters", listOrEmpty(body, "suggesters"));
-        definition.put("analyzers", listOrEmpty(body, "analyzers"));
+        definition.put("analyzers", analyzers(listOrEmpty(body, "analyzers")));
         definition.put("normalizers", listOrEmpty(body, "normalizers"));
         definition.put("tokenizers", listOrEmpty(body, "tokenizers"));
         definition.put("tokenFilters", listOrEmpty(body, "tokenFilters"));
@@ -372,7 +415,7 @@ public class SearchIndexes {
         definition.put("encryptionKey", body.get("encryptionKey"));
         definition.put("similarity", body.get("similarity") == null ? defaultSimilarity() : body.get("similarity"));
         definition.put("semantic", body.get("semantic"));
-        definition.put("vectorSearch", body.get("vectorSearch"));
+        definition.put("vectorSearch", vectorSearch(body.get("vectorSearch")));
         // What a newer api-version adds comes back as it was sent, so its SDK model still deserialises.
         for (Map.Entry<String, Object> sent : body.entrySet()) {
             if (!sent.getKey().startsWith("@odata.")) {
@@ -382,20 +425,99 @@ public class SearchIndexes {
         return definition;
     }
 
+    /** The analyzers with what Azure fills in: a custom analyzer's {@code tokenFilters} and {@code charFilters}. */
+    private static Object analyzers(Object sent) {
+        if (!(sent instanceof List<?> analyzers)) {
+            return sent;
+        }
+        List<Object> filled = new ArrayList<>();
+        for (Object analyzer : analyzers) {
+            if (analyzer instanceof Map<?, ?> && CUSTOM_ANALYZER.equals(ArmJson.cast(analyzer).get("@odata.type"))) {
+                Map<String, Object> custom = new LinkedHashMap<>(ArmJson.cast(analyzer));
+                custom.putIfAbsent("tokenFilters", List.of());
+                custom.putIfAbsent("charFilters", List.of());
+                filled.add(custom);
+            } else {
+                filled.add(analyzer);
+            }
+        }
+        return filled;
+    }
+
+    /**
+     * The {@code vectorSearch} section with what Azure fills in, in the order it answers: {@code algorithms},
+     * {@code profiles}, {@code vectorizers}, {@code compressions}. A profile gains a null {@code vectorizer} and
+     * {@code compression}; an {@code hnsw} algorithm gains its default parameters (recorded, and in the spec's
+     * create example) and a null {@code exhaustiveKnnParameters}; an {@code exhaustiveKnn} one gains the default
+     * metric and a null {@code hnswParameters} (by symmetry, not recorded).
+     */
+    private static Object vectorSearch(Object sent) {
+        if (!(sent instanceof Map<?, ?>)) {
+            return sent;
+        }
+        Map<String, Object> section = ArmJson.cast(sent);
+        Map<String, Object> filled = new LinkedHashMap<>();
+        filled.put("algorithms", fillEach(section.get("algorithms"), SearchIndexes::fillAlgorithm));
+        filled.put("profiles", fillEach(section.get("profiles"), profile -> {
+            profile.putIfAbsent("vectorizer", null);
+            profile.putIfAbsent("compression", null);
+        }));
+        filled.put("vectorizers", section.get("vectorizers") == null ? List.of() : section.get("vectorizers"));
+        filled.put("compressions", section.get("compressions") == null ? List.of() : section.get("compressions"));
+        section.forEach(filled::putIfAbsent);
+        return filled;
+    }
+
+    private static void fillAlgorithm(Map<String, Object> algorithm) {
+        Object kind = algorithm.get("kind");
+        if ("hnsw".equals(kind)) {
+            Map<String, Object> parameters = new LinkedHashMap<>(HNSW_DEFAULTS);
+            parameters.putAll(ArmJson.cast(algorithm.get("hnswParameters")));
+            algorithm.put("hnswParameters", parameters);
+            algorithm.putIfAbsent("exhaustiveKnnParameters", null);
+        } else if ("exhaustiveKnn".equals(kind)) {
+            Map<String, Object> parameters = new LinkedHashMap<>(EXHAUSTIVE_KNN_DEFAULTS);
+            parameters.putAll(ArmJson.cast(algorithm.get("exhaustiveKnnParameters")));
+            algorithm.putIfAbsent("hnswParameters", null);
+            algorithm.put("exhaustiveKnnParameters", parameters);
+        }
+    }
+
+    /** A copy of {@code sent} with {@code fill} applied to each object in it; anything else is kept as sent. */
+    private static Object fillEach(Object sent, Consumer<Map<String, Object>> fill) {
+        if (sent == null) {
+            return List.of();
+        }
+        if (!(sent instanceof List<?> items)) {
+            return sent;
+        }
+        List<Object> filled = new ArrayList<>();
+        for (Object item : items) {
+            if (item instanceof Map<?, ?>) {
+                Map<String, Object> copy = new LinkedHashMap<>(ArmJson.cast(item));
+                fill.accept(copy);
+                filled.add(copy);
+            } else {
+                filled.add(item);
+            }
+        }
+        return filled;
+    }
+
     private static void refuseMistypedSections(Map<String, Object> body) {
         for (String section : LIST_SECTIONS) {
             if (body.get(section) != null && !(body.get(section) instanceof List<?>)) {
-                throw refuse("'" + section + "' must be a list.");
+                throw refuseType("'" + section + "' must be a list.");
             }
         }
         for (String section : OBJECT_SECTIONS) {
             if (body.get(section) != null && !(body.get(section) instanceof Map<?, ?>)) {
-                throw refuse("'" + section + "' must be an object.");
+                throw refuseType("'" + section + "' must be an object.");
             }
         }
         for (String section : STRING_SECTIONS) {
             if (body.get(section) != null && !(body.get(section) instanceof String)) {
-                throw refuse("'" + section + "' must be a string.");
+                throw refuseType("'" + section + "' must be a string.");
             }
         }
     }
@@ -423,7 +545,7 @@ public class SearchIndexes {
         Set<String> seen = new HashSet<>();
         for (Object item : sent) {
             if (!(item instanceof Map<?, ?>)) {
-                throw refuse("Every entry of 'fields' must be a field definition.");
+                throw refuseType("Every entry of 'fields' must be a field definition.");
             }
             Map<String, Object> field = normaliseField(ArmJson.cast(item), topLevel, multiValued, profiles, parent);
             if (!seen.add((String) field.get("name"))) {
@@ -434,8 +556,9 @@ public class SearchIndexes {
         return fields;
     }
 
-    private static Map<String, Object> normaliseField(Map<String, Object> sent, boolean topLevel,
+    private static Map<String, Object> normaliseField(Map<String, Object> asSent, boolean topLevel,
                                                       boolean multiValued, Set<String> profiles, String parent) {
+        Map<String, Object> sent = withBooleanLiterals(asSent);
         if (!(sent.get("name") instanceof String name) || name.length() > MAX_NAME_LENGTH
                 || !FIELD_NAME.matcher(name).matches() || name.startsWith(RESERVED_FIELD_PREFIX)) {
             throw refuse("Invalid field name '" + sent.get("name") + "'. A field name must start with a letter,"
@@ -498,32 +621,58 @@ public class SearchIndexes {
         field.put("sortable", flag(sent, "sortable", !vector && singleValued));
         field.put("facetable", flag(sent, "facetable", !vector && !GEOGRAPHY_POINT.equals(element)));
         field.put("key", key);
+        for (String attribute : NULLABLE_ATTRIBUTES) {
+            field.put(attribute, sent.get(attribute));
+        }
+        field.put("synonymMaps", sent.get("synonymMaps") == null ? List.of() : sent.get("synonymMaps"));
         for (Map.Entry<String, Object> attribute : sent.entrySet()) {
             if (attribute.getValue() != null && !"fields".equals(attribute.getKey())) {
                 field.putIfAbsent(attribute.getKey(), attribute.getValue());
             }
         }
-        field.putIfAbsent("synonymMaps", List.of());
         return field;
+    }
+
+    /**
+     * The field with its flags' string literals read as booleans: Azure's OData reader takes {@code "true"} and
+     * {@code "false"} for a boolean (recorded for {@code key}), and refuses any other string.
+     */
+    private static Map<String, Object> withBooleanLiterals(Map<String, Object> sent) {
+        Map<String, Object> read = new LinkedHashMap<>(sent);
+        for (String flag : FLAGS) {
+            if (read.get(flag) instanceof String literal) {
+                if (!"true".equals(literal) && !"false".equals(literal)) {
+                    throw new Refused(SearchErrors.cannotConvert(literal, "Edm.Boolean"));
+                }
+                read.put(flag, Boolean.valueOf(literal));
+            }
+        }
+        return read;
     }
 
     private static void refuseMistypedAttributes(Map<String, Object> sent, String path) {
         for (String flag : FLAGS) {
             if (sent.get(flag) != null && !(sent.get(flag) instanceof Boolean)) {
-                throw refuse("'" + flag + "' of field '" + path + "' must be true or false.");
+                throw new Refused(SearchErrors.cannotConvert(sent.get(flag), "Edm.Boolean"));
             }
         }
         for (String attribute : STRING_ATTRIBUTES) {
             if (sent.get(attribute) != null && !(sent.get(attribute) instanceof String)) {
-                throw refuse("'" + attribute + "' of field '" + path + "' must be a string.");
+                throw new Refused(SearchErrors.cannotConvert(sent.get(attribute), STRING));
             }
         }
         if (sent.get("fields") != null && !(sent.get("fields") instanceof List<?>)) {
-            throw refuse("'fields' of field '" + path + "' must be a list.");
+            throw refuseType("'fields' of field '" + path + "' must be a list.");
         }
-        if (sent.get("synonymMaps") != null && !(sent.get("synonymMaps") instanceof List<?> maps
-                && maps.stream().allMatch(String.class::isInstance))) {
-            throw refuse("'synonymMaps' of field '" + path + "' must be a list of synonym map names.");
+        if (sent.get("synonymMaps") != null && !(sent.get("synonymMaps") instanceof List<?>)) {
+            throw refuseType("'synonymMaps' of field '" + path + "' must be a list of synonym map names.");
+        }
+        if (sent.get("synonymMaps") instanceof List<?> maps) {
+            for (Object map : maps) {
+                if (!(map instanceof String)) {
+                    throw new Refused(SearchErrors.cannotConvert(map, STRING));
+                }
+            }
         }
     }
 
@@ -590,23 +739,31 @@ public class SearchIndexes {
     }
 
     /**
-     * Checks an update against the stored definition, and carries over what an update cannot clear. The spec
-     * says {@code similarity} "can only be defined at index creation time and cannot be modified on existing
-     * indexes", and that the service "will ignore attempts to set [{@code encryptionKey}] to null". An update that
-     * leaves {@code similarity} out keeps the stored one too.
+     * Checks an update against the stored definition, and carries over what an update cannot clear. The
+     * {@code similarity} algorithm cannot change; its parameters can, but only with
+     * {@code allowIndexDowntime=true}, as for a new analysis component (both recorded). The spec says the service
+     * "will ignore attempts to set [{@code encryptionKey}] to null". An update that leaves {@code similarity} out
+     * keeps the stored one too.
      */
-    private static void refuseIndexChanges(Map<String, Object> stored, Map<String, Object> sent,
+    private static void refuseIndexChanges(Service service, Map<String, Object> stored, Map<String, Object> sent,
                                            Map<String, Object> definition, boolean downtimeAllowed) {
         refuseFieldChanges(fields(stored), fields(definition), "");
         refuseUnstoredNewFields(fields(stored), fields(definition), "");
-        if (!downtimeAllowed) {
-            refuseNewAnalysisComponents(stored, definition);
-        }
         if (sent.get("similarity") == null) {
             definition.put("similarity", stored.get("similarity"));
-        } else if (!sameSimilarity(ArmJson.cast(stored.get("similarity")), ArmJson.cast(sent.get("similarity")))) {
-            throw new Refused(SearchErrors.error(400, "OperationNotAllowed",
-                    "The similarity algorithm of an existing index cannot be changed."));
+        } else {
+            Map<String, Object> before = ArmJson.cast(stored.get("similarity"));
+            Map<String, Object> after = ArmJson.cast(sent.get("similarity"));
+            if (!Objects.equals(before.get("@odata.type"), after.get("@odata.type"))) {
+                throw new Refused(SearchErrors.error(400, SearchErrors.NO_CODE,
+                        "Similarity type cannot be changed on existing indexes."));
+            }
+            if (!downtimeAllowed && !sameSimilarity(before, after)) {
+                throw new Refused(downtimeRefusal(service, (String) definition.get("name")));
+            }
+        }
+        if (!downtimeAllowed && addsAnalysisComponent(stored, definition)) {
+            throw new Refused(downtimeRefusal(service, (String) definition.get("name")));
         }
         if (sent.get("encryptionKey") == null) {
             definition.put("encryptionKey", stored.get("encryptionKey"));
@@ -614,20 +771,31 @@ public class SearchIndexes {
     }
 
     /**
-     * Refuses an update that adds an analyzer, tokenizer, token filter or char filter without
-     * {@code allowIndexDowntime=true}: the spec says that parameter is what "allows new analyzers, tokenizers, token
-     * filters, or char filters to be added to an index".
+     * Whether an update adds an analyzer, normalizer, tokenizer, token filter or char filter, which takes the index
+     * offline and so needs {@code allowIndexDowntime=true}.
      */
-    private static void refuseNewAnalysisComponents(Map<String, Object> stored, Map<String, Object> definition) {
+    private static boolean addsAnalysisComponent(Map<String, Object> stored, Map<String, Object> definition) {
         for (String section : DOWNTIME_SECTIONS) {
             Set<Object> before = componentNames(stored.get(section));
             for (Object name : componentNames(definition.get(section))) {
                 if (!before.contains(name)) {
-                    throw new Refused(SearchErrors.error(400, "OperationNotAllowed", "Adding '" + name + "' to '"
-                            + section + "' takes the index offline: send allowIndexDowntime=true to allow it."));
+                    return true;
                 }
             }
         }
+        return false;
+    }
+
+    /** Azure's refusal of an update that would take the index offline, word for word. */
+    private static Response downtimeRefusal(Service service, String index) {
+        return SearchErrors.error(400, SearchErrors.NO_CODE, "An index with the name '" + index + "' in service '"
+                + service.name() + "' could not be updated. Index update not allowed because it would cause downtime."
+                + " In order to add new analyzers, normalizers, tokenizers, token filters, or character filters to an"
+                + " existing index, or modify its similarity settings, set the 'allowIndexDowntime' query parameter to"
+                + " 'true' in the index update request. Note that this operation will put your index offline for at"
+                + " least a few seconds, causing your indexing and query requests to fail. Performance and write"
+                + " availability of the index can be impaired for several minutes after the index is updated, or"
+                + " longer for very large indexes.");
     }
 
     private static Set<Object> componentNames(Object section) {
@@ -693,17 +861,21 @@ public class SearchIndexes {
                                            String parent) {
         Map<String, Map<String, Object>> sentByName = new LinkedHashMap<>();
         sent.forEach(field -> sentByName.put((String) field.get("name"), field));
+        List<String> removed = stored.stream().map(field -> parent + field.get("name"))
+                .filter(path -> !sentByName.containsKey(path.substring(parent.length()))).toList();
+        if (!removed.isEmpty()) {
+            String message = "Existing field(s) '" + String.join("', '", removed) + "' cannot be deleted.";
+            throw new Refused(SearchErrors.error(400, SearchErrors.OPERATION_NOT_ALLOWED, message,
+                    "CannotDeleteExistingField", message));
+        }
         for (Map<String, Object> existing : stored) {
             String path = parent + existing.get("name");
             Map<String, Object> updated = sentByName.get((String) existing.get("name"));
-            if (updated == null) {
-                throw new Refused(SearchErrors.error(400, "OperationNotAllowed",
-                        "Existing field(s) '" + path + "' cannot be deleted."));
-            }
             for (String attribute : IMMUTABLE) {
                 if (!Objects.equals(existing.get(attribute), updated.get(attribute))) {
-                    throw new Refused(SearchErrors.error(400, "OperationNotAllowed",
-                            "Existing field(s) '" + path + "' cannot be changed."));
+                    String message = "Existing field '" + path + "' cannot be changed.";
+                    throw new Refused(SearchErrors.error(400, SearchErrors.OPERATION_NOT_ALLOWED, message,
+                            "CannotChangeExistingField", message));
                 }
             }
             if (existing.containsKey("fields")) {
@@ -794,10 +966,13 @@ public class SearchIndexes {
 
     // ── Answers ──────────────────────────────────────────────────────────────
 
-    private static Response created(Entry entry, String serviceUrl) {
-        return respond(201, entry, serviceUrl)
-                .header("Location", serviceUrl + "/indexes('" + entry.definition().get("name") + "')")
-                .build();
+    /** {@code 201}, with a {@code Location} that, as Azure's, carries the api-version of the request. */
+    private static Response created(Entry entry, Links links) {
+        String location = links.serviceUrl() + "/indexes('" + entry.definition().get("name") + "')";
+        if (links.apiVersion() != null) {
+            location += "?api-version=" + URLEncoder.encode(links.apiVersion(), StandardCharsets.UTF_8);
+        }
+        return respond(201, entry, links.serviceUrl()).header("Location", location).build();
     }
 
     private static Response answer(int status, Entry entry, String serviceUrl) {
@@ -808,7 +983,15 @@ public class SearchIndexes {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put(CONTEXT, serviceUrl + "/$metadata#indexes/$entity");
         body.putAll(body(entry));
-        return SearchErrors.json(status, body).header("ETag", "W/\"" + entry.etag() + "\"");
+        return SearchErrors.json(status, body).header("ETag", "\"" + entry.etag() + "\"");
+    }
+
+    /** The answer to an update that changed nothing: Azure sends the definition with no ETag, in body or header. */
+    private static Response unchanged(Entry entry, String serviceUrl) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put(CONTEXT, serviceUrl + "/$metadata#indexes/$entity");
+        body.putAll(entry.definition());
+        return SearchErrors.json(200, body).build();
     }
 
     /** The definition with its ETag, which Azure answers as a quoted string inside the JSON. */
@@ -819,13 +1002,45 @@ public class SearchIndexes {
         return body;
     }
 
+    /** A read of an index that does not exist: Azure answers it with no code. */
     private static Response indexNotFound(Service service, String index) {
-        return SearchErrors.notFound("No index with the name '" + index + "' was found in the service '"
-                + service.name() + "'.");
+        return SearchErrors.error(404, SearchErrors.NO_CODE, "No index with the name '" + index
+                + "' was found in the service '" + service.name() + "'.");
     }
 
+    /** A definition the service refuses to carry out. */
     private static Refused refuse(String detail) {
+        return new Refused(SearchErrors.notAllowed(detail));
+    }
+
+    /** A definition whose JSON does not fit the model, which Azure refuses while reading it. */
+    private static Refused refuseType(String detail) {
         return new Refused(SearchErrors.invalid(detail));
+    }
+
+    /**
+     * The OData name of a response model, as Azure's {@code @odata.context} carries it:
+     * {@code Microsoft.Azure.Search.V2025_09_01.IndexStatistics} for api-version {@code 2025-09-01}. A preview
+     * version's suffix is written {@code _Preview} (not recorded).
+     */
+    static String modelType(String apiVersion, String model) {
+        String version = apiVersion == null ? "" : apiVersion.trim();
+        String preview = "-preview";
+        boolean isPreview = version.toLowerCase(Locale.ROOT).endsWith(preview);
+        if (isPreview) {
+            version = version.substring(0, version.length() - preview.length());
+        }
+        return "Microsoft.Azure.Search.V" + version.replace('-', '_') + (isPreview ? "_Preview" : "") + "." + model;
+    }
+
+    /** Whether the body was the JSON literal {@code null}, which Azure's reader refuses in words of its own. */
+    private static boolean nullLiteral(ArmJson.InvalidBodyException e) {
+        return e.getCause() != null && ArmJson.NULL_BODY.equals(e.getCause().getMessage());
+    }
+
+    /** Whether two definitions are the same JSON, so an update would change nothing. */
+    private static boolean sameJson(Map<String, Object> stored, Map<String, Object> updated) {
+        return MAPPER.valueToTree(stored).equals(MAPPER.valueToTree(updated));
     }
 
     // ── Small helpers ────────────────────────────────────────────────────────
@@ -851,6 +1066,15 @@ public class SearchIndexes {
 
     private static Object listOrEmpty(Map<String, Object> body, String section) {
         return body.get(section) == null ? List.of() : body.get(section);
+    }
+
+    /** An unmodifiable map of the given keys and values, in their order. */
+    private static Map<String, Object> orderedMap(Object... keysAndValues) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i < keysAndValues.length; i += 2) {
+            map.put((String) keysAndValues[i], keysAndValues[i + 1]);
+        }
+        return Collections.unmodifiableMap(map);
     }
 
     private static Map<String, Object> defaultSimilarity() {

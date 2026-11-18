@@ -44,6 +44,13 @@ public class SearchDataPlane {
     private static final int HIGH_DENSITY_INDEXES_PER_PARTITION = 1000;
     private static final int HIGH_DENSITY_INDEXES_PER_SERVICE = 3000;
     private static final String DEFAULT_SKU = "standard";
+    private static final String FREE_SKU = "free";
+    /**
+     * A free service's quotas, as a real one reports them: 3 indexers, data sources, synonym maps and skillsets,
+     * and 50 MB of storage, which is also its per-index limit. The other tiers' are not recorded and stay null.
+     */
+    private static final int FREE_RESOURCE_QUOTA = 3;
+    private static final long FREE_STORAGE_BYTES = 50L * 1024 * 1024;
 
     private final EmulatorConfig config;
     private final SearchArmService arm;
@@ -98,7 +105,7 @@ public class SearchDataPlane {
                 return SearchErrors.notFound("The resource 'servicestats/" + name.get() + "' does not exist.");
             }
             return "GET".equalsIgnoreCase(req.method())
-                    ? serviceStatistics(cloud, service, declared) : SearchErrors.methodNotAllowed();
+                    ? serviceStatistics(req, cloud, service, declared) : SearchErrors.methodNotAllowed();
         }
         return switch (operation) {
             case "indexes" -> indexes.handle(req, cloud, service, name, rest, serviceUrl(req, service));
@@ -110,33 +117,71 @@ public class SearchDataPlane {
      * {@code GetServiceStatistics}. The index count is real, and the index quota is the SKU's; the counters of
      * what floci-az does not serve yet are zero.
      */
-    private Response serviceStatistics(String cloud, String service, Optional<SearchServiceResource> declared) {
+    private Response serviceStatistics(AzureRequest req, String cloud, String service,
+                                       Optional<SearchServiceResource> declared) {
+        String apiVersion = req.queryParams().get("api-version");
+        boolean free = FREE_SKU.equals(declared.map(SearchServiceResource::sku).orElse(DEFAULT_SKU));
+        Integer freeQuota = free ? Integer.valueOf(FREE_RESOURCE_QUOTA) : null;
         Map<String, Object> counters = new LinkedHashMap<>();
-        // The counters of every api-version: 2026-04-01 requires aliasesCount, and 2026-05-01-preview the two
-        // knowledge counters, so an SDK built for either fails to read an answer without them.
-        counters.put("aliasesCount", counter(0, null));
+        if (hasAliasesCounter(apiVersion)) {
+            counters.put("aliasesCount", counter(0, null));
+        }
         counters.put("documentCount", counter(0, null));
         counters.put("indexesCount", counter(indexes.count(cloud, service), indexQuota(declared)));
-        counters.put("indexersCount", counter(0, null));
-        counters.put("dataSourcesCount", counter(0, null));
-        counters.put("storageSize", counter(0, null));
-        counters.put("synonymMaps", counter(0, null));
-        counters.put("skillsetCount", counter(0, null));
+        counters.put("indexersCount", counter(0, freeQuota));
+        counters.put("dataSourcesCount", counter(0, freeQuota));
+        counters.put("storageSize", counter(0, free ? Long.valueOf(FREE_STORAGE_BYTES) : null));
+        counters.put("synonymMaps", counter(0, freeQuota));
+        counters.put("skillsetCount", counter(0, freeQuota));
         counters.put("vectorIndexSize", counter(0, null));
-        counters.put("knowledgeBasesCount", counter(0, null));
-        counters.put("knowledgeSourcesCount", counter(0, null));
+        if (hasKnowledgeCounters(apiVersion)) {
+            counters.put("knowledgeBasesCount", counter(0, null));
+            counters.put("knowledgeSourcesCount", counter(0, null));
+        }
 
         Map<String, Object> limits = new LinkedHashMap<>();
-        limits.put("maxStoragePerIndex", null);
+        limits.put("maxStoragePerIndex", free ? Long.valueOf(FREE_STORAGE_BYTES) : null);
         limits.put("maxFieldsPerIndex", MAX_FIELDS_PER_INDEX);
         limits.put("maxFieldNestingDepthPerIndex", MAX_FIELD_NESTING_DEPTH);
         limits.put("maxComplexCollectionFieldsPerIndex", MAX_COMPLEX_COLLECTION_FIELDS);
         limits.put("maxComplexObjectsInCollectionsPerDocument", MAX_COMPLEX_OBJECTS_IN_COLLECTIONS);
 
         Map<String, Object> body = new LinkedHashMap<>();
+        body.put("@odata.context", serviceUrl(req, service) + "/$metadata#"
+                + SearchIndexes.modelType(apiVersion, "ServiceStatistics"));
         body.put("counters", counters);
         body.put("limits", limits);
         return SearchErrors.json(200, body).build();
+    }
+
+    /**
+     * Whether the api-version's {@code SearchServiceCounters} has {@code aliasesCount}: the previews from
+     * {@code 2021-04-30-Preview} and the stable versions from {@code 2026-04-01}. A real {@code 2025-09-01} service
+     * answers without it.
+     */
+    static boolean hasAliasesCounter(String apiVersion) {
+        ApiVersion version = ApiVersion.parse(apiVersion);
+        return version.preview() ? version.date().compareTo("2021-04-30") >= 0
+                : version.date().compareTo("2026-04-01") >= 0;
+    }
+
+    /**
+     * Whether the api-version has the knowledge counters: the previews from {@code 2026-05-01-preview}, and a stable
+     * version newer than the newest one in the specs ({@code 2026-04-01}), whose model may require them.
+     */
+    static boolean hasKnowledgeCounters(String apiVersion) {
+        ApiVersion version = ApiVersion.parse(apiVersion);
+        return version.preview() ? version.date().compareTo("2026-05-01") >= 0
+                : version.date().compareTo("2026-04-01") > 0;
+    }
+
+    /** An api-version as its date, {@code yyyy-MM-dd}, and whether it is a preview. */
+    private record ApiVersion(String date, boolean preview) {
+        static ApiVersion parse(String apiVersion) {
+            String version = apiVersion == null ? "" : apiVersion.trim().toLowerCase(Locale.ROOT);
+            return new ApiVersion(version.length() >= 10 ? version.substring(0, 10) : version,
+                    version.endsWith("-preview"));
+        }
     }
 
     /**
@@ -153,7 +198,7 @@ public class SearchDataPlane {
         return INDEX_QUOTA.get(sku);
     }
 
-    private static Map<String, Object> counter(int usage, Integer quota) {
+    private static Map<String, Object> counter(int usage, Number quota) {
         Map<String, Object> counter = new LinkedHashMap<>();
         counter.put("usage", usage);
         counter.put("quota", quota);

@@ -114,11 +114,11 @@ class SearchCompatibilityTest {
     }
 
     @Test
-    @DisplayName("creating a name that is taken is a 409, and a missing index a 404")
-    void conflictsAndMissingIndexesAnswerTheirStatus() {
+    @DisplayName("creating a name that is taken is a 400, as on Azure, and a missing index a 404")
+    void takenNamesAndMissingIndexesAnswerTheirStatus() {
         client.createIndex(hotels("hotels-twice"));
 
-        assertEquals(409, assertThrows(HttpResponseException.class,
+        assertEquals(400, assertThrows(HttpResponseException.class,
                 () -> client.createIndex(hotels("hotels-twice"))).getResponse().getStatusCode());
         assertEquals(404, assertThrows(HttpResponseException.class,
                 () -> client.getIndex("hotels-missing")).getResponse().getStatusCode());
@@ -161,7 +161,11 @@ class SearchCompatibilityTest {
     @DisplayName("If-Match guards an update and a delete with the index's ETag")
     void theEtagGuardsAnUpdateAndADelete() {
         SearchIndex first = client.createIndex(hotels("hotels-etag"));
-        SearchIndex second = client.createOrUpdateIndexWithResponse(first, ifMatch(first.getETag())).getValue();
+        // An update that changes nothing keeps the ETag, as on Azure, so this one adds a field.
+        List<SearchField> more = new ArrayList<>(first.getFields());
+        more.add(new SearchField("stars", SearchFieldDataType.INT32).setFilterable(true));
+        SearchIndex changed = new SearchIndex("hotels-etag", more).setVectorSearch(first.getVectorSearch());
+        SearchIndex second = client.createOrUpdateIndexWithResponse(changed, ifMatch(first.getETag())).getValue();
         assertNotEquals(first.getETag(), second.getETag());
 
         assertEquals(412, assertThrows(HttpResponseException.class,

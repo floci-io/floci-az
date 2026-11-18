@@ -57,6 +57,9 @@ public final class ArmJson {
         }
     }
 
+    /** The message of the {@link InvalidBodyException} for a body that is the JSON literal {@code null}. */
+    public static final String NULL_BODY = "The request body is the JSON literal null.";
+
     /**
      * Parses the body strictly: an absent body yields an empty map, a malformed one
      * throws {@link InvalidBodyException} (real ARM answers {@code 400 InvalidRequestContent}).
@@ -81,7 +84,7 @@ public final class ArmJson {
         }
         if (parsed == null) {
             // The JSON literal null parses to no map at all, which is not an object either.
-            throw new InvalidBodyException(new IOException("The request body is the JSON literal null."));
+            throw new InvalidBodyException(new IOException(NULL_BODY));
         }
         return parsed;
     }

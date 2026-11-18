@@ -68,6 +68,11 @@ class SearchIndexesTest {
         return "{\"name\": \"" + name + "\", \"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true}]}";
     }
 
+    private static String described(String name, String description) {
+        return "{\"name\": \"" + name + "\", \"description\": \"" + description + "\","
+                + " \"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true}]}";
+    }
+
     private static String withFields(String name, String fields) {
         return "{\"name\": \"" + name + "\", \"fields\": [" + fields + "]}";
     }
@@ -102,8 +107,8 @@ class SearchIndexesTest {
     void creatingAnIndexAnswersItsDefinitionWithTheDefaultsFilledIn() {
         post(HOTELS).then().statusCode(201)
             .contentType(containsString("application/json"))
-            .header("Location", endsWith(BASE + "/indexes('hotels')"))
-            .header("ETag", matchesPattern("W/" + ETAG_PATTERN))
+            .header("Location", endsWith(BASE + "/indexes('hotels')" + API))
+            .header("ETag", matchesPattern(ETAG_PATTERN))
             .body("'@odata.context'", endsWith(BASE + "/$metadata#indexes/$entity"))
             .body("'@odata.etag'", matchesPattern(ETAG_PATTERN))
             .body("name", equalTo("hotels"))
@@ -118,6 +123,12 @@ class SearchIndexesTest {
             .body("fields[0].sortable", equalTo(true))
             .body("fields[0].facetable", equalTo(true))
             .body("fields[0].synonymMaps", empty())
+            // Azure answers every attribute of a simple field, null when unset, in this order.
+            .body("fields[0].keySet()", contains("name", "type", "searchable", "filterable", "retrievable", "stored",
+                    "sortable", "facetable", "key", "indexAnalyzer", "searchAnalyzer", "analyzer", "normalizer",
+                    "dimensions", "vectorSearchProfile", "vectorEncoding", "synonymMaps"))
+            .body("fields[0].analyzer", nullValue())
+            .body("fields[0].dimensions", nullValue())
             // What the client sent wins over a default.
             .body("fields[1].sortable", equalTo(false))
             .body("fields[1].analyzer", equalTo("en.lucene"))
@@ -131,7 +142,7 @@ class SearchIndexesTest {
             .body("fields[3].sortable", equalTo(false))
             .body("fields[4].facetable", equalTo(false))
             // A complex field has sub-fields and no attributes of its own.
-            .body("fields[5]", not(hasKey("searchable")))
+            .body("fields[5].keySet()", contains("name", "type", "fields"))
             .body("fields[5].fields.name", contains("street", "city"))
             .body("fields[5].fields[0].searchable", equalTo(true))
             .body("fields[5].fields[1].searchable", equalTo(false))
@@ -150,7 +161,11 @@ class SearchIndexesTest {
     @Test
     void aMinimalIndexAnswersTheSectionsItDidNotSend() {
         post(minimal("plain")).then().statusCode(201)
-            .body("$", not(hasKey("description")))
+            .body("keySet()", contains("@odata.context", "@odata.etag", "name", "description",
+                    "defaultScoringProfile", "fields", "scoringProfiles", "corsOptions", "suggesters", "analyzers",
+                    "normalizers", "tokenizers", "tokenFilters", "charFilters", "encryptionKey", "similarity",
+                    "semantic", "vectorSearch"))
+            .body("description", nullValue())
             .body("scoringProfiles", empty())
             .body("suggesters", empty())
             .body("analyzers", empty())
@@ -183,6 +198,31 @@ class SearchIndexesTest {
     }
 
     @Test
+    void theVectorSearchSectionAndCustomAnalyzersGetTheDefaultsAzureFillsIn() {
+        String body = "{\"name\": \"filled\", \"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true}],"
+                + " \"analyzers\": [{\"@odata.type\": \"#Microsoft.Azure.Search.CustomAnalyzer\", \"name\": \"a\","
+                + " \"tokenizer\": \"standard_v2\"}],"
+                + " \"vectorSearch\": {\"profiles\": [{\"name\": \"p\", \"algorithm\": \"h\"}],"
+                + " \"algorithms\": [{\"name\": \"h\", \"kind\": \"hnsw\", \"hnswParameters\": {\"metric\": \"dotProduct\"}},"
+                + " {\"name\": \"e\", \"kind\": \"exhaustiveKnn\"}]}}";
+        post(body).then().statusCode(201)
+            .body("analyzers[0].tokenFilters", empty())
+            .body("analyzers[0].charFilters", empty())
+            .body("vectorSearch.keySet()", contains("algorithms", "profiles", "vectorizers", "compressions"))
+            .body("vectorSearch.vectorizers", empty())
+            .body("vectorSearch.compressions", empty())
+            .body("vectorSearch.profiles[0]", hasKey("vectorizer"))
+            .body("vectorSearch.profiles[0].compression", nullValue())
+            // The metric that was sent stays; the rest are Azure's defaults.
+            .body("vectorSearch.algorithms[0].hnswParameters.metric", equalTo("dotProduct"))
+            .body("vectorSearch.algorithms[0].hnswParameters.m", equalTo(4))
+            .body("vectorSearch.algorithms[0].hnswParameters.efConstruction", equalTo(400))
+            .body("vectorSearch.algorithms[0].hnswParameters.efSearch", equalTo(500))
+            .body("vectorSearch.algorithms[0]", hasKey("exhaustiveKnnParameters"))
+            .body("vectorSearch.algorithms[1].exhaustiveKnnParameters.metric", equalTo("cosine"));
+    }
+
+    @Test
     void aPropertyOfANewerApiVersionComesBackAsItWasSent() {
         String body = "{\"name\": \"newer\", \"somethingNew\": {\"mode\": \"on\"},"
                 + " \"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true, \"fieldNew\": 7}]}";
@@ -202,7 +242,7 @@ class SearchIndexesTest {
             .body("name", equalTo("forms"))
             .body("'@odata.context'", endsWith(SERVICE + ".search.windows.net/$metadata#indexes/$entity"));
         get("missing").then().statusCode(404)
-            .body("error.code", equalTo("ResourceNotFound"))
+            .body("error.code", equalTo(""))
             .body("error.message", containsString("'missing'"));
     }
 
@@ -236,7 +276,7 @@ class SearchIndexesTest {
     @Test
     void aPutCreatesAnIndexAndThenUpdatesItUnderANewEtag() {
         String created = put("put-me", minimal("put-me")).then().statusCode(201)
-            .header("Location", endsWith("/indexes('put-me')"))
+            .header("Location", endsWith("/indexes('put-me')" + API))
             .extract().path("'@odata.etag'");
 
         String updated = put("put-me", "{\"name\": \"put-me\", \"description\": \"second\","
@@ -252,12 +292,24 @@ class SearchIndexesTest {
     }
 
     @Test
-    void creatingANameThatIsTakenIsAConflict() {
+    void creatingANameThatIsTakenIsABadRequestAsOnAzure() {
         post(minimal("taken")).then().statusCode(201);
 
-        post(minimal("taken")).then().statusCode(409)
+        post(minimal("taken")).then().statusCode(400)
             .body("error.code", equalTo("ResourceNameAlreadyInUse"))
-            .body("error.message", containsString("'taken'"));
+            .body("error.message", equalTo("Cannot create index 'taken' because it already exists."))
+            .body("error.details[0].code", equalTo("CannotCreateExistingIndex"));
+    }
+
+    @Test
+    void anUpdateThatChangesNothingKeepsTheEtagAndAnswersWithoutOne() {
+        String etag = post(minimal("same")).then().statusCode(201).extract().path("'@odata.etag'");
+
+        put("same", minimal("same")).then().statusCode(200)
+            .header("ETag", nullValue())
+            .body("$", not(hasKey("@odata.etag")))
+            .body("name", equalTo("same"));
+        get("same").then().statusCode(200).body("'@odata.etag'", equalTo(etag));
     }
 
     @Test
@@ -267,7 +319,7 @@ class SearchIndexesTest {
         // If-None-Match: * creates only.
         given().contentType("application/json").header("If-None-Match", "*").body(minimal("guarded"))
             .when().put(BASE + "/indexes('guarded')" + API)
-            .then().statusCode(412).body("error.code", equalTo("PreconditionFailed"));
+            .then().statusCode(412).body("error.code", equalTo(""));
         // If-Match: * updates only.
         given().contentType("application/json").header("If-Match", "*").body(minimal("absent"))
             .when().put(BASE + "/indexes('absent')" + API)
@@ -277,19 +329,19 @@ class SearchIndexesTest {
             .then().statusCode(412);
 
         // The stored tag passes as the body carries it, quoted, and the write replaces it.
-        String next = given().contentType("application/json").header("If-Match", etag).body(minimal("guarded"))
-            .when().put(BASE + "/indexes('guarded')" + API)
+        String next = given().contentType("application/json").header("If-Match", etag)
+            .body(described("guarded", "second")).when().put(BASE + "/indexes('guarded')" + API)
             .then().statusCode(200).extract().path("'@odata.etag'");
         assertNotEquals(etag, next);
-        given().contentType("application/json").header("If-Match", etag).body(minimal("guarded"))
+        given().contentType("application/json").header("If-Match", etag).body(described("guarded", "third"))
             .when().put(BASE + "/indexes('guarded')" + API)
             .then().statusCode(412);
         // A weak or a bare tag names the same version.
         String third = given().contentType("application/json").header("If-Match", "W/" + next)
-            .body(minimal("guarded")).when().put(BASE + "/indexes('guarded')" + API)
+            .body(described("guarded", "third")).when().put(BASE + "/indexes('guarded')" + API)
             .then().statusCode(200).extract().path("'@odata.etag'");
         given().contentType("application/json").header("If-Match", third.substring(1, third.length() - 1))
-            .body(minimal("guarded")).when().put(BASE + "/indexes('guarded')" + API)
+            .body(described("guarded", "fourth")).when().put(BASE + "/indexes('guarded')" + API)
             .then().statusCode(200);
     }
 
@@ -303,8 +355,14 @@ class SearchIndexesTest {
         given().header("If-Match", etag).when().delete(BASE + "/indexes('doomed')" + API)
             .then().statusCode(204);
         given().when().delete(BASE + "/indexes('doomed')" + API).then().statusCode(404)
-            .body("error.code", equalTo("ResourceNotFound"));
+            .body("error.code", equalTo("OperationNotAllowed"))
+            .body("error.message", equalTo("No index with the name 'doomed' was found in a service named '"
+                    + SERVICE + "'."))
+            .body("error.details[0].code", equalTo("IndexNotFoundInService"));
         get("doomed").then().statusCode(404);
+        // No missing index meets an If-Match, not even *: Azure answers 412 rather than 404.
+        given().header("If-Match", "*").when().delete(BASE + "/indexes('doomed')" + API).then().statusCode(412);
+        given().header("If-Match", etag).when().delete(BASE + "/indexes('doomed')" + API).then().statusCode(412);
     }
 
     @Test
@@ -369,7 +427,7 @@ class SearchIndexesTest {
             withVectorProfile("unstoredretrievable", vector(", \"stored\": false, \"retrievable\": true")),
         };
         for (String body : refused) {
-            post(body).then().statusCode(400).body("error.code", equalTo("InvalidRequestParameter"));
+            post(body).then().statusCode(400).body("error.code", equalTo("OperationNotAllowed"));
         }
         given().when().get(BASE + "/indexes" + API).then().statusCode(200).body("value", empty());
     }
@@ -384,8 +442,8 @@ class SearchIndexesTest {
             "{\"name\": \"xx\", \"fields\": [" + key + "], \"scoringProfiles\": {}}",
             "{\"name\": \"xx\", \"fields\": [" + key + "], \"vectorSearch\": []}",
             "{\"name\": \"xx\", \"fields\": [" + key + "], \"description\": 5}",
-            withFields("xx", "{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": \"true\"}"),
-            withFields("xx", key + ", {\"name\": \"f\", \"type\": \"Edm.String\", \"searchable\": \"false\"}"),
+            withFields("xx", "{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": \"yes\"}"),
+            withFields("xx", key + ", {\"name\": \"f\", \"type\": \"Edm.String\", \"searchable\": 1}"),
             withFields("xx", key + ", {\"name\": \"f\", \"type\": \"Edm.String\", \"analyzer\": 5}"),
             withFields("xx", key + ", {\"name\": \"f\", \"type\": \"Edm.String\", \"fields\": \"none\"}"),
             withFields("xx", key + ", {\"name\": \"f\", \"type\": \"Edm.String\", \"synonymMaps\": \"map\"}"),
@@ -395,8 +453,25 @@ class SearchIndexesTest {
             "{not json",
         };
         for (String body : refused) {
-            post(body).then().statusCode(400).body("error.code", equalTo("InvalidRequestParameter"));
+            // Azure refuses what its reader cannot read with no code.
+            post(body).then().statusCode(400).body("error.code", equalTo(""));
         }
+        post(withFields("xx", key + ", {\"name\": \"f\", \"type\": \"Edm.String\", \"synonymMaps\": [3]}"))
+            .then().statusCode(400)
+            .body("error.message", equalTo("The request is invalid. Details: Cannot convert the literal '3' to the"
+                    + " expected type 'Edm.String'."));
+        post("null").then().statusCode(400)
+            .body("error.message", equalTo("The request is invalid. Details: An unexpected 'PrimitiveValue' node"
+                    + " was found when reading from the JSON reader. A 'StartObject' node was expected."));
+    }
+
+    @Test
+    void aBooleanWrittenAsAStringIsReadAsAzureReadsIt() {
+        post(withFields("strings", "{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": \"true\"},"
+                + " {\"name\": \"f\", \"type\": \"Edm.String\", \"searchable\": \"false\"}"))
+            .then().statusCode(201)
+            .body("fields[0].key", equalTo(true))
+            .body("fields[1].searchable", equalTo(false));
     }
 
     @Test
@@ -406,7 +481,11 @@ class SearchIndexesTest {
         put("kept", withFields("kept", "{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true,"
                 + " \"synonymMaps\": [3]}"))
             .then().statusCode(400);
-        put("kept", "null").then().statusCode(400).body("error.code", equalTo("InvalidRequestParameter"));
+        put("kept", "null").then().statusCode(400).body("error.code", equalTo(""));
+        put("kept", minimal("other")).then().statusCode(400)
+            .body("error.code", equalTo("400"))
+            .body("error.message", equalTo("The index name 'other' in the request payload does not match the name"
+                    + " 'kept' in the request URL."));
 
         get("kept").then().statusCode(200)
             .body("'@odata.etag'", equalTo(etag))
@@ -437,8 +516,10 @@ class SearchIndexesTest {
             .then().statusCode(200);
         String withAnalyzer = index.formatted(", {\"name\": \"title\", \"type\": \"Edm.String\"}", analyzer);
         put("analysed", withAnalyzer).then().statusCode(400)
-            .body("error.code", equalTo("OperationNotAllowed"))
-            .body("error.message", containsString("allowIndexDowntime"));
+            .body("error.code", equalTo(""))
+            .body("error.message", startsWith("An index with the name 'analysed' in service '" + SERVICE
+                    + "' could not be updated. Index update not allowed because it would cause downtime."))
+            .body("error.message", containsString("set the 'allowIndexDowntime' query parameter to 'true'"));
         given().contentType("application/json").body(withAnalyzer)
             .when().put(path + "&allowIndexDowntime=false").then().statusCode(400);
         given().contentType("application/json").body(withAnalyzer)
@@ -495,7 +576,7 @@ class SearchIndexesTest {
     }
 
     @Test
-    void anUpdateKeepsTheSimilarityAndEncryptionKeyItLeavesOutAndCannotChangeTheSimilarity() {
+    void anUpdateKeepsTheSimilarityAndEncryptionKeyItLeavesOutAndChangesTheSimilarityOnlyWithDowntime() {
         String encryptionKey = "\"encryptionKey\": {\"keyVaultKeyName\": \"k\", \"keyVaultKeyVersion\": \"%s\","
                 + " \"keyVaultUri\": \"https://kv.vault.azure.net\"}";
         String similarity = "\"similarity\": {\"@odata.type\": \"#Microsoft.Azure.Search.BM25Similarity\","
@@ -515,12 +596,36 @@ class SearchIndexesTest {
             .then().statusCode(200)
             .body("encryptionKey.keyVaultKeyVersion", equalTo("2"));
 
-        put("tuned", index.formatted(", " + similarity.formatted("2"))).then().statusCode(400)
-            .body("error.code", equalTo("OperationNotAllowed"));
-        put("tuned", index.formatted(", \"similarity\": {\"@odata.type\":"
-                + " \"#Microsoft.Azure.Search.ClassicSimilarity\"}")).then().statusCode(400)
-            .body("error.code", equalTo("OperationNotAllowed"));
+        // Its parameters change only with allowIndexDowntime=true, as on Azure; its algorithm never does.
+        put("tuned", index.formatted(", " + similarity.formatted("1.8"))).then().statusCode(400)
+            .body("error.code", equalTo(""))
+            .body("error.message", containsString("or modify its similarity settings"));
         get("tuned").then().body("similarity.k1", equalTo(1.5f));
+        given().contentType("application/json").body(index.formatted(", " + similarity.formatted("1.8")))
+            .when().put(BASE + "/indexes('tuned')" + API + "&allowIndexDowntime=true").then().statusCode(200)
+            .body("similarity.k1", equalTo(1.8f));
+        given().contentType("application/json").body(index.formatted(", \"similarity\": {\"@odata.type\":"
+                + " \"#Microsoft.Azure.Search.ClassicSimilarity\"}"))
+            .when().put(BASE + "/indexes('tuned')" + API + "&allowIndexDowntime=true").then().statusCode(400)
+            .body("error.code", equalTo(""))
+            .body("error.message", equalTo("Similarity type cannot be changed on existing indexes."));
+        get("tuned").then().body("similarity.k1", equalTo(1.8f));
+    }
+
+    @Test
+    void theVectorSearchProfileOfAnExistingFieldCannotChange() {
+        String profiles = ", \"vectorSearch\": {\"profiles\": [{\"name\": \"p\", \"algorithm\": \"a\"},"
+                + " {\"name\": \"p2\", \"algorithm\": \"a\"}], \"algorithms\": [{\"name\": \"a\", \"kind\": \"hnsw\"}]}}";
+        String index = "{\"name\": \"profiled\", \"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\","
+                + " \"key\": true}, {\"name\": \"v\", \"type\": \"Collection(Edm.Single)\", \"dimensions\": 4,"
+                + " \"vectorSearchProfile\": \"%s\"}]" + profiles;
+        post(index.formatted("p")).then().statusCode(201);
+
+        put("profiled", index.formatted("p2")).then().statusCode(400)
+            .body("error.code", equalTo("OperationNotAllowed"))
+            .body("error.message", equalTo("Existing field 'v' cannot be changed."))
+            .body("error.details[0].code", equalTo("CannotChangeExistingField"));
+        get("profiled").then().body("fields[1].vectorSearchProfile", equalTo("p"));
     }
 
     @Test
@@ -531,7 +636,7 @@ class SearchIndexesTest {
                 + " \"type\": \"Collection(Edm.Single)\", \"dimensions\": 4, \"vectorSearchProfile\": \"p\","
                 + " \"stored\": false}"))
             .then().statusCode(400)
-            .body("error.code", equalTo("InvalidRequestParameter"))
+            .body("error.code", equalTo("OperationNotAllowed"))
             .body("error.message", containsString("'w'"));
         get("later").then().body("fields.name", contains("id", "v"));
     }
@@ -589,8 +694,12 @@ class SearchIndexesTest {
         for (String body : refused) {
             put("grow", body).then().statusCode(400)
                 .body("error.code", equalTo("OperationNotAllowed"))
-                .body("error.message", startsWith("Existing field(s) '"));
+                .body("error.message", matchesPattern("Existing field(\\(s\\))? '.+' cannot be (deleted|changed)\\."))
+                .body("error.details[0].code", matchesPattern("Cannot(Delete|Change)ExistingField"));
         }
+        // Azure's words, recorded.
+        put("grow", refused[0]).then().body("error.message", equalTo("Existing field(s) 'rating' cannot be deleted."));
+        put("grow", refused[1]).then().body("error.message", equalTo("Existing field 'title' cannot be changed."));
         get("grow").then().statusCode(200).body("fields[1].retrievable", equalTo(false));
     }
 
@@ -599,6 +708,8 @@ class SearchIndexesTest {
         post(minimal("counted")).then().statusCode(201);
 
         given().when().get(BASE + "/indexes('counted')/search.stats" + API).then().statusCode(200)
+            .body("'@odata.context'", endsWith(BASE
+                    + "/$metadata#Microsoft.Azure.Search.V2025_09_01.IndexStatistics"))
             .body("documentCount", equalTo(0))
             .body("storageSize", equalTo(0))
             .body("vectorIndexSize", equalTo(0));
@@ -606,14 +717,14 @@ class SearchIndexesTest {
 
         // A service ARM never declared reports as a standard one.
         given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
+            .body("'@odata.context'", endsWith(BASE
+                    + "/$metadata#Microsoft.Azure.Search.V2025_09_01.ServiceStatistics"))
+            .body("counters.keySet()", contains("documentCount", "indexesCount", "indexersCount",
+                    "dataSourcesCount", "storageSize", "synonymMaps", "skillsetCount", "vectorIndexSize"))
             .body("counters.indexesCount.usage", equalTo(1))
             .body("counters.indexesCount.quota", equalTo(50))
             .body("counters.documentCount.usage", equalTo(0))
             .body("counters.documentCount.quota", nullValue())
-            // Required from 2026-04-01 and 2026-05-01-preview on, so they are answered on every api-version.
-            .body("counters.aliasesCount.usage", equalTo(0))
-            .body("counters.knowledgeBasesCount.usage", equalTo(0))
-            .body("counters.knowledgeSourcesCount.usage", equalTo(0))
             .body("counters", hasKey("indexersCount"))
             .body("counters", hasKey("dataSourcesCount"))
             .body("counters", hasKey("storageSize"))
@@ -624,6 +735,42 @@ class SearchIndexesTest {
             .body("limits.maxFieldNestingDepthPerIndex", equalTo(10))
             .body("limits.maxComplexCollectionFieldsPerIndex", equalTo(40))
             .body("limits.maxComplexObjectsInCollectionsPerDocument", equalTo(3000));
+    }
+
+    @Test
+    void theServiceCountersAreThoseOfTheApiVersion() {
+        // aliasesCount is in the previews from 2021-04-30 and stable from 2026-04-01; the knowledge counters
+        // from 2026-05-01-preview, and in a stable version newer than any in the specs.
+        given().when().get(BASE + "/servicestats?api-version=2026-04-01").then().statusCode(200)
+            .body("counters", hasKey("aliasesCount"))
+            .body("counters", not(hasKey("knowledgeBasesCount")))
+            .body("'@odata.context'", endsWith("Microsoft.Azure.Search.V2026_04_01.ServiceStatistics"));
+        given().when().get(BASE + "/servicestats?api-version=2025-11-01-preview").then().statusCode(200)
+            .body("counters", hasKey("aliasesCount"))
+            .body("counters", not(hasKey("knowledgeSourcesCount")))
+            .body("'@odata.context'", endsWith("Microsoft.Azure.Search.V2025_11_01_Preview.ServiceStatistics"));
+        given().when().get(BASE + "/servicestats?api-version=2026-05-01-preview").then().statusCode(200)
+            .body("counters", hasKey("knowledgeBasesCount"))
+            .body("counters", hasKey("knowledgeSourcesCount"));
+        given().when().get(BASE + "/servicestats?api-version=2026-10-01").then().statusCode(200)
+            .body("counters", hasKey("aliasesCount"))
+            .body("counters", hasKey("knowledgeBasesCount"));
+    }
+
+    @Test
+    void aFreeServiceReportsTheQuotasOfARealOne() {
+        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"free\"}}")
+            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
+        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
+            .body("counters.indexesCount.quota", equalTo(3))
+            .body("counters.indexersCount.quota", equalTo(3))
+            .body("counters.dataSourcesCount.quota", equalTo(3))
+            .body("counters.synonymMaps.quota", equalTo(3))
+            .body("counters.skillsetCount.quota", equalTo(3))
+            .body("counters.storageSize.quota", equalTo(52428800))
+            .body("counters.documentCount.quota", nullValue())
+            .body("counters.vectorIndexSize.quota", nullValue())
+            .body("limits.maxStoragePerIndex", equalTo(52428800));
     }
 
     @Test
