@@ -119,8 +119,10 @@ class ApiManagementResourceStoreTest {
         assertTrue(backend.keys().contains(service("Sub-Store", "RG-Store", "Apim3").toLowerCase()));
         assertEquals(1, backend.keys().size());
 
+        // The delete leaves the soft-deleted record, keyed by its own id, and nothing else.
         given().when().delete(service("Sub-Store", "RG-Store", "Apim3") + API).then().statusCode(200);
-        assertTrue(backend.keys().isEmpty());
+        assertEquals(Set.of("/subscriptions/sub-store/providers/microsoft.apimanagement/locations/eastus"
+            + "/deletedservices/apim3"), Set.copyOf(backend.keys()));
     }
 
     @ParameterizedTest

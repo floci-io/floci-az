@@ -50,6 +50,25 @@ The policy engine intentionally supports a focused subset:
 - `<return-response>` with nested `<set-status code="...">` and `<set-body>`
 - Named-value interpolation with `{{name}}` in supported policy values
 
+## Deleted services
+
+A deleted service is soft-deleted, as in Azure, whether it is deleted on its own or with its resource group (when
+`parity-overrides.resource-group-delete` makes the group delete cascade). It stays recoverable for 48 hours, with its
+APIs, operations, policies, products, subscriptions, named values and backends:
+
+- `GET /subscriptions/{sub}/providers/Microsoft.ApiManagement/deletedservices` lists the deleted services.
+- `GET .../locations/{location}/deletedservices/{name}` answers one, with `serviceId`, `deletionDate` and
+  `scheduledPurgeDate`; `404` when there is none.
+- `DELETE` on the same path purges it and its child resources. It answers `200` at once, and `204` when there is
+  nothing to purge; Azure answers `202` and completes the purge later.
+- A create with `properties.restore: true` brings the service back as it was deleted, with its child resources; the
+  other properties of the request are ignored, as the spec says.
+- A plain create over a deleted name is not refused: the deleted service and its child resources go, and a new service
+  is created.
+
+While a service is soft-deleted, its child resources answer `404`. `azd down --purge` and the azurerm provider (with
+`purge_soft_delete_on_destroy`, on by default) purge the deleted service after deleting it.
+
 ## Service names
 
 A service name is a global DNS name (`{name}.azure-api.net`, `azure-api.us` in Azure US Government, `azure-api.cn` in

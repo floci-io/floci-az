@@ -3,6 +3,7 @@ package io.floci.az.services.monitor;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.time.Instant;
 import java.util.Map;
 
 /** The ARM resources {@link MonitorHandler} keeps. */
@@ -26,5 +27,17 @@ public final class MonitorModels {
         public String property(String key) {
             return properties != null && properties.get(key) instanceof String text ? text : null;
         }
+    }
+
+    /**
+     * A workspace deleted without {@code force}: recoverable by a PUT on its id until the retention ends.
+     *
+     * @param id        the record's key, the workspace id with {@code deletedWorkspaces} for {@code workspaces}, so
+     *                  it shares the {@code monitor} backend without being listed as a workspace
+     * @param deletedAt when the workspace was deleted
+     * @param workspace the workspace as it was, which {@code DeletedWorkspaces_List} answers with
+     */
+    @RegisterForReflection
+    public record DeletedWorkspace(String id, Instant deletedAt, MonitorResource workspace) {
     }
 }

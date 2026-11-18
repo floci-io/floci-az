@@ -249,6 +249,7 @@ jobs:
             min_tests: 8
             emulator_env: >-
               -e FLOCI_AZ_TLS_PUBLIC_HOSTS=true
+              -e FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE=true
 
     steps:
       - name: Download native floci-az image

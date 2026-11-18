@@ -218,8 +218,12 @@ restarts in `persistent`/`hybrid`/`wal` modes.
 
 ## Notes & limitations
 
-- **Workspaces are not soft-deleted.** A delete removes the workspace outright, so it cannot be recovered and
-  `deletedWorkspaces` always lists nothing. Real Azure keeps a deleted workspace recoverable for a period.
+- **Deleted workspaces are kept for 14 days.** A workspace deleted without `force=true`, or with its resource group
+  when `parity-overrides.resource-group-delete` makes the group delete cascade, is listed by `deletedWorkspaces` (at
+  subscription and resource-group scope) and no longer answers queries or ingestion. A `PUT` on the same id recovers
+  it with the same `customerId`, so its shared keys and its ingested records come back. `force=true` removes the
+  workspace and frees its name, which is what `azd down --purge` sends. A workspace of the same name in another
+  location of the group is not refused while the deleted one is kept.
 - **KQL is a subset.** `summarize`, `extend`, `join`, `order by`, `parse`, scalar functions, and
   aggregations are not implemented: only `where` / `project` / `take` / `limit` plus `timespan`
   filtering.

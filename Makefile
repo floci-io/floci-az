@@ -80,8 +80,10 @@ JAVA_EMULATOR_ENV = $(JAVA_SERVICEBUS_EMULATOR_ENV) \
 # it must still reach its own brokers over the container network. Only the messaging tests run against it.
 JAVA_PUBLISHED_EMULATOR_ENV = $(JAVA_EMULATOR_ENV) \
 	-e FLOCI_AZ_DOCKER_ENDPOINT_MODE=published
-# azd cannot be pointed at a custom cloud, so its emulator answers for Azure's own hosts.
-AZD_EMULATOR_ENV = -e FLOCI_AZ_TLS_PUBLIC_HOSTS=true
+# azd cannot be pointed at a custom cloud, so its emulator answers for Azure's own hosts. azd down deletes the
+# resource group and then purges what Azure soft-deleted with it, so the group delete cascades.
+AZD_EMULATOR_ENV = -e FLOCI_AZ_TLS_PUBLIC_HOSTS=true \
+	-e FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE=true
 # test_redis.py checks the cache's SSL port against floci-az's CA, so the python emulator serves Redis TLS.
 REDIS_TLS_EMULATOR_ENV = -e FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true
 PYTHON_EMULATOR_ENV = $(SERVICEBUS_EMULATOR_ENV) $(REDIS_TLS_EMULATOR_ENV)

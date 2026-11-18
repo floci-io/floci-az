@@ -47,9 +47,31 @@ deployment_named() {
     assert_output --partial "no changes"
 }
 
+# One value of the selected environment, as azd env get-values prints it.
+env_value() {
+    azd env get-values | sed -n "s/^$1=\"\\(.*\\)\"$/\\1/p"
+}
+
+@test "azd provision (bicep): also deploys a Log Analytics workspace and an API Management service" {
+    workspace="$(env_value LOG_WORKSPACE)"
+    apim="$(env_value APIM_SERVICE)"
+    [[ -n "${workspace}" && -n "${apim}" ]]
+    [[ "$(arm_status "subscriptions/${SUB_ID}/resourceGroups/${GROUP}/providers/Microsoft.OperationalInsights/workspaces/${workspace}?api-version=2022-10-01")" == "200" ]]
+    [[ "$(arm_status "subscriptions/${SUB_ID}/resourceGroups/${GROUP}/providers/Microsoft.ApiManagement/service/${apim}?api-version=2022-08-01")" == "200" ]]
+}
+
 @test "azd down --purge: deletes the group and records the void deployment" {
+    workspace="$(env_value LOG_WORKSPACE)"
+    apim="$(env_value APIM_SERVICE)"
     run azd down --force --purge --no-prompt
     assert_success
+    # The workspace was force-deleted and the API Management service purged, so neither is left soft-deleted.
+    run bash -c "curl -sS -H 'Authorization: Bearer $(arm_token)' \
+        'https://management.azure.com/subscriptions/${SUB_ID}/providers/Microsoft.OperationalInsights/deletedWorkspaces?api-version=2022-10-01' \
+        | jq -r '.value[].name'"
+    assert_success
+    refute_output --partial "${workspace}"
+    [[ "$(arm_status "subscriptions/${SUB_ID}/providers/Microsoft.ApiManagement/locations/${LOCATION}/deletedservices/${apim}?api-version=2022-08-01")" == "404" ]]
     [[ "$(arm_status "subscriptions/${SUB_ID}/resourceGroups/${GROUP}?api-version=2021-04-01")" == "404" ]]
     # azd records the teardown as an empty deployment tagged azd-deploy-reason=down.
     deployments="$(arm_get "subscriptions/${SUB_ID}/providers/Microsoft.Resources/deployments?api-version=2021-04-01")"
@@ -57,4 +79,37 @@ deployment_named() {
         | length > 0 and all(.properties.provisioningState == "Succeeded"
             and ((.properties.outputResources // []) | length == 0))' <<<"${deployments}"
     assert_success
+}
+
+@test "azd down without --purge: leaves the workspace and the API Management service soft-deleted" {
+    new_project bicep keep
+    run azd provision --no-prompt
+    assert_success
+    workspace="$(env_value LOG_WORKSPACE)"
+    apim="$(env_value APIM_SERVICE)"
+
+    run azd down --force --no-prompt
+    assert_success
+
+    deleted="subscriptions/${SUB_ID}/resourceGroups/rg-keep/providers/Microsoft.OperationalInsights/workspaces/${workspace}"
+    run bash -c "curl -sS -H 'Authorization: Bearer $(arm_token)' \
+        'https://management.azure.com/subscriptions/${SUB_ID}/providers/Microsoft.OperationalInsights/deletedWorkspaces?api-version=2022-10-01' \
+        | jq -r '.value[].name'"
+    assert_success
+    assert_output --partial "${workspace}"
+    apim_deleted="subscriptions/${SUB_ID}/providers/Microsoft.ApiManagement/locations/${LOCATION}/deletedservices/${apim}?api-version=2022-08-01"
+    [[ "$(arm_status "${apim_deleted}")" == "200" ]]
+
+    # Clean up as a user would: purge the service, and recover the workspace to force-delete it.
+    [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $(arm_token)" \
+        "https://management.azure.com/${apim_deleted}")" == "200" ]]
+    [[ "$(arm_status "${apim_deleted}")" == "404" ]]
+    [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $(arm_token)" \
+        -H 'Content-Type: application/json' -d "{\"location\":\"${LOCATION}\"}" \
+        "https://management.azure.com/subscriptions/${SUB_ID}/resourceGroups/rg-keep?api-version=2021-04-01")" =~ ^20[01]$ ]]
+    [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $(arm_token)" \
+        -H 'Content-Type: application/json' -d "{\"location\":\"${LOCATION}\"}" \
+        "https://management.azure.com/${deleted}?api-version=2022-10-01")" =~ ^20[01]$ ]]
+    [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $(arm_token)" \
+        "https://management.azure.com/${deleted}?api-version=2022-10-01&force=true")" == "200" ]]
 }

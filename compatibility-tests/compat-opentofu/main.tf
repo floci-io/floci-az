@@ -663,6 +663,17 @@ resource "azurerm_search_service" "search" {
   sku                 = "basic"
 }
 
+# azurerm purges the soft-deleted service on destroy (purge_soft_delete_on_destroy defaults to true), so the destroy
+# test below goes through DeletedServices_GetByName and DeletedServices_Purge. Consumption skips the portal settings.
+resource "azurerm_api_management" "apim" {
+  name                = "floci-test-apim"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  publisher_name      = "floci-az"
+  publisher_email     = "iac@example.com"
+  sku_name            = "Consumption_0"
+}
+
 output "search_service_id" {
   value = azurerm_search_service.search.id
 }
