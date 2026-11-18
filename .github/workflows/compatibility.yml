@@ -194,6 +194,7 @@ jobs:
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5
               -e FLOCI_AZ_SERVICES_AKS_MOCKED=true
+              -e FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED=false
             extra_env: >-
               --add-host devstoreaccount1.dfs.core.windows.net:127.0.0.1
               -e FLOCI_AZ_ABFS_LOOPBACK=true
@@ -209,6 +210,7 @@ jobs:
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5
               -e FLOCI_AZ_SERVICES_AKS_MOCKED=true
+              -e FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED=false
               -e FLOCI_AZ_DOCKER_ENDPOINT_MODE=published
             extra_env: >-
               --add-host devstoreaccount1.dfs.core.windows.net:127.0.0.1

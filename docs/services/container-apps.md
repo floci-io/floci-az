@@ -11,6 +11,7 @@ Real mode runs each active revision replica as Docker containers. Mocked mode ke
 - Versioned templates with Single and Multiple active revision modes
 - Revision list, get, activate, deactivate, and restart
 - Container commands, arguments, environment variables, and secret references
+- Key Vault reference secrets (`keyVaultUrl`, with an optional secret version): resolved from floci-az's own Key Vault when a revision starts, so a rotated secret reaches the next revision. The `identity` is accepted and not checked
 - External and internal HTTP ingress forwarded to running revision containers
 - Weighted revision traffic and round-robin replica selection with unhealthy replica failover
 - `minReplicas` and `maxReplicas` validation; local replicas start at `minReplicas`
