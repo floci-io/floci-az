@@ -51,6 +51,11 @@ against it yet.
 - **Paging** with `options.$top` (1 to 1000, default 1000), `options.$skip` and the opaque
   `options.$skipToken` the previous page returned; `totalRecords`, `count`, `resultTruncated` and
   `$skipToken` in the response, as the service answers them.
+- **Result formats**: `objectArray` (the default) and `table`, whose `columns` are named even when the
+  result has no rows: from the table's published columns, followed through the query's operators
+  (`resources | where name == 'x'` names all of them). Only a result whose columns depend on the data
+  (after a `union`, or an `arg_max(x, *)`) and that has no rows answers the names its last `project` or
+  `summarize` gives, or none.
 - **Scoping** with the request's `subscriptions` list; `managementGroups` is accepted and ignored.
 - **Management groups** in `resourcecontainers` (`microsoft.management/managementgroups`, with their parent
   and ancestors under `properties.details`) and each subscription's `properties.managementGroupAncestorsChain`,

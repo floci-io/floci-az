@@ -286,6 +286,25 @@ class ResourceGraphTest {
                 .then().statusCode(200)
                 .body("data.columns.name", equalTo(List.of("name", "type")))
                 .body("data.rows", hasSize(0));
+        // So does a result with no rows and no projection: the table's published columns, through the operators.
+        given().contentType("application/json")
+                .body("{\"query\": \"resources | where name == 'nothing'\", \"options\": {\"resultFormat\": \"table\"}}")
+                .when().post(GRAPH)
+                .then().statusCode(200)
+                .body("data.columns.name", equalTo(List.of("id", "name", "type", "tenantId", "kind", "location",
+                        "resourceGroup", "subscriptionId", "managedBy", "sku", "plan", "properties", "tags", "identity",
+                        "zones", "extendedLocation", "systemData")))
+                .body("data.rows", hasSize(0))
+                .body("count", equalTo(0));
+        given().contentType("application/json")
+                .body("{\"query\": \"authorizationresources | project-away systemData | extend role = properties.roleName | take 5\","
+                        + " \"options\": {\"resultFormat\": \"table\"}}")
+                .when().post(GRAPH)
+                .then().statusCode(200)
+                .body("data.columns.name", hasSize(17))
+                .body("data.columns.name[15]", equalTo("extendedLocation"))
+                .body("data.columns.name[16]", equalTo("role"))
+                .body("data.rows", hasSize(0));
         // Names are checked against the published schema even when a table is empty.
         query("authorizationresources | project misspelledColumn")
                 .statusCode(400).body("error.details[1].code", equalTo("SemanticError"));
