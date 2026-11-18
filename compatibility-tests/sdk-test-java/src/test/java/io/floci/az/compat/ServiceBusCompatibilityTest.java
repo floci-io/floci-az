@@ -5,6 +5,9 @@ import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 import com.azure.messaging.servicebus.ServiceBusReceiverClient;
 import com.azure.messaging.servicebus.ServiceBusSenderClient;
 import com.azure.messaging.servicebus.ServiceBusSessionReceiverClient;
+import com.azure.messaging.servicebus.administration.ServiceBusAdministrationClient;
+import com.azure.messaging.servicebus.administration.models.CreateQueueOptions;
+import com.azure.messaging.servicebus.administration.models.QueueProperties;
 import com.azure.messaging.servicebus.models.AbandonOptions;
 import com.azure.messaging.servicebus.models.DeadLetterOptions;
 import com.azure.messaging.servicebus.models.ServiceBusReceiveMode;
@@ -493,6 +496,37 @@ class ServiceBusCompatibilityTest {
             assertEquals("The message expired and was dead lettered.",
                     expired.getDeadLetterErrorDescription());
             deadLetters.complete(expired);
+        }
+    }
+
+    @Test
+    @DisplayName("administration client updateQueue applies MaxDeliveryCount and LockDuration")
+    void administrationClientUpdateQueueAppliesDeliverySettings() throws Exception {
+        String queue = uniqueName("update");
+        ServiceBusAdministrationClient admin = EmulatorConfig.serviceBusAdministrationClient();
+        admin.createQueue(queue, new CreateQueueOptions()
+                .setMaxDeliveryCount(3)
+                .setLockDuration(Duration.ofSeconds(30)));
+
+        QueueProperties properties = admin.getQueue(queue)
+                .setMaxDeliveryCount(7)
+                .setLockDuration(Duration.ofSeconds(50));
+        QueueProperties updated = admin.updateQueue(properties);
+        assertEquals(7, updated.getMaxDeliveryCount());
+        assertEquals(Duration.ofSeconds(50), updated.getLockDuration());
+
+        QueueProperties fetched = admin.getQueue(queue);
+        assertEquals(7, fetched.getMaxDeliveryCount());
+        assertEquals(Duration.ofSeconds(50), fetched.getLockDuration());
+
+        // The broker must lock new deliveries for the updated duration, not the original 30s.
+        send(queue, "locked-after-update");
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage message = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElseThrow();
+            long lockSeconds = Duration.between(OffsetDateTime.now(), message.getLockedUntil()).toSeconds();
+            assertTrue(lockSeconds > 40, "lock should follow the updated 50s duration, was " + lockSeconds + "s");
+            receiver.complete(message);
         }
     }
 
