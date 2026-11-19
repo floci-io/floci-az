@@ -249,6 +249,7 @@
                                         org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java,
                                         org/apache/activemq/artemis/protocol/amqp/broker/AMQPLargeMessage.java,
                                         org/apache/activemq/artemis/protocol/amqp/broker/AMQPStandardMessage.java,
+                                        org/apache/activemq/artemis/protocol/amqp/proton/AMQPSessionContext.java,
                                         org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java,
                                         org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java,
                                         org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java,
@@ -278,6 +279,13 @@
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
                                     token="controller.close(condition);&#10;            try {&#10;               if (brokerConsumer != null) {&#10;                  sessionSPI.closeSender(brokerConsumer);"
                                     value="controller.close(condition);&#10;            try {&#10;               if (brokerConsumer != null) {&#10;                  ServiceBusSessionSupport.closeSender(sessionSPI, brokerConsumer, condition);"
+                                    failOnNoReplacements="true" />
+                                <!-- Accept-next-session waits for a session (ServiceBusSessionAcceptSupport):
+                                     while it waits, the attach is left unanswered instead of refused. -->
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/AMQPSessionContext.java"
+                                    token="} catch (ActiveMQAMQPException e) {&#10;         senders.remove(sender);"
+                                    value="} catch (ActiveMQAMQPException e) {&#10;         if (ServiceBusSessionAcceptSupport.isPending(e)) {&#10;            return null;&#10;         }&#10;         senders.remove(sender);"
                                     failOnNoReplacements="true" />
                                 <!-- Artemis re-encodes a message whenever the broker changes it (ingress
                                      timestamp, expiry, diverts, dead-lettering) and writes its routing

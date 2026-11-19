@@ -132,6 +132,15 @@ receiver, or a session processor. The broker translates Azure's AMQP session fil
 Artemis `JMSXGroupID` selector, which keeps each session on one receiver and preserves FIFO order
 within that session. Attach responses include Azure's `com.microsoft:locked-until-utc` property.
 
+When no unlocked session has messages, an accept-next-session receiver (and so a session processor)
+waits, as on Service Bus: the broker holds the link attach until a message arrives for a session
+nobody has locked, or a locked session is released, and then hands that session over. Several
+waiting receivers each get a different session. The wait lasts as long as the client asks for in
+the `com.microsoft:timeout` link property, which Azure SDKs set just under their operation timeout
+(`TryTimeout`, 60 seconds by default), or 60 seconds when the client sends none. When it runs out,
+the attach fails with `com.microsoft:timeout`, which the SDKs treat as "no session available" and
+retry. A waiting receiver checks for a session every 50 ms.
+
 Session locks expire after the entity `LockDuration` unless renewed. Azure SDK explicit and automatic
 session-lock renewal extend the deadline; closing the receiver releases ownership. Session state is
 not currently emulated.
@@ -305,6 +314,20 @@ unsettled peek-locked messages does not release them: each stays locked until it
 `LockDuration` runs out and then returns with its delivery count incremented, as on
 Azure. Session entities still release their messages when the session closes.
 Entities that omit either property fall back to the configured defaults above.
+
+### Dead-letter reasons
+
+A message the broker moves to the dead-letter queue carries the `DeadLetterReason` and
+`DeadLetterErrorDescription` application properties Azure
+[sets for it](https://learn.microsoft.com/azure/service-bus-messaging/service-bus-dead-letter-queues#moving-messages-to-the-dlq):
+
+| Cause | `DeadLetterReason` | `DeadLetterErrorDescription` |
+|---|---|---|
+| Delivery count exceeded `MaxDeliveryCount` (abandon or lock expiry) | `MaxDeliveryCountExceeded` | `Message could not be consumed after {MaxDeliveryCount} delivery attempts.` |
+| Time to live passed, with `DeadLetteringOnMessageExpiration` | `TTLExpiredException` | `The message expired and was dead lettered.` |
+
+An explicit dead-letter keeps the reason and description the client gave, and sets neither when
+the client gives none.
 
 ## Received message metadata
 

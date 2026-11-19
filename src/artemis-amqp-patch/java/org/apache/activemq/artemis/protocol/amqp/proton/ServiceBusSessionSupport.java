@@ -97,10 +97,16 @@ public final class ServiceBusSessionSupport {
          : reserveSession(server, queue, normalizedQueueName, requestedSession.toString(), protonSender,
                           senderContext, metadata.lockMillis());
       if (reservation == null) {
+         // Accept-next-session waits for a session, as Service Bus does, rather than failing at once.
+         if (ServiceBusSessionAcceptSupport.await(server, queue, normalizedQueueName, protonSender,
+                                                  senderContext.getSessionContext().getAMQPConnectionContext())) {
+            throw new ServiceBusSessionAcceptSupport.AcceptPending();
+         }
          throw new ActiveMQAMQPException(TIMEOUT_ERROR,
                                          "No unlocked sessions are available",
                                          ActiveMQExceptionType.TIMEOUT_EXCEPTION);
       }
+      ServiceBusSessionAcceptSupport.accepted(protonSender);
 
       supportedFilters.put(SESSION_FILTER, reservation.sessionId());
       setLockedUntil(protonSender, reservation.owner().lockedUntilMillis());
@@ -244,6 +250,23 @@ public final class ServiceBusSessionSupport {
       }
 
       return null;
+   }
+
+   /** True when the queue holds a message for a session nobody has locked. */
+   static boolean hasUnlockedSession(Queue queue, SimpleString queueName) {
+      synchronized (queue) {
+         Map<SimpleString, ?> lockedGroups = queue.getGroups();
+         try (LinkedListIterator<MessageReference> iterator = queue.browserIterator()) {
+            while (iterator.hasNext()) {
+               SimpleString groupId = iterator.next().getMessage().getGroupID();
+               if (groupId != null && !lockedGroups.containsKey(groupId)
+                   && !SESSION_OWNERS.containsKey(new SessionKey(queueName, groupId.toString()))) {
+                  return true;
+               }
+            }
+         }
+      }
+      return false;
    }
 
    private static SessionReservation reserveSession(ActiveMQServer server,

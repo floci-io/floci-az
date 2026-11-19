@@ -14,6 +14,7 @@ from azure.core.exceptions import (
     ResourceModifiedError,
     ResourceNotFoundError,
 )
+from azure.search.documents import SearchIndexingBufferedSender
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import (
     ComplexField,
@@ -215,3 +216,88 @@ def test_delete_index(index_client):
     assert "hotels-delete" not in list(index_client.list_index_names())
     with pytest.raises(ResourceNotFoundError):
         index_client.get_index("hotels-delete")
+
+
+def test_upload_lookup_and_count_documents(index_client):
+    index_client.create_index(hotels("hotels-docs"))
+    client = index_client.get_search_client("hotels-docs")
+
+    results = client.upload_documents([
+        {"hotelId": "1", "hotelName": "Fancy", "rating": 4.5, "tags": ["pool"],
+         "address": {"street": "Main", "city": "Helsinki"}, "embedding": [0.1, 0.2, 0.3, 0.4]},
+        {"hotelId": "2", "hotelName": "Plain", "rating": 2.0},
+    ])
+    assert [(r.key, r.succeeded, r.status_code) for r in results] == [("1", True, 201), ("2", True, 201)]
+
+    fetched = client.get_document("1")
+    assert fetched["hotelName"] == "Fancy"
+    assert fetched["address"] == {"street": "Main", "city": "Helsinki"}
+    # A vector field is not retrievable unless the index says so.
+    assert "embedding" not in fetched
+    assert client.get_document("2")["tags"] == []
+    selected = client.get_document("1", selected_fields=["hotelName"])
+    assert selected["hotelName"] == "Fancy" and "rating" not in selected
+    assert client.get_document_count() == 2
+    with pytest.raises(ResourceNotFoundError):
+        client.get_document("missing")
+
+
+def test_merge_merge_or_upload_and_delete_documents(index_client):
+    index_client.create_index(hotels("hotels-merge"))
+    client = index_client.get_search_client("hotels-merge")
+    client.upload_documents([{"hotelId": "1", "hotelName": "Fancy", "rating": 4.5,
+                              "address": {"street": "Main", "city": "Helsinki"}}])
+
+    merged = client.merge_documents([{"hotelId": "1", "rating": 5.0, "address": {"city": "Turku"}}])
+    assert merged[0].status_code == 200
+    fetched = client.get_document("1")
+    assert fetched["hotelName"] == "Fancy" and fetched["rating"] == 5.0
+    # A complex field merges field by field, as on Azure.
+    assert fetched["address"] == {"street": "Main", "city": "Turku"}
+
+    upserted = client.merge_or_upload_documents([{"hotelId": "1", "hotelName": "Fancier"},
+                                                 {"hotelId": "3", "hotelName": "New"}])
+    assert [r.status_code for r in upserted] == [200, 201]
+
+    # A merge of a missing key fails that action alone (207); the SDK hands back every result.
+    mixed = client.merge_documents([{"hotelId": "3", "rating": 1.0}, {"hotelId": "missing", "rating": 1.0}])
+    assert [(r.key, r.succeeded, r.status_code) for r in mixed] == [("3", True, 200), ("missing", False, 404)]
+    assert mixed[1].error_message == "Document not found."
+
+    deleted = client.delete_documents([{"hotelId": "1"}, {"hotelId": "never"}])
+    assert [r.status_code for r in deleted] == [200, 200]
+    assert client.get_document_count() == 1
+
+
+def test_a_point_round_trips_with_azures_crs(index_client):
+    index = hotels("hotels-geo")
+    index.fields.append(SimpleField(name="location", type=SearchFieldDataType.GEOGRAPHY_POINT))
+    index_client.create_index(index)
+    client = index_client.get_search_client("hotels-geo")
+
+    client.upload_documents([{"hotelId": "1", "location": {"type": "Point", "coordinates": [24.94, 60.17]}}])
+
+    location = client.get_document("1")["location"]
+    assert location["coordinates"] == [24.94, 60.17]
+    assert location["crs"]["properties"]["name"] == "EPSG:4326"
+
+
+def test_a_malformed_document_refuses_the_whole_batch(index_client):
+    index_client.create_index(hotels("hotels-bad"))
+    client = index_client.get_search_client("hotels-bad")
+
+    with pytest.raises(HttpResponseError) as refused:
+        client.upload_documents([{"hotelId": "1"}, {"hotelId": "2", "rating": "not-a-number"}])
+    assert refused.value.status_code == 400
+    assert client.get_document_count() == 0
+
+
+def test_buffered_sender_flushes_documents(index_client):
+    index_client.create_index(hotels("hotels-buffered"))
+    keys = requests.post(f"{ARM_SERVICE}/listAdminKeys?api-version={ARM_API}", headers=HEADERS, timeout=30)
+    credential = AzureKeyCredential(keys.json()["primaryKey"])
+
+    with SearchIndexingBufferedSender(f"{EMULATOR_BASE}/{SERVICE}-search", "hotels-buffered", credential) as sender:
+        sender.upload_documents([{"hotelId": str(i), "hotelName": f"Hotel {i}"} for i in range(50)])
+
+    assert index_client.get_search_client("hotels-buffered").get_document_count() == 50

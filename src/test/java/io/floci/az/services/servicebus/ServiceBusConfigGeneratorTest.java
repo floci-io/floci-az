@@ -52,6 +52,8 @@ class ServiceBusConfigGeneratorTest {
         assertTrue(brokerXml.contains(
                 "class-name=\"io.floci.az.artemis.ServiceBusExpiryPlugin\""));
         assertTrue(brokerXml.contains(
+                "class-name=\"io.floci.az.artemis.ServiceBusDeadLetterPlugin\""));
+        assertTrue(brokerXml.contains(
                 "class-name=\"io.floci.az.artemis.ServiceBusManagementPlugin\""));
         assertTrue(brokerXml.contains(
                 "class-name=\"org.apache.activemq.artemis.protocol.amqp.proton.ServiceBusDeferralSupport\""));
@@ -145,6 +147,8 @@ class ServiceBusConfigGeneratorTest {
                 Set<String> expectedClasses = Set.of(
                         "io/floci/az/artemis/ServiceBusExpiryPlugin.class",
                         "io/floci/az/artemis/ServiceBusExpiryPluginMBean.class",
+                        "io/floci/az/artemis/ServiceBusDeadLetterPlugin.class",
+                        "io/floci/az/artemis/ServiceBusDeadLetterReason.class",
                         "io/floci/az/artemis/ServiceBusManagementPlugin.class");
                 Set<String> packagedClasses = new HashSet<>();
                 for (var entry = jar.getNextJarEntry(); entry != null; entry = jar.getNextJarEntry()) {
@@ -190,6 +194,7 @@ class ServiceBusConfigGeneratorTest {
                 "org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/ServiceBusDeadLetterSupport.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/ServiceBusDeferralSupport.class",
+                "org/apache/activemq/artemis/protocol/amqp/proton/ServiceBusSessionAcceptSupport.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.class");
         try (InputStream stream = getClass().getResourceAsStream(
                 ServiceBusNamespaceManager.ARTEMIS_AMQP_PATCH_RESOURCE)) {

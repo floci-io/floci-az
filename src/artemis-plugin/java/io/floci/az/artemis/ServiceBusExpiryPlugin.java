@@ -41,6 +41,9 @@ public final class ServiceBusExpiryPlugin
             System.getLogger(ServiceBusExpiryPlugin.class.getName());
     public static final String OBJECT_NAME = "io.floci.az.artemis:type=ServiceBusExpiry";
 
+    /** The dead-letter address this thread is moving an expired message to, while it does. */
+    private static final ThreadLocal<String> DEAD_LETTERING_TO = new ThreadLocal<>();
+
     private final ConcurrentHashMap<String, ExpirySettings> settingsByQueue =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ExpiryKey, ExpiryDeadline> expiryDeadlines =
@@ -150,6 +153,17 @@ public final class ServiceBusExpiryPlugin
         }
         deferredDeadlines.remove(key);
         return true;
+    }
+
+    /** The copy an expiry moves to the dead-letter queue carries Azure's expiry reason. */
+    @Override
+    public void beforeMessageRoute(
+            Message message, RoutingContext context, boolean direct, boolean rejectDuplicates) {
+        String deadLetterAddress = DEAD_LETTERING_TO.get();
+        if (deadLetterAddress != null && deadLetterAddress.equals(message.getAddress())) {
+            ServiceBusDeadLetterReason.stamp(message, ServiceBusDeadLetterReason.TTL_EXPIRED,
+                    ServiceBusDeadLetterReason.TTL_EXPIRED_DESCRIPTION);
+        }
     }
 
     @Override
@@ -292,8 +306,14 @@ public final class ServiceBusExpiryPlugin
             if (deadLetterAddress == null) {
                 return queue.expireReference(messageId);
             }
-            return queue.moveReference(
-                    messageId, SimpleString.of(deadLetterAddress), null, false);
+            // The move routes the copy on this thread, through beforeMessageRoute.
+            DEAD_LETTERING_TO.set(deadLetterAddress);
+            try {
+                return queue.moveReference(
+                        messageId, SimpleString.of(deadLetterAddress), null, false);
+            } finally {
+                DEAD_LETTERING_TO.remove();
+            }
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Could not expire message " + messageId + " from " + queue.getName(), e);

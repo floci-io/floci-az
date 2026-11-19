@@ -53,8 +53,9 @@ import java.util.stream.Collectors;
  * were sent, whatever the api-version added to them. The fields are the exception: they are validated, and their
  * attributes are filled with the defaults Azure answers.
  *
- * <p>The definitions share the {@code search} backend with the ARM resources. Their keys are {@code idx}, the
- * cloud, the service and the index, separated by null bytes; no ARM id starts that way.
+ * <p>The definitions share the {@code search} backend with the ARM resources and the documents. Their keys are
+ * {@code idx}, the cloud, the service and the index, separated by null bytes; no ARM id starts that way. Deleting
+ * an index deletes its documents ({@link SearchDocuments}) in the same step.
  */
 @ApplicationScoped
 public class SearchIndexes {
@@ -190,7 +191,7 @@ public class SearchIndexes {
                     case "PUT" -> createOrUpdate(req, service, index.get(), links);
                     case "GET" -> read(service, index.get())
                             .map(entry -> answer(200, entry, serviceUrl))
-                            .orElseGet(() -> indexNotFound(service, index.get()));
+                            .orElseGet(() -> SearchErrors.indexNotFound(service.name(), index.get()));
                     case "DELETE" -> delete(req, service, index.get());
                     default -> SearchErrors.methodNotAllowed();
                 };
@@ -281,7 +282,13 @@ public class SearchIndexes {
             if (conditionsFail(req, existing)) {
                 return SearchErrors.preconditionFailed();
             }
-            storage.delete(key(service, name));
+            String documents = SearchDocuments.indexPrefix(service.cloud(), service.name(), name);
+            Set<String> doomed = storage.keys().stream()
+                    .filter(key -> key.startsWith(documents))
+                    .collect(Collectors.toCollection(HashSet::new));
+            doomed.add(key(service, name));
+            // The index and its documents go in one step, so a new index of the same name starts empty.
+            storage.applyBatch(Map.of(), doomed);
         }
         LOG.infov("Search: deleted index {0} of service {1}", name, service.name());
         return Response.noContent().build();
@@ -313,17 +320,20 @@ public class SearchIndexes {
     }
 
     /**
-     * {@code Indexes_GetStatistics}. No document is stored yet, so every counter is zero.
+     * {@code Indexes_GetStatistics}: the documents are counted at once, where Azure counts them a little later, and
+     * their size is an approximation (see {@link SearchDocuments#usage}).
      */
     private Response statistics(Service service, String name, Links links) {
         if (read(service, name).isEmpty()) {
-            return indexNotFound(service, name);
+            return SearchErrors.indexNotFound(service.name(), name);
         }
+        SearchDocuments.Usage usage = SearchDocuments.usage(storage,
+                SearchDocuments.indexPrefix(service.cloud(), service.name(), name));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put(CONTEXT, links.serviceUrl() + "/$metadata#" + modelType(links.apiVersion(), "IndexStatistics"));
-        body.put("documentCount", 0);
-        body.put("storageSize", 0);
-        body.put("vectorIndexSize", 0);
+        body.put("documentCount", usage.documents());
+        body.put("storageSize", usage.storageBytes());
+        body.put("vectorIndexSize", usage.vectorBytes());
         return SearchErrors.json(200, body).build();
     }
 
@@ -340,20 +350,29 @@ public class SearchIndexes {
         return (int) storage.keys().stream().filter(key -> key.startsWith(prefix)).count();
     }
 
-    /** Forgets the indexes of {@code service} in {@code cloud}: its ARM resource was deleted. */
+    /** Forgets the indexes and documents of {@code service} in {@code cloud}: its ARM resource was deleted. */
     public void deleteAll(String cloud, String service) {
-        deleteKeysStartingWith(prefix(new Service(cloud, service)));
+        deleteKeysStartingWith(prefix(new Service(cloud, service)), SearchDocuments.servicePrefix(cloud, service));
     }
 
-    /** Forgets every index: {@code POST /_admin/reset}. */
+    /** Forgets every index and document: {@code POST /_admin/reset}. */
     public void clear() {
-        deleteKeysStartingWith(KEY_PREFIX);
+        deleteKeysStartingWith(KEY_PREFIX, SearchDocuments.KEY_PREFIX);
+    }
+
+    /**
+     * The lock every write of an index or of its documents takes, so a batch of documents and the delete of their
+     * index are never interleaved.
+     */
+    Object writeLock() {
+        return writeLock;
     }
 
     /** Deletes in one batch, so a persistent backend saves once rather than once per index. */
-    private void deleteKeysStartingWith(String prefix) {
+    private void deleteKeysStartingWith(String indexPrefix, String documentPrefix) {
         synchronized (writeLock) {
-            Set<String> doomed = storage.keys().stream().filter(key -> key.startsWith(prefix))
+            Set<String> doomed = storage.keys().stream()
+                    .filter(key -> key.startsWith(indexPrefix) || key.startsWith(documentPrefix))
                     .collect(Collectors.toSet());
             if (!doomed.isEmpty()) {
                 storage.applyBatch(Map.of(), doomed);
@@ -1000,12 +1019,6 @@ public class SearchIndexes {
         body.put(ETAG, "\"" + entry.etag() + "\"");
         body.putAll(entry.definition());
         return body;
-    }
-
-    /** A read of an index that does not exist: Azure answers it with no code. */
-    private static Response indexNotFound(Service service, String index) {
-        return SearchErrors.error(404, SearchErrors.NO_CODE, "No index with the name '" + index
-                + "' was found in the service '" + service.name() + "'.");
     }
 
     /** A definition the service refuses to carry out. */

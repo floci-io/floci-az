@@ -2,8 +2,9 @@
 
 Drives ``POST /providers/Microsoft.ResourceGraph/resources`` through the
 ``azure-mgmt-resourcegraph`` SDK, whose 8.1 line pins api-version ``2024-04-01``:
-the query request and response models, both result formats, paging through
-``$skipToken`` and the service's error shape for a query that does not parse.
+the query request and response models, both result formats (a ``table`` result
+with no rows still names its columns), paging through ``$skipToken`` and the
+service's error shape for a query that does not parse.
 
 The resources queried are provisioned over the ARM management plane first.
 """
@@ -109,6 +110,31 @@ def test_table_format_answers_columns_and_rows(graph):
     assert response.count == len(ACCOUNTS)
     assert [column["name"] for column in response.data["columns"]] == ["name", "location"]
     assert response.data["rows"] == [[name, "eastus"] for name in ACCOUNTS]
+
+
+# The columns every table publishes, in the order a row carries them.
+PUBLISHED_COLUMNS = [
+    "id", "name", "type", "tenantId", "kind", "location", "resourceGroup", "subscriptionId", "managedBy",
+    "sku", "plan", "properties", "tags", "identity", "zones", "extendedLocation", "systemData",
+]
+
+
+def test_table_format_names_the_columns_of_a_result_with_no_rows(graph):
+    nothing = "resources | where name == 'sdkgraph-no-such-resource'"
+
+    def table(query):
+        response = graph.resources(
+            QueryRequest(subscriptions=[SUB], query=query, options=QueryRequestOptions(result_format="table"))
+        )
+        assert response.total_records == 0
+        assert response.count == 0
+        assert response.data["rows"] == []
+        return [column["name"] for column in response.data["columns"]]
+
+    # No projection: the table's published columns.
+    assert table(nothing) == PUBLISHED_COLUMNS
+    # The names follow the operators the query applies, as they would with rows.
+    assert table(nothing + " | project-away systemData | extend seen = 1") == PUBLISHED_COLUMNS[:-1] + ["seen"]
 
 
 def test_pages_through_the_skip_token(graph):
