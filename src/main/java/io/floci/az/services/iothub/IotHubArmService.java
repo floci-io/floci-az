@@ -356,6 +356,7 @@ public class IotHubArmService {
                     refuseLocationChange(hub, location);
                     refuseSkuChange(hub, sku.get());
                 }, () -> refuseETagOfMissingHub(id, ifMatch));
+                refusePartitionCount(sent, sku.get(), existing);
                 // The id keeps the casing of the PUT that created the hub.
                 ArmResourceId stored = existing.map(hub -> ArmResourceId.parse(hub.id()).orElseThrow()).orElse(id);
                 List<AccessPolicy> policies = sentPolicies
@@ -829,14 +830,7 @@ public class IotHubArmService {
             return Optional.of(iotError(400, 400089, tls + " is not a valid MinTlsVersion value."));
         }
         Map<String, Object> events = ArmJson.cast(ArmJson.cast(sent.get("eventHubEndpoints")).get(EVENTS_ENDPOINT));
-        Object partitions = events.get("partitionCount");
-        if (partitions != null) {
-            int max = FREE_SKU.equals(sku) ? MIN_PARTITIONS : MAX_PARTITIONS;
-            if (!(partitions instanceof Integer count) || count < MIN_PARTITIONS || count > max) {
-                return Optional.of(iotError(400, 400016, "Invalid PartitionCount " + partitions
-                        + " - value must be between " + MIN_PARTITIONS + " and " + max + "."));
-            }
-        }
+        // The partition count's range is checked under the store's lock (refusePartitionCount), against the hub.
         Object retention = events.get("retentionTimeInDays");
         if (retention != null) {
             long maxDays = FREE_SKU.equals(sku) ? 1 : MAX_RETENTION_DAYS;
@@ -854,22 +848,49 @@ public class IotHubArmService {
      * Keeps the stored hub's partition count: Azure fixes it at creation. A request that leaves it out gets the
      * stored one rather than the default, and one that sends another is refused.
      */
-    private static void keepPartitionCount(IotHubResource hub, Map<String, Object> sent,
-                                           Map<String, Object> properties) {
-        Object stored = ArmJson.cast(ArmJson.cast(hub.properties().get("eventHubEndpoints")).get(EVENTS_ENDPOINT))
+    /**
+     * Refuses a partition count outside the SKU's range, with Azure's error. An existing hub's own count passes
+     * whatever the range: the count cannot change after creation, and a release of floci-az before the limit of
+     * {@value #MAX_PARTITIONS} stored hubs with up to 128, which a read-modify-write update sends back.
+     */
+    private static void refusePartitionCount(Map<String, Object> sent, String sku, Optional<IotHubResource> existing) {
+        Object partitions = ArmJson.cast(ArmJson.cast(sent.get("eventHubEndpoints")).get(EVENTS_ENDPOINT))
                 .get("partitionCount");
-        if (!(stored instanceof Number count)) {
+        if (partitions == null) {
             return;
         }
+        boolean storedCount = partitions instanceof Integer count
+                && existing.flatMap(IotHubArmService::storedPartitionCount).filter(count::equals).isPresent();
+        int max = FREE_SKU.equals(sku) ? MIN_PARTITIONS : MAX_PARTITIONS;
+        if (!storedCount
+                && (!(partitions instanceof Integer count) || count < MIN_PARTITIONS || count > max)) {
+            throw new Refused(iotError(400, 400016, "Invalid PartitionCount " + partitions
+                    + " - value must be between " + MIN_PARTITIONS + " and " + max + "."));
+        }
+    }
+
+    private static Optional<Integer> storedPartitionCount(IotHubResource hub) {
+        Object stored = ArmJson.cast(ArmJson.cast(hub.properties().get("eventHubEndpoints")).get(EVENTS_ENDPOINT))
+                .get("partitionCount");
+        return stored instanceof Number count ? Optional.of(count.intValue()) : Optional.empty();
+    }
+
+    private static void keepPartitionCount(IotHubResource hub, Map<String, Object> sent,
+                                           Map<String, Object> properties) {
+        Optional<Integer> stored = storedPartitionCount(hub);
+        if (stored.isEmpty()) {
+            return;
+        }
+        int count = stored.get();
         Object requested = ArmJson.cast(ArmJson.cast(sent.get("eventHubEndpoints")).get(EVENTS_ENDPOINT))
                 .get("partitionCount");
-        if (requested instanceof Number asked && asked.intValue() != count.intValue()) {
-            throw new Refused(invalid("The partition count of IoT hub '" + hub.name() + "' is " + count.intValue()
+        if (requested instanceof Number asked && asked.intValue() != count) {
+            throw new Refused(invalid("The partition count of IoT hub '" + hub.name() + "' is " + count
                     + " and cannot be changed after the hub is created; the request sends " + asked + "."));
         }
         Map<String, Object> endpoints = new LinkedHashMap<>(ArmJson.cast(properties.get("eventHubEndpoints")));
         Map<String, Object> events = new LinkedHashMap<>(ArmJson.cast(endpoints.get(EVENTS_ENDPOINT)));
-        events.put("partitionCount", count.intValue());
+        events.put("partitionCount", count);
         endpoints.put(EVENTS_ENDPOINT, events);
         properties.put("eventHubEndpoints", endpoints);
     }
