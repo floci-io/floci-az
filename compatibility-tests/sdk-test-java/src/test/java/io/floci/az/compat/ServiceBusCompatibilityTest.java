@@ -5,6 +5,11 @@ import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 import com.azure.messaging.servicebus.ServiceBusReceiverClient;
 import com.azure.messaging.servicebus.ServiceBusSenderClient;
 import com.azure.messaging.servicebus.ServiceBusSessionReceiverClient;
+import com.azure.messaging.servicebus.administration.ServiceBusAdministrationClient;
+import com.azure.messaging.servicebus.administration.models.CreateQueueOptions;
+import com.azure.messaging.servicebus.administration.models.CreateSubscriptionOptions;
+import com.azure.messaging.servicebus.administration.models.CreateTopicOptions;
+import com.azure.messaging.servicebus.administration.models.QueueProperties;
 import com.azure.messaging.servicebus.models.AbandonOptions;
 import com.azure.messaging.servicebus.models.DeadLetterOptions;
 import com.azure.messaging.servicebus.models.ServiceBusReceiveMode;
@@ -493,6 +498,73 @@ class ServiceBusCompatibilityTest {
             assertEquals("The message expired and was dead lettered.",
                     expired.getDeadLetterErrorDescription());
             deadLetters.complete(expired);
+        }
+    }
+
+    @Test
+    @DisplayName("topic lifetime updates expire messages in existing subscriptions")
+    @Timeout(40)
+    void topicLifetimeUpdatesApplyToExistingSubscriptions() throws Exception {
+        String topic = uniqueName("update-ttl");
+        String subscription = "audit";
+        ServiceBusAdministrationClient admin = EmulatorConfig.serviceBusAdministrationClient();
+        admin.createTopic(topic, new CreateTopicOptions().setDefaultMessageTimeToLive(Duration.ofMinutes(5)));
+        admin.createSubscription(topic, subscription, new CreateSubscriptionOptions()
+                .setDefaultMessageTimeToLive(Duration.ofMinutes(5))
+                .setDeadLetteringOnMessageExpiration(true));
+        admin.updateTopic(admin.getTopic(topic).setDefaultMessageTimeToLive(Duration.ofSeconds(2)));
+
+        String payload = "topic-ttl-" + UUID.randomUUID();
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().topicName(topic).buildClient()) {
+            sender.sendMessage(new ServiceBusMessage(payload));
+        }
+        Thread.sleep(4_000);
+
+        try (ServiceBusReceiverClient receiver = EmulatorConfig.serviceBusClientBuilder().receiver()
+                .topicName(topic).subscriptionName(subscription).buildClient()) {
+            assertEquals(0, receiver.receiveMessages(1, Duration.ofSeconds(2)).stream().count(),
+                    "The updated topic lifetime must expire messages in an existing subscription");
+        }
+        try (ServiceBusReceiverClient deadLetters = EmulatorConfig.serviceBusClientBuilder().receiver()
+                .topicName(topic).subscriptionName(subscription).subQueue(SubQueue.DEAD_LETTER_QUEUE)
+                .buildClient()) {
+            ServiceBusReceivedMessage expired = deadLetters.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElseThrow();
+            assertEquals(payload, expired.getBody().toString());
+            assertEquals("TTLExpiredException", expired.getDeadLetterReason());
+            deadLetters.complete(expired);
+        }
+    }
+
+    @Test
+    @DisplayName("administration client updateQueue applies MaxDeliveryCount and LockDuration")
+    void administrationClientUpdateQueueAppliesDeliverySettings() throws Exception {
+        String queue = uniqueName("update");
+        ServiceBusAdministrationClient admin = EmulatorConfig.serviceBusAdministrationClient();
+        admin.createQueue(queue, new CreateQueueOptions()
+                .setMaxDeliveryCount(3)
+                .setLockDuration(Duration.ofSeconds(30)));
+
+        QueueProperties properties = admin.getQueue(queue)
+                .setMaxDeliveryCount(7)
+                .setLockDuration(Duration.ofSeconds(50));
+        QueueProperties updated = admin.updateQueue(properties);
+        assertEquals(7, updated.getMaxDeliveryCount());
+        assertEquals(Duration.ofSeconds(50), updated.getLockDuration());
+
+        QueueProperties fetched = admin.getQueue(queue);
+        assertEquals(7, fetched.getMaxDeliveryCount());
+        assertEquals(Duration.ofSeconds(50), fetched.getLockDuration());
+
+        // The broker must lock new deliveries for the updated duration, not the original 30s.
+        send(queue, "locked-after-update");
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage message = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElseThrow();
+            long lockSeconds = Duration.between(OffsetDateTime.now(), message.getLockedUntil()).toSeconds();
+            assertTrue(lockSeconds > 40, "lock should follow the updated 50s duration, was " + lockSeconds + "s");
+            receiver.complete(message);
         }
     }
 

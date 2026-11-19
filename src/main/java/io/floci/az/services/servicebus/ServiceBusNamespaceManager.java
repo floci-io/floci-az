@@ -498,9 +498,6 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
-        String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
-                + ",\"maxDeliveryAttempts\":" + maxDeliveryAttempts
-                + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createAddress(java.lang.String,java.lang.String)",
@@ -516,18 +513,75 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
                     jsonArr(messageQueueConfiguration(deadLetterQueue, false)));
             createManagementAddress(http, baseUrl, auth, mbean, queueName);
             createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
-            applyLockMetadata(http, baseUrl, auth, mbean, queueName,
-                    requiresSession, lockDurationSeconds);
-            applyLockMetadata(http, baseUrl, auth, mbean, deadLetterQueue, false, lockDurationSeconds);
-            jolokiaExec(http, baseUrl, auth, mbean,
-                    "addAddressSettings(java.lang.String,java.lang.String)",
-                    jsonArr(queueName, addressSettings));
-            configureDuplicateDetection(
-                    http, baseUrl, auth, queueName, duplicateDetection);
-            configureExpiry(
-                    http, baseUrl, auth, queueName, lifetime.ttlMillis(),
-                    lifetime.deadLetterOnExpiration() ? deadLetterQueue : "");
+            applyQueueSettings(http, baseUrl, auth, mbean, queueName, requiresSession,
+                    lockDurationSeconds, maxDeliveryAttempts, duplicateDetection, lifetime);
         });
+    }
+
+    /**
+     * Re-applies the mutable settings of an existing queue (or subscription queue, named
+     * {@code {topic}/Subscriptions/{sub}}) to the running broker: lock duration, max delivery
+     * count, duplicate detection window and message lifetime.
+     */
+    public void jolokiaUpdateQueue(
+            String namespaceName,
+            String queueName,
+            boolean requiresSession,
+            long lockDurationSeconds,
+            int maxDeliveryAttempts,
+            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+            ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
+        withJolokia(namespaceName, (http, baseUrl, auth, mbean) ->
+                applyQueueSettings(http, baseUrl, auth, mbean, queueName, requiresSession,
+                        lockDurationSeconds, maxDeliveryAttempts, duplicateDetection, lifetime));
+    }
+
+    /** As {@link #jolokiaUpdateQueue}, for the queue backing a topic subscription. */
+    public void jolokiaUpdateSubscription(
+            String namespaceName,
+            String topicName,
+            String subName,
+            boolean requiresSession,
+            long lockDurationSeconds,
+            int maxDeliveryAttempts,
+            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+            ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
+        jolokiaUpdateQueue(namespaceName, topicName + "/Subscriptions/" + subName, requiresSession,
+                lockDurationSeconds, maxDeliveryAttempts, duplicateDetection, lifetime);
+    }
+
+    /** Re-applies the duplicate detection window of an existing topic to the running broker. */
+    public void jolokiaUpdateTopic(
+            String namespaceName,
+            String topicName,
+            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
+        withJolokia(namespaceName, (http, baseUrl, auth, mbean) ->
+                configureDuplicateDetection(http, baseUrl, auth, topicName, duplicateDetection));
+    }
+
+    private void applyQueueSettings(
+            HttpClient http, String baseUrl, String auth, String mbean,
+            String queueName,
+            boolean requiresSession,
+            long lockDurationSeconds,
+            int maxDeliveryAttempts,
+            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+            ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
+        String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
+        String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
+                + ",\"maxDeliveryAttempts\":" + maxDeliveryAttempts
+                + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
+        applyLockMetadata(http, baseUrl, auth, mbean, queueName,
+                requiresSession, lockDurationSeconds);
+        applyLockMetadata(http, baseUrl, auth, mbean, deadLetterQueue, false, lockDurationSeconds);
+        jolokiaExec(http, baseUrl, auth, mbean,
+                "addAddressSettings(java.lang.String,java.lang.String)",
+                jsonArr(queueName, addressSettings));
+        configureDuplicateDetection(
+                http, baseUrl, auth, queueName, duplicateDetection);
+        configureExpiry(
+                http, baseUrl, auth, queueName, lifetime.ttlMillis(),
+                lifetime.deadLetterOnExpiration() ? deadLetterQueue : "");
     }
 
     /** Removes an ANYCAST queue from the running Artemis broker. */
@@ -647,9 +701,6 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
         String queueName = topicName + "/Subscriptions/" + subName;
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
-        String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
-                + ",\"maxDeliveryAttempts\":" + maxDeliveryAttempts
-                + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createAddress(java.lang.String,java.lang.String)",
@@ -665,19 +716,10 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
                     jsonArr(messageQueueConfiguration(deadLetterQueue, false)));
             createManagementAddress(http, baseUrl, auth, mbean, queueName);
             createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
-            applyLockMetadata(http, baseUrl, auth, mbean, queueName,
-                    requiresSession, lockDurationSeconds);
-            applyLockMetadata(http, baseUrl, auth, mbean, deadLetterQueue, false, lockDurationSeconds);
-            jolokiaExec(http, baseUrl, auth, mbean,
-                    "addAddressSettings(java.lang.String,java.lang.String)",
-                    jsonArr(queueName, addressSettings));
+            applyQueueSettings(http, baseUrl, auth, mbean, queueName, requiresSession,
+                    lockDurationSeconds, maxDeliveryAttempts, duplicateDetection, lifetime);
             jolokiaCreateDivert(http, baseUrl, auth, mbean, divertName,
                     topicName + TOPIC_ADDRESS_SUFFIX, queueName, filter, false);
-            configureDuplicateDetection(
-                    http, baseUrl, auth, queueName, duplicateDetection);
-            configureExpiry(
-                    http, baseUrl, auth, queueName, lifetime.ttlMillis(),
-                    lifetime.deadLetterOnExpiration() ? deadLetterQueue : "");
         });
     }
 

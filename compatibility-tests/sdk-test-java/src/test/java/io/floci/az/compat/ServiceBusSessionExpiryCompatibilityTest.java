@@ -5,6 +5,7 @@ import com.azure.messaging.servicebus.ServiceBusException;
 import com.azure.messaging.servicebus.ServiceBusFailureReason;
 import com.azure.messaging.servicebus.ServiceBusMessage;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
+import com.azure.messaging.servicebus.ServiceBusReceiverClient;
 import com.azure.messaging.servicebus.ServiceBusSessionReceiverClient;
 import com.azure.messaging.servicebus.models.SubQueue;
 import org.junit.jupiter.api.Assumptions;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -72,22 +74,23 @@ class ServiceBusSessionExpiryCompatibilityTest {
     void gracefulClosePreservesDeliveryCountAndFifoAndRenewalStillSettles() throws Exception {
         String queue = queue();
         send(queue, "first", "second");
-        try (var sessions = sessions(queue)) {
-            try (var receiver = sessions.acceptSession("session")) {
-                var messages = receiver.receiveMessages(2, RECEIVE_TIMEOUT).stream().toList();
-                assertEquals(2, messages.size());
-                assertEquals(0, messages.getFirst().getDeliveryCount());
+        try (ServiceBusSessionReceiverClient sessions = sessions(queue);
+             ServiceBusReceiverClient receiver = sessions.acceptSession("session")) {
+            List<ServiceBusReceivedMessage> messages = receiver.receiveMessages(2, RECEIVE_TIMEOUT).stream().toList();
+            assertEquals(2, messages.size());
+            assertEquals(0, messages.getFirst().getDeliveryCount());
+        }
+        // The SDK names links by session ID. A fresh connection avoids reusing the closing link.
+        try (ServiceBusSessionReceiverClient sessions = sessions(queue);
+             ServiceBusReceiverClient receiver = sessions.acceptSession("session")) {
+            List<ServiceBusReceivedMessage> messages = receiver.receiveMessages(2, RECEIVE_TIMEOUT).stream().toList();
+            assertEquals(List.of("first", "second"),
+                    messages.stream().map(message -> message.getBody().toString()).toList());
+            for (ServiceBusReceivedMessage message : messages) {
+                assertEquals(0, message.getDeliveryCount());
             }
-            try (var receiver = sessions.acceptSession("session")) {
-                var messages = receiver.receiveMessages(2, RECEIVE_TIMEOUT).stream().toList();
-                assertEquals(List.of("first", "second"),
-                        messages.stream().map(message -> message.getBody().toString()).toList());
-                for (ServiceBusReceivedMessage message : messages) {
-                    assertEquals(0, message.getDeliveryCount());
-                }
-                assertTrue(receiver.renewSessionLock().isAfter(java.time.OffsetDateTime.now()));
-                messages.forEach(receiver::complete);
-            }
+            assertTrue(receiver.renewSessionLock().isAfter(OffsetDateTime.now()));
+            messages.forEach(receiver::complete);
         }
     }
 
