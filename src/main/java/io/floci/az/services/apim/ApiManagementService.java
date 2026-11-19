@@ -52,8 +52,8 @@ public class ApiManagementService implements GlobalNameSource {
 
     /**
      * {@code DeletedServices_GetByName} and {@code _Purge}: a deleted service stays recoverable for
-     * {@link #SOFT_DELETE_RETENTION}. The children of a deleted service stay in their maps until it is purged, restored
-     * over, or replaced by a plain create.
+     * {@link #SOFT_DELETE_RETENTION}, and keeps its name: a create of it from any scope is refused until it is purged or
+     * expires. The children of a deleted service stay in their maps until it is purged or restored over.
      */
     private final ArmResourceStore<ApimDeletedService> deletedServices;
 
@@ -207,6 +207,14 @@ public class ApiManagementService implements GlobalNameSource {
     private List<ArmResourceStore.Stored<ApimDeletedService>> deletedServicesNamed(String sub, String name) {
         dropExpiredDeletedServices();
         return deletedServices.list(new ArmScope(sub, null)).stream()
+                .filter(stored -> name.equalsIgnoreCase(stored.id().name()))
+                .toList();
+    }
+
+    /** The deleted services of this name in every subscription: the name is global, as a live service's is. */
+    private List<ArmResourceStore.Stored<ApimDeletedService>> deletedServicesNamed(String name) {
+        dropExpiredDeletedServices();
+        return deletedServices.all().stream()
                 .filter(stored -> name.equalsIgnoreCase(stored.id().name()))
                 .toList();
     }
@@ -366,26 +374,20 @@ public class ApiManagementService implements GlobalNameSource {
     private synchronized Response createOrUpdateService(AzureRequest request, ArmResourceId requested) {
         Map<String, Object> body = parseBody(request);
         if (services.get(requested).isEmpty()) {
-            // A deleted service's id names its subscription, location and name but no resource group, so the
-            // subscription holds one deleted service of a name: a service of that name in another resource group
-            // would overwrite it when deleted. azurerm answers this case with "pick a different name/location".
+            // "You can't reuse the name of the API Management instance while the instance is soft-deleted": only a
+            // restore of the service's own record brings the name back. The name is global, so a deleted service in
+            // any subscription holds it, until it is purged or its purge date passes. The deleted records are read
+            // here, past their purge date dropped, rather than claimed in the name registry, so no hold outlives one.
             String key = requested.canonicalKey();
-            List<ArmResourceStore.Stored<ApimDeletedService>> named =
-                    deletedServicesNamed(requested.subscriptionId(), requested.name());
-            if (named.stream().anyMatch(stored -> !ownRecord(stored, key))) {
+            List<ArmResourceStore.Stored<ApimDeletedService>> named = deletedServicesNamed(requested.name());
+            Optional<ArmResourceStore.Stored<ApimDeletedService>> own =
+                    named.stream().filter(stored -> ownRecord(stored, key)).findFirst();
+            if (isRestore(body) && own.isPresent()) {
+                return restoreService(own.get());
+            }
+            if (!named.isEmpty()) {
                 return ArmErrors.error(409, "ServiceAlreadyExists", "Api service already exists: " + requested.name()
-                        + ". A soft-deleted service of this name exists in another resource group; restore or purge"
-                        + " it first.");
-            }
-            List<ArmResourceStore.Stored<ApimDeletedService>> deleted = named;
-            if (isRestore(body) && !deleted.isEmpty()) {
-                return restoreService(deleted.getFirst());
-            }
-            // No local source says what Azure answers to a plain create of a soft-deleted service, so it is not
-            // refused: the deleted service and its children go, and an ordinary create runs (as for Key Vault).
-            for (ArmResourceStore.Stored<ApimDeletedService> stale : deleted) {
-                deletedServices.delete(stale.id());
-                dropChildren(serviceId(stale.value().service().id()));
+                        + ". A soft-deleted service of this name exists; restore or purge it first.");
             }
         }
         ArmResourceStore.Written<ApimService> written = services.createOrUpdate(requested, existing -> {

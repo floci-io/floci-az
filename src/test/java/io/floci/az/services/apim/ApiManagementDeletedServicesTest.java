@@ -1,6 +1,10 @@
 package io.floci.az.services.apim;
 
+import io.floci.az.core.arm.ArmResourceStore;
+import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.apim.ApiManagementModels.ApimDeletedService;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -32,6 +36,12 @@ class ApiManagementDeletedServicesTest {
             + "/providers/Microsoft.ApiManagement/locations/westus/deletedservices/" + SERVICE;
     private static final String SERVICE_BODY = "{\"location\":\"westus\",\"sku\":{\"name\":\"Developer\",\"capacity\":1},"
             + "\"properties\":{\"publisherEmail\":\"admin@contoso.com\",\"publisherName\":\"Contoso\"}}";
+
+    private static final String OTHER_SUBSCRIPTION = "/subscriptions/another-sub/resourceGroups/test-rg-apim-deleted"
+            + "/providers/Microsoft.ApiManagement/service/" + SERVICE;
+
+    @Inject
+    StorageFactory storageFactory;
 
     @BeforeEach
     void reset() {
@@ -113,15 +123,19 @@ class ApiManagementDeletedServicesTest {
     }
 
     @Test
-    void aPlainCreateOverADeletedNameStartsAFreshServiceAndDropsTheRecord() {
+    void aPlainCreateOverADeletedNameIsRefusedUntilItIsPurged() {
         createService();
         createApi();
         given().when().delete(SERVICE_ID + API).then().statusCode(200);
 
-        createService();
+        // "You can't reuse the name of the API Management instance while the instance is soft-deleted."
+        given().contentType("application/json").body(SERVICE_BODY).when().put(SERVICE_ID + API)
+                .then().statusCode(409).body("error.code", equalTo("ServiceAlreadyExists"));
+        given().when().get(DELETED + API).then().statusCode(200);
 
+        given().when().delete(DELETED + API).then().statusCode(200);
+        createService();
         given().when().get(SERVICE_ID + "/apis" + API).then().statusCode(200).body("value", empty());
-        given().when().get(DELETED + API).then().statusCode(404);
     }
 
     @Test
@@ -139,22 +153,43 @@ class ApiManagementDeletedServicesTest {
     }
 
     @Test
-    void aNewServiceOfADeletedNameInAnotherSubscriptionDoesNotServeTheDeletedServicesApis() {
+    void aServiceOfADeletedNameInAnotherSubscriptionIsRefusedUntilItIsPurged() {
         createService();
         createApi();
         given().when().delete(SERVICE_ID + API).then().statusCode(200);
 
-        String otherSubscription = "/subscriptions/another-sub/resourceGroups/test-rg-apim-deleted"
-                + "/providers/Microsoft.ApiManagement/service/" + SERVICE;
-        given().contentType("application/json").body(SERVICE_BODY).when().put(otherSubscription + API)
-                .then().statusCode(200);
+        // The name is global, so the deleted service holds it in every subscription.
+        given().contentType("application/json").body(SERVICE_BODY).when().put(OTHER_SUBSCRIPTION + API)
+                .then().statusCode(409).body("error.code", equalTo("ServiceAlreadyExists"));
+        given().when().get(DELETED + API).then().statusCode(200);
 
-        // The deleted service still keeps its API for a restore, but the gateway reaches only the live service's own.
-        given().when().get(otherSubscription + "/apis" + API).then().statusCode(200).body("value", empty());
+        given().when().delete(DELETED + API).then().statusCode(200);
+        given().contentType("application/json").body(SERVICE_BODY).when().put(OTHER_SUBSCRIPTION + API)
+                .then().statusCode(200);
+        given().when().get(OTHER_SUBSCRIPTION + "/apis" + API).then().statusCode(200).body("value", empty());
         given().when().get("/devstoreaccount1-apim/" + SERVICE + "/orders")
                 .then().statusCode(404)
                 .body("error.message", containsString("No API route matched"));
-        given().when().get(DELETED + API).then().statusCode(200);
+    }
+
+    @Test
+    void aDeletedServicePastItsPurgeDateFreesItsName() {
+        createService();
+        createApi();
+        given().when().delete(SERVICE_ID + API).then().statusCode(200);
+
+        // Moves the purge date into the past, as 48 hours passing would.
+        ArmResourceStore<ApimDeletedService> deleted = ArmResourceStore.create(storageFactory, "apim",
+                ApiManagementModels.DELETED_SERVICE_ID_TYPE, ApimDeletedService.class, ApimDeletedService::id,
+                key -> false);
+        ApimDeletedService record = deleted.all().getFirst().value();
+        deleted.put(new ApimDeletedService(record.id(), record.name(), record.location(), record.deletionDate(),
+                Instant.now().minusSeconds(1), record.service()));
+
+        given().contentType("application/json").body(SERVICE_BODY).when().put(OTHER_SUBSCRIPTION + API)
+                .then().statusCode(200);
+        given().when().get(DELETED + API).then().statusCode(404);
+        given().when().get(OTHER_SUBSCRIPTION + "/apis" + API).then().statusCode(200).body("value", empty());
     }
 
     @Test

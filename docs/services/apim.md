@@ -63,13 +63,13 @@ APIs, operations, policies, products, subscriptions, named values and backends:
   nothing to purge; Azure answers `202` and completes the purge later.
 - A create with `properties.restore: true` brings the service back as it was deleted, with its child resources; the
   other properties of the request are ignored, as the spec says.
-- A plain create of the deleted service (the same subscription, resource group and name) is not refused: the deleted
-  service and its child resources go, and a new service is created.
-- A deleted service's id has no resource group, so a subscription holds one deleted service of a name. While it
-  exists, a create of that name in another resource group of the subscription, a restore aimed there included, answers
-  `409 ServiceAlreadyExists`; restore or purge the deleted service first. (Which code Azure answers here is not in the
-  spec; azurerm asks for "a different name/location".) Another subscription may take the name, and the gateway serves
-  only the live service's own APIs, policies and the rest, never those a deleted service of the same name keeps.
+- A deleted service keeps its name: as in Azure, the name can't be reused while the service is soft-deleted. Any
+  other create of it answers `409 ServiceAlreadyExists` until the deleted service is purged or its purge date passes:
+  a plain create of the deleted service itself, a create in another resource group or subscription, and a restore
+  aimed at another resource group. Restore or purge the deleted service first. (Which code Azure answers here is not
+  in the spec.) The azurerm provider restores a deleted service before it creates one, with
+  `recover_soft_deleted`, on by default.
+- The gateway serves only the live service's own APIs, policies and the rest, never those a deleted service keeps.
 
 While a service is soft-deleted, its child resources answer `404`. `azd down --purge` and the azurerm provider (with
 `purge_soft_delete_on_destroy`, on by default) purge the deleted service after deleting it.

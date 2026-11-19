@@ -73,7 +73,15 @@ class CrossSubscriptionIsolationTest {
         }
     }
 
-    record GlobalKind(Kind kind, int conflictStatus, String conflictCode) {
+    /**
+     * @param purge for a type whose deleted resource keeps its name until it is purged, the purge path under the
+     *              subscription, else null
+     */
+    record GlobalKind(Kind kind, int conflictStatus, String conflictCode, String purge) {
+        GlobalKind(Kind kind, int conflictStatus, String conflictCode) {
+            this(kind, conflictStatus, conflictCode, null);
+        }
+
         @Override
         public String toString() {
             return kind.label();
@@ -138,7 +146,8 @@ class CrossSubscriptionIsolationTest {
                 new GlobalKind(new Kind("API Management service", "Microsoft.ApiManagement/service", "xsub-apim", "2022-08-01",
                         "{\"location\":\"eastus\",\"sku\":{\"name\":\"Developer\",\"capacity\":1},"
                                 + "\"properties\":{\"publisherEmail\":\"a@b.c\",\"publisherName\":\"x\"}}"),
-                        409, "ServiceAlreadyExists"),
+                        409, "ServiceAlreadyExists",
+                        "/providers/Microsoft.ApiManagement/locations/eastus/deletedservices/xsub-apim?api-version=2022-08-01"),
                 new GlobalKind(new Kind("communication service", "Microsoft.Communication/communicationServices", "xsub-comm", "2023-04-01",
                         "{\"location\":\"global\",\"properties\":{\"dataLocation\":\"United States\"}}"),
                         409, "Conflict"),
@@ -184,6 +193,9 @@ class CrossSubscriptionIsolationTest {
 
         given().delete(kind.url(SUB_A, rg));
         awaitGone(kind, SUB_A, rg);
+        if (global.purge() != null) {
+            given().delete("/subscriptions/" + SUB_A + global.purge()).then().statusCode(200);
+        }
         assertCreated(put(kind, SUB_B, rg), kind);
         assertEquals(kind.path(SUB_B, rg).toLowerCase(), idOf(kind, SUB_B, rg));
     }
