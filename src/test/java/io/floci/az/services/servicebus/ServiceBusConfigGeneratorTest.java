@@ -190,6 +190,7 @@ class ServiceBusConfigGeneratorTest {
                 "org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/ServiceBusDeadLetterSupport.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/ServiceBusDeferralSupport.class",
+                "org/apache/activemq/artemis/protocol/amqp/proton/ServiceBusSessionAcceptSupport.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.class");
         try (InputStream stream = getClass().getResourceAsStream(
                 ServiceBusNamespaceManager.ARTEMIS_AMQP_PATCH_RESOURCE)) {
