@@ -64,6 +64,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.DBforPostgreSQL/flexibleServers/databases                            RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.DBforPostgreSQL/flexibleServers/firewallRules                        RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Devices/IotHubs                                                      RESOURCE_GROUP  REQUIRED  FILTER
+        Microsoft.Devices/IotHubs/eventHubEndpoints/ConsumerGroups                     RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.EventGrid/eventSubscriptions                                         EXTENSION       OPTIONAL  PROVIDER_SERVICE
         Microsoft.EventGrid/topics                                                     RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.Insights/dataCollectionEndpoints                                     RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
@@ -159,6 +160,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.DBforMySQL/flexibleServers    3-63    MYSQL    409    ServerNameAlreadyExists
         Microsoft.DBforPostgreSQL/flexibleServers    3-63    POSTGRES    409    ServerNameAlreadyExists
         Microsoft.Devices/IotHubs    3-50    IOTHUB    409    Conflict
+        Microsoft.Devices/IotHubs/eventHubEndpoints/ConsumerGroups    1-50    null    0    null
         Microsoft.EventGrid/eventSubscriptions    3-64    null    0    null
         Microsoft.EventGrid/topics    3-50    null    0    null
         Microsoft.KeyVault/managedHSMs    3-24    MHSM    409    Conflict

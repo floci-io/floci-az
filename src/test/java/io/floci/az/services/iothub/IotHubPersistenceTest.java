@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.PersistentStorage;
 import io.floci.az.services.iothub.IotHubModels.AccessPolicy;
+import io.floci.az.services.iothub.IotHubModels.ConsumerGroup;
 import io.floci.az.services.iothub.IotHubModels.IotHubResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -50,6 +51,8 @@ class IotHubPersistenceTest {
     void theStoredHubCarriesItsKeysAndGeneratedNames() throws Exception {
         String body = "{\"location\": \"westus2\", \"tags\": {\"env\": \"dev\"}, \"sku\": {\"name\": \"S1\"}}";
         given().contentType("application/json").body(body).when().put(HUB + API).then().statusCode(201);
+        given().contentType("application/json").body("{\"properties\": {\"name\": \"cg1\"}}")
+            .when().put(HUB + "/eventHubEndpoints/events/ConsumerGroups/cg1" + API).then().statusCode(200);
         given().contentType("application/json").body(body).when().put(HUB + API).then().statusCode(201);
         List<String> primaries = given().when().post(HUB + "/listkeys" + API).then().statusCode(200)
             .extract().path("value.primaryKey");
@@ -72,6 +75,23 @@ class IotHubPersistenceTest {
         Map<String, Object> events = eventsEndpoint(answered);
         assertEquals(events.get("path"), hub.eventHubPath());
         assertEquals("sb://" + hub.eventHubNamespace() + ".servicebus.windows.net/", events.get("endpoint"));
+        assertEquals(List.of("$Default", "cg1"), hub.consumerGroups().stream().map(ConsumerGroup::name).toList());
+    }
+
+    @Test
+    void aHubStoredBeforeConsumerGroupsLoadsWithTheDefaultGroup() throws Exception {
+        ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule())
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        // A hub as the Phase 1 release wrote it: no consumerGroups field.
+        IotHubResource stored = mapper.readValue("""
+                {"id": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Devices/IotHubs/old-hub",
+                 "name": "old-hub", "location": "westus2", "sku": "S1", "capacity": 1, "properties": {},
+                 "policies": [], "incarnation": 7, "version": 3, "createdAt": "2026-11-01T10:00:00Z",
+                 "eventHubPath": "old-hub-abc123", "eventHubNamespace": "iothub-ns-old-hub-1-ab"}""",
+                IotHubResource.class);
+
+        assertEquals(List.of(new ConsumerGroup("events", "$Default", "2026-11-01T10:00:00Z")),
+                stored.consumerGroups());
     }
 
     private static IotHubResource read(ObjectMapper mapper, StoredObject stored) {

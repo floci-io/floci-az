@@ -37,6 +37,21 @@ class IotHubStrictNamesTest {
     }
 
     @Test
+    void aConsumerGroupNameOutsideTheRuleIsRefusedByTheGate() {
+        given().contentType("application/json").body(BODY).when().put(BASE + "cg-hub" + API).then().statusCode(201);
+        String groups = BASE + "cg-hub/eventHubEndpoints/events/ConsumerGroups/";
+        for (String bad : new String[] {"with~tilde", "x".repeat(51)}) {
+            given().contentType("application/json").body("{\"properties\": {\"name\": \"" + bad + "\"}}")
+                .when().put(groups + bad + API)
+                .then().statusCode(400).body("error.code", equalTo("InvalidResourceName"));
+        }
+        for (String good : new String[] {"cg.one_2-x", "$Default"}) {
+            given().contentType("application/json").body("{\"properties\": {\"name\": \"" + good + "\"}}")
+                .when().put(groups + good + API).then().statusCode(200);
+        }
+    }
+
+    @Test
     void aHubNameInsideTheRuleIsCreated() {
         for (String good : new String[] {"abc", "Mixed-Case-Hub", "1digit-first", "x".repeat(50)}) {
             given().contentType("application/json").body(BODY).when().put(BASE + good + API)
