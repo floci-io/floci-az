@@ -3,6 +3,7 @@ package org.apache.activemq.artemis.protocol.amqp.proton;
 import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.ActiveMQServer;
+import org.apache.activemq.artemis.core.server.Consumer;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.activemq.artemis.protocol.amqp.exceptions.ActiveMQAMQPException;
@@ -222,6 +223,30 @@ class ServiceBusSessionAcceptTest {
         assertTrue(pending.isEmpty());
     }
 
+    @Test
+    @DisplayName("waiters on one queue share one backlog scan per poll interval")
+    void waitersShareOneScanPerInterval() throws Exception {
+        messages.add(message("s1"));
+        Map<SimpleString, Consumer> locked = new HashMap<>();
+        locked.put(SimpleString.of("s1"), mock(Consumer.class));
+        when(queue.getGroups()).thenReturn(locked);
+        Attach first = newAttach("first", 30_000L);
+        Attach second = newAttach("second", 30_000L);
+        Attach third = newAttach("third", 30_000L);
+        attach(first);
+        attach(second);
+        attach(third);
+        assertEquals(3, pending.size());
+
+        clearInvocations(queue);
+        runPolls();
+
+        verify(queue, times(1)).browserIterator();
+        assertEquals(3, pending.size(), "every session is locked: all three keep waiting");
+        assertEquals(3, polls().size());
+        verify(connection, never()).onRemoteOpen(any(Link.class));
+    }
+
     private Attach newAttach(String name, long waitMillis) {
         Sender sender = mock(Sender.class);
         Session session = mock(Session.class);
@@ -282,7 +307,9 @@ class ServiceBusSessionAcceptTest {
         return scheduled.stream().filter(task -> task.delayMillis() <= 50L).toList();
     }
 
-    private void runPolls() {
+    /** Runs the polls due one interval from now, as the scheduled pool would. */
+    private void runPolls() throws InterruptedException {
+        Thread.sleep(60);
         List<Scheduled> due = polls();
         scheduled.removeAll(due);
         due.forEach(task -> task.task().run());

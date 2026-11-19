@@ -67,7 +67,16 @@ public final class ServiceBusSessionAcceptSupport {
    /** How often a waiter looks for a session it could lock. */
    static final long POLL_MILLIS = 50L;
 
+   private static final long POLL_NANOS = TimeUnit.MILLISECONDS.toNanos(POLL_MILLIS);
+
    private static final Map<Sender, PendingAccept> PENDING = new ConcurrentHashMap<>();
+
+   /**
+    * When a scan of each queue last found no session to lock. The scan walks the backlog under the
+    * queue's lock, so the waiters on a queue share one scan per poll interval instead of each running
+    * its own; a session freed meanwhile is seen at most one interval later.
+    */
+   private static final Map<SimpleString, Long> NO_FREE_SESSION_AT = new ConcurrentHashMap<>();
 
    private ServiceBusSessionAcceptSupport() {
    }
@@ -150,7 +159,7 @@ public final class ServiceBusSessionAcceptSupport {
          return;
       }
       boolean due = System.nanoTime() - pending.deadlineNanos() >= 0;
-      if (!due && !ServiceBusSessionSupport.hasUnlockedSession(pending.queue(), pending.queueName())) {
+      if (!due && !mayLockASession(pending)) {
          schedulePoll(pending);
          return;
       }
@@ -173,6 +182,21 @@ public final class ServiceBusSessionAcceptSupport {
          // Answered or abandoned without deferring again: nothing will poll this waiter any more.
          PENDING.remove(sender, pending);
       }
+   }
+
+   private static boolean mayLockASession(PendingAccept pending) {
+      SimpleString queueName = pending.queueName();
+      long now = System.nanoTime();
+      Long scannedAt = NO_FREE_SESSION_AT.get(queueName);
+      if (scannedAt != null && now - scannedAt < POLL_NANOS) {
+         return false;
+      }
+      if (ServiceBusSessionSupport.hasUnlockedSession(pending.queue(), queueName)) {
+         NO_FREE_SESSION_AT.remove(queueName);
+         return true;
+      }
+      NO_FREE_SESSION_AT.put(queueName, now);
+      return false;
    }
 
    private static boolean attaching(Sender sender) {
