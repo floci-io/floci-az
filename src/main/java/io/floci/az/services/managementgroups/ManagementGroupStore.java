@@ -15,6 +15,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -31,10 +32,10 @@ import java.util.UUID;
  * subscription that was never placed belongs to its tenant root group, as in Azure. Every operation names
  * the tenant whose hierarchy it works on, which the handler resolves from the caller's token.
  *
- * <p>Every group and placement is written through to the {@code managementgroups} {@link StorageFactory}
- * store, keyed by tenant (two tenants' groups of one name share an ARM id, so the id alone cannot key
- * them), and read back at startup. With persistent storage the hierarchy therefore survives a restart, as
- * the subscriptions {@link #place} registers in the directory do.
+ * <p>Every group and placement is written through to the {@link AzureDirectory#STORE directory} store, next
+ * to the subscriptions {@link #place} registers there, keyed by tenant (two tenants' groups of one name share
+ * an ARM id, so the id alone cannot key them), and read back at startup. The hierarchy therefore survives a
+ * restart exactly when those subscriptions do, and follows {@code storage.services.directory.mode} with them.
  */
 @ApplicationScoped
 public class ManagementGroupStore implements Resettable {
@@ -117,10 +118,8 @@ public class ManagementGroupStore implements Resettable {
         private final Map<String, String> subscriptionParents = new LinkedHashMap<>();
     }
 
-    /** The {@link StorageFactory} service name, so persistence follows the storage mode like every other service's. */
-    static final String STORE = "managementgroups";
-    private static final String GROUP_PREFIX = "group/";
-    private static final String PLACEMENT_PREFIX = "placement/";
+    private static final String GROUP_PREFIX = "managementgroup/";
+    private static final String PLACEMENT_PREFIX = "managementgroupplacement/";
     private static final Logger LOG = Logger.getLogger(ManagementGroupStore.class);
     private static final ObjectMapper MAPPER = new ObjectMapper()
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -132,7 +131,7 @@ public class ManagementGroupStore implements Resettable {
 
     @Inject
     public ManagementGroupStore(AzureDirectory directory, StorageFactory storageFactory) {
-        this(directory, storageFactory.create(STORE));
+        this(directory, storageFactory.create(AzureDirectory.STORE));
     }
 
     /** A store over an explicit backend, for tests. */
@@ -360,7 +359,10 @@ public class ManagementGroupStore implements Resettable {
 
     @Override
     public synchronized void clear() {
-        store.clear();
+        // The directory store is shared: only this store's own entries go.
+        for (String storedKey : store.keys().stream().filter(ManagementGroupStore::owns).toList()) {
+            store.delete(storedKey);
+        }
         hierarchies.clear();
         nextSequence = 0;
     }
@@ -381,21 +383,29 @@ public class ManagementGroupStore implements Resettable {
 
     // ── Persistence ─────────────────────────────────────────────────────────────
 
-    /** Rebuilds every hierarchy from the store: each tenant's groups in creation order, root first, then the placements. */
+    /**
+     * Rebuilds every hierarchy from the store: each tenant's groups in creation order, root first, then the
+     * placements. An entry that cannot be read or used is skipped with a warning, so one bad entry never keeps
+     * the others from loading.
+     */
     private void load() {
         hierarchies.clear();
         nextSequence = 0;
         List<StoredGroup> groups = new ArrayList<>();
         List<StoredPlacement> placements = new ArrayList<>();
         for (String storedKey : store.keys()) {
+            if (!owns(storedKey)) {
+                continue;
+            }
             Optional<StoredObject> stored = store.get(storedKey);
             if (stored.isEmpty()) {
                 continue;
             }
             if (storedKey.startsWith(GROUP_PREFIX)) {
-                read(storedKey, stored.get(), StoredGroup.class).ifPresent(groups::add);
-            } else if (storedKey.startsWith(PLACEMENT_PREFIX)) {
-                read(storedKey, stored.get(), StoredPlacement.class).ifPresent(placements::add);
+                read(storedKey, stored.get(), StoredGroup.class).filter(group -> usable(storedKey, group)).ifPresent(groups::add);
+            } else {
+                read(storedKey, stored.get(), StoredPlacement.class).filter(placement -> usable(storedKey, placement))
+                    .ifPresent(placements::add);
             }
         }
         // The root (no parent) leads its tenant, the rest follow in the order they were created.
@@ -408,9 +418,9 @@ public class ManagementGroupStore implements Resettable {
             hierarchy.sequences.put(key(group.name()), group.sequence());
             nextSequence = Math.max(nextSequence, group.sequence() + 1);
         }
-        // A tenant whose root entry is missing gets a fresh one, ahead of the groups that hang off it.
         for (Map.Entry<String, Hierarchy> entry : hierarchies.entrySet()) {
             Hierarchy hierarchy = entry.getValue();
+            // A tenant whose root entry is missing gets a fresh one, ahead of the groups that hang off it.
             if (!hierarchy.groups.containsKey(entry.getKey())) {
                 String tenantId = hierarchy.groups.values().iterator().next().tenantId();
                 Map<String, Group> rest = new LinkedHashMap<>(hierarchy.groups);
@@ -419,6 +429,18 @@ public class ManagementGroupStore implements Resettable {
                 hierarchy.groups.put(entry.getKey(), root);
                 hierarchy.groups.putAll(rest);
                 persist(hierarchy, root);
+            }
+            // A group whose parent did not load hangs off the root, so it stays reachable from the tree.
+            Group root = hierarchy.groups.get(entry.getKey());
+            for (Group group : new ArrayList<>(hierarchy.groups.values())) {
+                if (group.parent() != null && !hierarchy.groups.containsKey(key(group.parent()))) {
+                    LOG.warnv("Management groups: {0} named the missing parent {1}; moving it under the root",
+                        group.name(), group.parent());
+                    Group moved = new Group(group.name(), group.displayName(), group.tenantId(), root.name(),
+                        group.version(), group.updatedTime(), group.updatedBy());
+                    hierarchy.groups.put(key(group.name()), moved);
+                    persist(hierarchy, moved);
+                }
             }
         }
         for (StoredPlacement placement : placements) {
@@ -430,6 +452,38 @@ public class ManagementGroupStore implements Resettable {
         if (!groups.isEmpty()) {
             LOG.infov("Management groups: {0} group(s) and {1} placement(s) restored", groups.size(), placements.size());
         }
+    }
+
+    private static boolean owns(String storedKey) {
+        return storedKey.startsWith(GROUP_PREFIX) || storedKey.startsWith(PLACEMENT_PREFIX);
+    }
+
+    /** Whether a stored group can join a hierarchy: named, in a tenant, timed validly, and parentless only as its tenant's root. */
+    private static boolean usable(String storedKey, StoredGroup group) {
+        String problem = null;
+        if (group.name() == null || group.name().isBlank() || group.tenantId() == null || group.tenantId().isBlank()) {
+            problem = "it has no name or no tenant";
+        } else if (group.parent() == null && !group.name().equalsIgnoreCase(group.tenantId())) {
+            problem = "it has no parent and is not its tenant's root";
+        } else if (group.updatedTime() != null) {
+            try {
+                Instant.parse(group.updatedTime());
+            } catch (DateTimeParseException e) {
+                problem = "its updatedTime is not a timestamp";
+            }
+        }
+        if (problem != null) {
+            LOG.warnv("Management groups: skipping entry {0}: {1}", storedKey, problem);
+        }
+        return problem == null;
+    }
+
+    private static boolean usable(String storedKey, StoredPlacement placement) {
+        boolean usable = placement.tenantId() != null && placement.subscriptionId() != null && placement.group() != null;
+        if (!usable) {
+            LOG.warnv("Management groups: skipping entry {0}: it has no tenant, subscription or group", storedKey);
+        }
+        return usable;
     }
 
     private void persist(Hierarchy hierarchy, Group group) {
@@ -451,7 +505,7 @@ public class ManagementGroupStore implements Resettable {
         try {
             return Optional.of(MAPPER.readValue(stored.data(), type));
         } catch (IOException | RuntimeException e) {
-            LOG.warnv(e, "Management groups: dropping unreadable entry {0}", storedKey);
+            LOG.warnv(e, "Management groups: skipping unreadable entry {0}", storedKey);
             return Optional.empty();
         }
     }
