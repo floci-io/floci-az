@@ -798,9 +798,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                     ServiceBusEntityXml.MessageLifetimeSettings lifetime =
                             ServiceBusEntityXml.parseMessageLifetime(body);
                     ServiceBusEntityXml.DeliverySettings delivery = ServiceBusEntityXml.parseDelivery(body);
-                    if (isUpdate(req) && store.get(subKey(account, namespace, topicName, subName)).isPresent()) {
+                    if (isUpdate(req)) {
                         yield handleUpdateSubscription(account, namespace, topicName, subName,
-                                lifetime, delivery, ServiceBusEntityXml.parseMetadata(body));
+                                requiresSession, body, lifetime, delivery, ServiceBusEntityXml.parseMetadata(body));
                     }
                     yield handleCreateSubscription(account, namespace, topicName, subName,
                             requiresSession, body, lifetime, delivery);
@@ -897,6 +897,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     /** Applies an update to an existing subscription; its rules are left as they are. */
     private synchronized Response handleUpdateSubscription(String account, String namespace,
                                               String topicName, String subName,
+                                              boolean requiresSession, String body,
                                               ServiceBusEntityXml.MessageLifetimeSettings lifetime,
                                               ServiceBusEntityXml.DeliverySettings delivery,
                                               ServiceBusEntityXml.EntityMetadata metadata) {
@@ -907,8 +908,13 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         ServiceBusModels.TopicEntity topic = fromBytes(
                 storedTopic.get().data(), ServiceBusModels.TopicEntity.class);
         String key = subKey(account, namespace, topicName, subName);
+        Optional<StoredObject> stored = store.get(key);
+        if (stored.isEmpty()) {
+            return handleCreateSubscription(account, namespace, topicName, subName,
+                    requiresSession, body, lifetime, delivery);
+        }
         ServiceBusModels.SubscriptionEntity existing =
-                fromBytes(store.get(key).orElseThrow().data(), ServiceBusModels.SubscriptionEntity.class);
+                fromBytes(stored.get().data(), ServiceBusModels.SubscriptionEntity.class);
         ServiceBusModels.SubscriptionEntity sub = newSubscription(
                 topicName, subName, existing.requiresSession(), lifetime, delivery, metadata)
                 .updating(existing);
