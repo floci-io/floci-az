@@ -84,6 +84,15 @@ class ScopeResolverTest {
     }
 
     @Test
+    void instanceDiscoveryIsAnEntraPathOnlyUnderCommon() {
+        assertTrue(ScopeResolver.isEntraPath("common/discovery/instance"));
+        assertFalse(ScopeResolver.isEntraPath("t1/discovery/instance"));
+        assertFalse(ScopeResolver.isEntraPath("common/discovery/instance/x"));
+        assertTrue(ScopeResolver.isEntraPath("common/discovery/v2.0/keys"));
+        assertNull(resolver.resolve("common/discovery/instance", null).tenantId());
+    }
+
+    @Test
     void entraAliasesFallThroughToTheLoginHost() {
         for (String alias : new String[] {"common", "organizations", "consumers", "Common"}) {
             ScopeContext scope = resolver.resolve(alias + "/oauth2/v2.0/token", "login.microsoftonline.us");

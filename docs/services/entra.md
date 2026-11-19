@@ -47,6 +47,7 @@ All endpoints are tenant-rooted at the base URL (port `4577`). `{tenant}` may be
 | `GET /oidc/userinfo`, `POST /oidc/userinfo` | Scoped profile for a locally signed delegated access token |
 | `GET /{tenant}/discovery/v2.0/keys` | JWKS |
 | `GET /common/userrealm/{username}?api-version=1.0` | Home realm discovery: always `account_type: Managed`, so MSAL username-password sign-in goes straight to the password grant |
+| `GET /common/discovery/instance?api-version=1.1&authorization_endpoint=...` | Instance discovery, which MSAL calls before a token request: `tenant_discovery_endpoint` names the OpenID configuration of the authorize URL's tenant on the emulator's own host (`v2.0` for a v2 authorize URL, `common` when none is sent), and the one `metadata` entry names the request host and the other login hosts of its cloud. Azure lists every public cloud there and answers `invalid_instance` for an unknown authority; floci-az answers any authorize URL |
 
 ## Discovery document
 
