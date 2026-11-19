@@ -1,7 +1,9 @@
 package io.floci.az.services.search;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
@@ -14,7 +16,6 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.math.BigInteger;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -59,7 +60,10 @@ public class SearchDocuments {
 
     private static final Logger LOG = Logger.getLogger(SearchDocuments.class);
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    /** Refuses content after the first JSON value, so a batch with trailing content writes nothing. */
+    private static final ObjectMapper MAPPER = JsonMapper.builder()
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .build();
 
     private static final String STORE = "search";
     private static final char SEP = '\0';
@@ -545,8 +549,9 @@ public class SearchDocuments {
                 yield integer(value, type, Long.MIN_VALUE, Long.MAX_VALUE);
             }
             case "Edm.Double", "Edm.Single", "Edm.Half" -> {
-                if (value instanceof Number number && !(number instanceof BigInteger)) {
-                    yield number.doubleValue();
+                Optional<Double> number = finiteDouble(value);
+                if (number.isPresent()) {
+                    yield number.get();
                 }
                 if (value instanceof String text && NOT_A_NUMBER.contains(text)) {
                     // Azure keeps the three special values as the strings they were sent as.
@@ -558,6 +563,18 @@ public class SearchDocuments {
             case "Edm.GeographyPoint" -> point(value);
             default -> value;
         };
+    }
+
+    /**
+     * A JSON number as a double, when it is one. Jackson reads an integer beyond a long as a {@code BigInteger}, so
+     * {@code 9223372036854775808} is a double as much as {@code 9.223372036854776e18} is; a number past the range of
+     * a double, which would become an infinity, is not.
+     */
+    private static Optional<Double> finiteDouble(Object value) {
+        if (value instanceof Number number && Double.isFinite(number.doubleValue())) {
+            return Optional.of(number.doubleValue());
+        }
+        return Optional.empty();
     }
 
     private static Object integer(Object value, String type, long min, long max) {
@@ -595,10 +612,10 @@ public class SearchDocuments {
     private static Map<String, Object> point(Object value) {
         if (value instanceof Map<?, ?> sent && "Point".equals(sent.get("type"))
                 && sent.get("coordinates") instanceof List<?> coordinates && coordinates.size() == 2
-                && coordinates.stream().allMatch(c -> c instanceof Number && !(c instanceof BigInteger))) {
+                && coordinates.stream().allMatch(c -> finiteDouble(c).isPresent())) {
             Map<String, Object> point = new LinkedHashMap<>();
             point.put("type", "Point");
-            point.put("coordinates", coordinates.stream().map(c -> ((Number) c).doubleValue()).toList());
+            point.put("coordinates", coordinates.stream().map(c -> finiteDouble(c).orElseThrow()).toList());
             point.put("crs", WGS84);
             return point;
         }
@@ -676,7 +693,6 @@ public class SearchDocuments {
             return Optional.empty();
         }
         Map<String, Object> tree = new LinkedHashMap<>();
-        Set<String> whole = new HashSet<>();
         for (String path : paths) {
             Map<String, Object> level = tree;
             List<Map<String, Object>> candidates = fields;
@@ -697,15 +713,25 @@ public class SearchDocuments {
                 level = next;
                 candidates = fields(field);
             }
-            if (!path.contains("/")) {
-                whole.add(path);
-            }
         }
-        // address,address/city selects all of address: an empty map stands for the whole field.
-        for (String name : whole) {
-            tree.put(name, new LinkedHashMap<String, Object>());
+        // address,address/city selects all of address, at any depth: an empty map stands for the whole field.
+        for (String path : paths) {
+            selectWhole(tree, path.split("/"));
         }
         return Optional.of(tree);
+    }
+
+    /** Marks the field at {@code parts} as selected whole, unless a field above it already is. */
+    private static void selectWhole(Map<String, Object> tree, String[] parts) {
+        Map<String, Object> level = tree;
+        for (int i = 0; i < parts.length - 1; i++) {
+            Map<String, Object> next = cast(level.get(parts[i]));
+            if (next.isEmpty()) {
+                return;
+            }
+            level = next;
+        }
+        level.put(parts[parts.length - 1], new LinkedHashMap<String, Object>());
     }
 
     // ── Storage ──────────────────────────────────────────────────────────────
@@ -742,7 +768,8 @@ public class SearchDocuments {
     private static byte[] body(AzureRequest req) {
         InputStream body = req.bodyStream();
         try {
-            return body == null ? new byte[0] : body.readAllBytes();
+            // One byte past the limit is enough to refuse a batch as too large, without holding all of it.
+            return body == null ? new byte[0] : body.readNBytes(MAX_BODY_BYTES + 1);
         } catch (IOException e) {
             throw new Refused(SearchErrors.invalid("The request body could not be read."));
         }

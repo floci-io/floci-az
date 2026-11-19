@@ -136,6 +136,9 @@ class SearchDocumentsTest {
         given().queryParam("$select", "address,address/city").when().get(DOCS + "('one')" + API).then()
             .statusCode(200)
             .body("address.keySet()", contains("city", "postcode"));
+        given().queryParam("$select", "address/city,address").when().get(DOCS + "('one')" + API).then()
+            .statusCode(200)
+            .body("address.keySet()", contains("city", "postcode"));
 
         lookup("missing").then().statusCode(404)
             .header("Content-Type", nullValue())
@@ -447,6 +450,64 @@ class SearchDocumentsTest {
                     + "'."));
         given().when().get(BASE + "/indexes('nothere')/docs/$count" + API).then().statusCode(404);
         given().when().get(DOCS + "/search.index" + API).then().statusCode(405);
+    }
+
+    @Test
+    void aNestedComplexFieldStaysWholeWhenOneOfItsSubFieldsIsSelectedToo() {
+        given().contentType("application/json").body("""
+                {"name": "nested", "fields": [
+                  {"name": "id", "type": "Edm.String", "key": true},
+                  {"name": "address", "type": "Edm.ComplexType", "fields": [
+                    {"name": "city", "type": "Edm.String"},
+                    {"name": "region", "type": "Edm.ComplexType", "fields": [
+                      {"name": "name", "type": "Edm.String"},
+                      {"name": "code", "type": "Edm.String"}]}]}]}""")
+            .when().post(BASE + "/indexes" + API).then().statusCode(201);
+        String docs = BASE + "/indexes('nested')/docs";
+        batchTo(docs, "{\"id\": \"one\", \"address\": {\"city\": \"Oulu\", \"region\": {\"name\": \"North\","
+                + " \"code\": \"N\"}}}", "").then().statusCode(200);
+
+        for (String select : new String[] {"address/region,address/region/name",
+                "address/region/name,address/region"}) {
+            given().queryParam("$select", select).when().get(docs + "('one')" + API).then().statusCode(200)
+                .body("address.keySet()", contains("region"))
+                .body("address.region.keySet()", contains("name", "code"));
+        }
+        given().queryParam("$select", "address/region/name").when().get(docs + "('one')" + API).then()
+            .statusCode(200)
+            .body("address.region.keySet()", contains("name"));
+    }
+
+    @Test
+    void trailingContentAfterTheBatchRefusesItAndWritesNothing() {
+        given().contentType("application/json").body("{\"value\": [{\"id\": \"one\"}]} {\"extra\": true}")
+            .when().post(DOCS + "/search.index" + API).then().statusCode(400)
+            .body("error.code", equalTo(""));
+
+        lookup("one").then().statusCode(404);
+        given().when().get(DOCS + "/$count" + API).then().body(equalTo("0"));
+    }
+
+    @Test
+    void aDoubleWrittenAsAnIntegerBeyondALongIsAccepted() {
+        batch("{\"id\": \"big\", \"rating\": 9223372036854775808, \"point\": {\"type\": \"Point\","
+                + " \"coordinates\": [24, 60]}}").then().statusCode(200);
+
+        // RestAssured reads JSON numbers as floats, so the exact double is checked in the raw body.
+        lookup("big").then().statusCode(200)
+            .body(containsString("\"rating\":9.223372036854776E18"))
+            .body("point.coordinates", contains(24.0f, 60.0f));
+        // Past the range of a double, a number would become an infinity, which JSON cannot carry.
+        batch("{\"id\": \"huge\", \"rating\": 1e400}").then().statusCode(400);
+        lookup("huge").then().statusCode(404);
+    }
+
+    @Test
+    void aBatchOverSixteenMegabytesIsTooLargeAndWritesNothing() {
+        String title = "x".repeat(16 * 1024 * 1024);
+
+        batch("{\"id\": \"one\"}, {\"id\": \"two\", \"title\": \"" + title + "\"}").then().statusCode(413);
+        given().when().get(DOCS + "/$count" + API).then().body(equalTo("0"));
     }
 
     @Test
