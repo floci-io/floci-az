@@ -177,7 +177,7 @@ Errors the hub itself reports use the IoT Hub `ErrorDetails` shape with Azure's 
 
 | Request | Answer |
 |---|---|
-| `F1` with a partition count other than 2, or a Basic or Standard SKU outside 2 to 32 (Learn's maximum; azurerm's own check allows 128) | `400 {"code": 400016, "httpStatusCode": 400, "message": "Invalid PartitionCount 4 - value must be between 2 and 2."}` |
+| `F1` with a partition count other than 2, or a Basic or Standard SKU outside 2 to 32 (Learn's maximum; azurerm's own check allows 128). A hub saved by an earlier floci-az with more keeps its count, so an update that sends it back passes | `400 {"code": 400016, "httpStatusCode": 400, "message": "Invalid PartitionCount 4 - value must be between 2 and 2."}` |
 | `minTlsVersion` other than `1.0` or `1.2` | `400 {"code": 400089, ...}` |
 
 The following are refused with ARM's `{"error": {...}}` envelope:
