@@ -112,25 +112,27 @@ def test_table_format_answers_columns_and_rows(graph):
 
 
 def test_pages_through_the_skip_token(graph):
-    names, token, pages = [], None, 0
-    while True:
-        response = graph.resources(
+    def page(token):
+        return graph.resources(
             QueryRequest(
                 subscriptions=[SUB],
                 query=ACCOUNTS_QUERY,
                 options=QueryRequestOptions(top=2, skip_token=token),
             )
         )
-        pages += 1
-        assert response.total_records == len(ACCOUNTS)
-        names.extend(row["name"] for row in response.data)
-        token = response.skip_token
-        if token is None:
-            break
-        assert response.count == 2
 
-    assert pages == 2
-    assert names == ACCOUNTS
+    # Exactly two requests: a server that ignored the token would repeat the first page, not end the result.
+    first = page(None)
+    assert first.total_records == len(ACCOUNTS)
+    assert first.count == 2
+    assert first.skip_token is not None
+
+    second = page(first.skip_token)
+    assert second.total_records == len(ACCOUNTS)
+    assert second.count == len(ACCOUNTS) - 2
+    assert second.skip_token is None
+
+    assert [row["name"] for row in first.data] + [row["name"] for row in second.data] == ACCOUNTS
 
 
 def test_summarize_and_resource_containers(graph):
