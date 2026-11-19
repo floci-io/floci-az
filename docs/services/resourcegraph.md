@@ -4,9 +4,10 @@ Implements the `Microsoft.ResourceGraph` query endpoint of the Resource Graph RE
 (`stable/2024-04-01`): `POST /providers/Microsoft.ResourceGraph/resources` runs a Kusto Query Language
 (KQL) query over the resources, resource containers and policy resources the emulator holds, and
 answers in the `objectArray` or `table` result format with the service's paging contract. The
-request and response shapes are verified by the emulator's own test suite over HTTP; the Azure CLI
-`resource-graph` extension and the Resource Graph SDKs, which call this endpoint, have not been run
-against it yet.
+request and response shapes are verified by the emulator's own test suite over HTTP and by the Python
+SDK compatibility suite, which drives the endpoint through `azure-mgmt-resourcegraph` at api-version
+`2024-04-01` (both result formats, `$skipToken` paging, the error shape). The Azure CLI
+`resource-graph` extension and the other Resource Graph SDKs have not been run against it yet.
 
 > **HTTP-only, no Docker.** Queries read the live state of the other services; nothing is indexed or
 > persisted separately.
