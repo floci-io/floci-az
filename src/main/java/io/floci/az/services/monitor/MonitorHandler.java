@@ -19,6 +19,7 @@ import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.monitor.MonitorModels.DeletedWorkspace;
 import io.floci.az.services.monitor.MonitorModels.MonitorResource;
 import io.floci.az.services.monitor.activitylog.ActivityLogEndpoint;
 import io.quarkus.runtime.configuration.MemorySize;
@@ -35,6 +36,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -83,11 +85,17 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
 
     /** {@code DeletedWorkspaces_List} and {@code DeletedWorkspaces_ListByResourceGroup}. */
     private static final Pattern DELETED_WORKSPACES_PATTERN = Pattern.compile(
-        "subscriptions/[^/]+(?:/resourceGroups/[^/]+)?/providers/Microsoft\\.OperationalInsights/deletedWorkspaces/?"
+        "subscriptions/([^/]+)(?:/resourceGroups/([^/]+))?/providers/Microsoft\\.OperationalInsights/deletedWorkspaces/?"
             + "(?:\\?.*)?",
         Pattern.CASE_INSENSITIVE);
 
     static final String WORKSPACE_TYPE = "Microsoft.OperationalInsights/workspaces";
+
+    /** The type path of a deleted workspace's record key: the workspace id with this type for its own. */
+    static final String DELETED_WORKSPACE_TYPE = "Microsoft.OperationalInsights/deletedWorkspaces";
+
+    /** How long a workspace deleted without {@code force} stays recoverable (the {@code Workspaces_Delete} doc). */
+    static final Duration SOFT_DELETE_RETENTION = Duration.ofDays(14);
     static final String DCE_TYPE = "Microsoft.Insights/dataCollectionEndpoints";
     static final String DCR_TYPE = "Microsoft.Insights/dataCollectionRules";
     static final String DIAGNOSTIC_SETTINGS_TYPE = "Microsoft.Insights/diagnosticSettings";
@@ -108,6 +116,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
      */
     private final StorageBackend<String, StoredObject> store;
     private final ArmResourceStore<MonitorResource> workspaces;
+    private final ArmResourceStore<DeletedWorkspace> deletedWorkspaces;
     private final ArmResourceStore<MonitorResource> endpoints;
     private final ArmResourceStore<MonitorResource> rules;
     private final ArmResourceStore<MonitorResource> diagnosticSettings;
@@ -134,6 +143,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         this.store = factory.create("monitor");
         this.workspaces = ArmResourceStore.create(factory, "monitor", WORKSPACE_TYPE, MonitorResource.class,
             MonitorResource::id, key -> key.startsWith("workspace/"));
+        this.deletedWorkspaces = ArmResourceStore.create(factory, "monitor", DELETED_WORKSPACE_TYPE,
+            DeletedWorkspace.class, DeletedWorkspace::id, key -> false);
         this.endpoints = ArmResourceStore.create(factory, "monitor", DCE_TYPE, MonitorResource.class,
             MonitorResource::id, key -> key.startsWith("dce/"));
         this.rules = ArmResourceStore.create(factory, "monitor", DCR_TYPE, MonitorResource.class,
@@ -205,11 +216,12 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                 ? listCollection(collection.group(3), new ArmScope(collection.group(1), collection.group(2)))
                 : Response.status(405).build();
         }
-        // A delete removes a workspace outright, so there is never a soft-deleted one to list. azurerm reads this
-        // list before every workspace create.
-        if (DELETED_WORKSPACES_PATTERN.matcher(path).matches()) {
+        // azurerm reads this list before every workspace create, and only acts on an LACluster sku.
+        Matcher deletedList = DELETED_WORKSPACES_PATTERN.matcher(path);
+        if (deletedList.matches()) {
             return "GET".equals(method)
-                ? Response.ok(Map.of("value", List.of())).type(MediaType.APPLICATION_JSON).build()
+                ? Response.ok(Map.of("value", listDeletedWorkspaces(new ArmScope(deletedList.group(1),
+                    deletedList.group(2))))).type(MediaType.APPLICATION_JSON).build()
                 : Response.status(405).build();
         }
         // Every workspace, endpoint and rule lives in a resource group: a subscription-level path only lists.
@@ -322,7 +334,10 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             Map<String, Object> props = bodyProperties(body);
             MonitorResource workspace;
             synchronized (this) {
-                workspace = workspaces.createOrUpdate(id, existing -> {
+                Optional<MonitorResource> recovered = workspaces.get(id).isEmpty()
+                    ? recoverDeletedWorkspace(id) : Optional.empty();
+                workspace = workspaces.createOrUpdate(id, stored -> {
+                    Optional<MonitorResource> existing = stored.or(() -> recovered);
                     // customerId is read-only: a redeploy keeps the one the workspace was created with
                     String customerId = existing.map(ws -> ws.property("customerId"))
                         .orElse(props.get("customerId") instanceof String text ? text : null);
@@ -346,17 +361,65 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             }
             return Response.ok(workspace.get().value()).type(MediaType.APPLICATION_JSON).build();
         } else if ("DELETE".equals(method)) {
+            boolean force = isForce(req);
             synchronized (this) {
-                workspaces.delete(id).map(ArmResourceStore.Stored::value)
-                    .map(workspace -> workspace.property("customerId"))
-                    .ifPresent(customerId -> {
+                workspaces.delete(id).map(ArmResourceStore.Stored::value).ifPresent(workspace -> {
+                    String customerId = workspace.property("customerId");
+                    if (customerId != null) {
                         workspaceIndex().remove(customerId);
                         store.delete(LEGACY_WORKSPACE_LOOKUP + customerId);
-                    });
+                    }
+                    if (!force) {
+                        deletedWorkspaces.put(new DeletedWorkspace(deletedWorkspaceId(id).id(), Instant.now(),
+                            workspace));
+                        LOG.infov("Monitor: workspace {0} is soft-deleted", workspace.name());
+                    }
+                });
             }
             return Response.ok().build();
         }
         return Response.status(405).build();
+    }
+
+    /**
+     * {@code Workspaces_Delete}'s {@code force}: true removes the workspace and releases its name; otherwise it stays
+     * recoverable for {@link #SOFT_DELETE_RETENTION}. A resource-group delete sends no flag, and soft-deletes.
+     */
+    private static boolean isForce(AzureRequest req) {
+        if (req.queryParams() == null) {
+            return false;
+        }
+        return req.queryParams().entrySet().stream()
+            .anyMatch(entry -> "force".equalsIgnoreCase(entry.getKey()) && "true".equalsIgnoreCase(entry.getValue()));
+    }
+
+    /** The record key of the deleted workspace {@code id}: the same path with {@code deletedWorkspaces}. */
+    private static ArmResourceId deletedWorkspaceId(ArmResourceId id) {
+        return ArmResourceId.parse("/subscriptions/" + id.subscriptionId() + "/resourceGroups/" + id.resourceGroup()
+            + "/providers/" + DELETED_WORKSPACE_TYPE + "/" + id.name()).orElseThrow();
+    }
+
+    /** {@code DeletedWorkspaces_List} and {@code _ListByResourceGroup}: the workspaces still recoverable. */
+    private List<MonitorResource> listDeletedWorkspaces(ArmScope scope) {
+        dropExpiredDeletedWorkspaces();
+        return deletedWorkspaces.list(scope).stream().map(stored -> stored.value().workspace()).toList();
+    }
+
+    /**
+     * Takes the deleted workspace {@code id} out of the deleted records, for a PUT that recreates it: "To recover the
+     * workspace, create it again with the same name, in the same subscription, resource group and location."
+     */
+    private Optional<MonitorResource> recoverDeletedWorkspace(ArmResourceId id) {
+        dropExpiredDeletedWorkspaces();
+        Optional<MonitorResource> recovered = deletedWorkspaces.delete(deletedWorkspaceId(id))
+            .map(stored -> stored.value().workspace());
+        recovered.ifPresent(workspace -> LOG.infov("Monitor: workspace {0} is recovered", workspace.name()));
+        return recovered;
+    }
+
+    private void dropExpiredDeletedWorkspaces() {
+        Instant cutoff = Instant.now().minus(SOFT_DELETE_RETENTION);
+        deletedWorkspaces.deleteIf(deleted -> deleted.deletedAt().isBefore(cutoff));
     }
 
     /** The workspace's shared keys, derived from its customer id so they hold for the workspace's life. */
@@ -902,6 +965,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
 
     public synchronized void clear() {
         workspaces.clear();
+        deletedWorkspaces.clear();
         endpoints.clear();
         rules.clear();
         diagnosticSettings.clear();

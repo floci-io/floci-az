@@ -459,11 +459,12 @@ setup() {
 }
 
 # Runs last: the destroy in teardown_file ignores failures, and leaves nothing to do when this passes.
-@test "OpenTofu: destroying everything removes the resource group and purges the key vault" {
+@test "OpenTofu: destroying everything removes the resource group and purges the key vault and the API Management service" {
     cd "$TOFU_DIR"
     run tofu destroy -input=false -auto-approve -no-color
     assert_success
     assert_output --partial "azurerm_key_vault.kv: Destruction complete"
+    assert_output --partial "azurerm_api_management.apim: Destruction complete"
     assert_output --partial "azurerm_resource_group.rg: Destruction complete"
 
     run curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer fake" \
@@ -472,5 +473,10 @@ setup() {
 
     run curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer fake" \
         "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/providers/Microsoft.KeyVault/locations/eastus/deletedVaults/${KV_NAME}?api-version=2023-02-01"
+    assert_output "404"
+
+    # The destroy purges the soft-deleted API Management service too (purge_soft_delete_on_destroy).
+    run curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/providers/Microsoft.ApiManagement/locations/eastus/deletedservices/floci-test-apim?api-version=2022-08-01"
     assert_output "404"
 }

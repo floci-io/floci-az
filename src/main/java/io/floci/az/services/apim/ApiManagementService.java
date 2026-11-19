@@ -17,6 +17,7 @@ import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.apim.ApiManagementModels.ApimDeletedService;
 import io.floci.az.services.apim.ApiManagementModels.ApimService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -24,7 +25,11 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -44,6 +49,16 @@ public class ApiManagementService implements GlobalNameSource {
      * written under another key shape and there are no legacy keys to read.
      */
     private final ArmResourceStore<ApimService> services;
+
+    /**
+     * {@code DeletedServices_GetByName} and {@code _Purge}: a deleted service stays recoverable for
+     * {@link #SOFT_DELETE_RETENTION}, and keeps its name: a create of it from any scope is refused until it is purged or
+     * expires. The children of a deleted service stay in their maps until it is purged or restored over.
+     */
+    private final ArmResourceStore<ApimDeletedService> deletedServices;
+
+    /** How long Azure keeps a deleted service: the az CLI recording schedules the purge 48 hours after the delete. */
+    static final Duration SOFT_DELETE_RETENTION = Duration.ofHours(48);
     private final Map<String, Map<String, Object>> apis;
     private final Map<String, Map<String, Object>> operations;
     private final Map<String, Map<String, Object>> policies;
@@ -62,7 +77,10 @@ public class ApiManagementService implements GlobalNameSource {
         this.config = config;
         this.names = names;
         this.defaults = defaults;
-        this.services = ArmResourceStore.create(storageFactory, "apim", ApimService.class, ApimService::id,
+        this.services = ArmResourceStore.create(storageFactory, "apim", ApiManagementModels.SERVICE_TYPE,
+                ApimService.class, ApimService::id, key -> false);
+        this.deletedServices = ArmResourceStore.create(storageFactory, "apim",
+                ApiManagementModels.DELETED_SERVICE_ID_TYPE, ApimDeletedService.class, ApimDeletedService::id,
                 key -> false);
         this.apis = store.apis();
         this.operations = store.operations();
@@ -98,14 +116,18 @@ public class ApiManagementService implements GlobalNameSource {
                         .map(stored -> Response.ok(stored.value().toArm()).build())
                         .orElseGet(() -> notFound("service/" + requested.name()));
                 case "DELETE" -> {
-                    deleteService(requested);
+                    deleteService(request, requested);
                     yield Response.ok().build();
                 }
                 default -> Response.status(405).build();
             };
         }
-        return handleChild(request, path, method, services.get(requested).map(ArmResourceStore.Stored::id)
-                .orElse(requested), parts);
+        Optional<ArmResourceId> live = services.get(requested).map(ArmResourceStore.Stored::id);
+        if (live.isEmpty() && !deletedServicesNamed(sub, requested.name()).isEmpty()) {
+            // The children of a soft-deleted service wait for its restore; until then the service is not there.
+            return notFound("service/" + requested.name());
+        }
+        return handleChild(request, path, method, live.orElse(requested), parts);
     }
 
     /**
@@ -122,7 +144,95 @@ public class ApiManagementService implements GlobalNameSource {
         if (parts.length == 1 && "checkNameAvailability".equalsIgnoreCase(parts[0])) {
             return "POST".equals(method) ? checkNameAvailability(request) : Response.status(405).build();
         }
+        if (parts.length == 1 && "deletedservices".equalsIgnoreCase(parts[0])) {
+            return "GET".equals(method) ? listDeletedServices(sub) : Response.status(405).build();
+        }
+        if (parts.length == 4 && "locations".equalsIgnoreCase(parts[0])
+                && "deletedservices".equalsIgnoreCase(parts[2])) {
+            // A client builds this path from the service's location, which Azure answers as a display name
+            // ("West US"), so the segment arrives escaped.
+            ArmResourceId id = deletedServiceId(request, sub, URLDecoder.decode(parts[1], StandardCharsets.UTF_8),
+                    parts[3]);
+            return switch (method) {
+                case "GET" -> liveDeletedService(id)
+                        .map(deleted -> Response.ok(deleted.toArm()).build())
+                        .orElseGet(() -> notFound("deletedservices/" + id.name()));
+                case "DELETE" -> purgeDeletedService(id);
+                default -> Response.status(405).build();
+            };
+        }
         return notFound(path);
+    }
+
+    // ── Deleted services ────────────────────────────────────────────────────
+
+    /** {@code DeletedServices_ListBySubscription}: one page holds them all, so there is no {@code nextLink}. */
+    private Response listDeletedServices(String sub) {
+        dropExpiredDeletedServices();
+        return Response.ok(Map.of("value", deletedServices.list(new ArmScope(sub, null)).stream()
+                .map(stored -> stored.value().toArm()).toList())).build();
+    }
+
+    /**
+     * {@code DeletedServices_Purge}. The spec declares 200 for a purged service and 204 for one that does not exist;
+     * both are terminal, so a client's poller finishes at once. Azure itself answers 202 and polls.
+     */
+    private synchronized Response purgeDeletedService(ArmResourceId id) {
+        Optional<ApimDeletedService> deleted = liveDeletedService(id);
+        if (deleted.isEmpty()) {
+            return Response.noContent().build();
+        }
+        deletedServices.delete(id);
+        dropChildren(serviceId(deleted.get().service().id()));
+        LOG.infov("ARM: purged deleted API Management service {0}", id.name());
+        return Response.ok().build();
+    }
+
+    /** The deleted service {@code id} names, unless its purge date has passed. */
+    private Optional<ApimDeletedService> liveDeletedService(ArmResourceId id) {
+        dropExpiredDeletedServices();
+        return deletedServices.get(id).map(ArmResourceStore.Stored::value);
+    }
+
+    /** Records past their purge date go, with their children, the next time anything reads the deleted services. */
+    private synchronized void dropExpiredDeletedServices() {
+        Instant now = Instant.now();
+        for (ArmResourceStore.Stored<ApimDeletedService> expired
+                : deletedServices.deleteIf(deleted -> deleted.scheduledPurgeDate().isBefore(now))) {
+            dropChildren(serviceId(expired.value().service().id()));
+        }
+    }
+
+    /** The subscription's deleted services of this name: a location is part of their ids, but a name is one service. */
+    private List<ArmResourceStore.Stored<ApimDeletedService>> deletedServicesNamed(String sub, String name) {
+        dropExpiredDeletedServices();
+        return deletedServices.list(new ArmScope(sub, null)).stream()
+                .filter(stored -> name.equalsIgnoreCase(stored.id().name()))
+                .toList();
+    }
+
+    /** The deleted services of this name in every subscription: the name is global, as a live service's is. */
+    private List<ArmResourceStore.Stored<ApimDeletedService>> deletedServicesNamed(String name) {
+        dropExpiredDeletedServices();
+        return deletedServices.all().stream()
+                .filter(stored -> name.equalsIgnoreCase(stored.id().name()))
+                .toList();
+    }
+
+    private static ArmResourceId deletedServiceId(AzureRequest request, String sub, String location, String name) {
+        return ArmResourceId.parse("/subscriptions/" + sub + "/providers/Microsoft.ApiManagement/locations/"
+                + CloudCatalog.normalizeLocation(cloud(request), location) + "/deletedservices/" + name)
+                .orElseThrow(() -> new IllegalArgumentException("not a deleted service: " + name));
+    }
+
+    /** The display name of {@code location} in the request's cloud ({@code West US}), or the value itself. */
+    private static String locationDisplayName(AzureRequest request, String location) {
+        String name = CloudCatalog.normalizeLocation(cloud(request), location);
+        return cloud(request).locations().stream()
+                .filter(candidate -> candidate.name().equals(name))
+                .map(CloudProfile.Location::displayName)
+                .findFirst()
+                .orElse(location);
     }
 
     /**
@@ -212,7 +322,8 @@ public class ApiManagementService implements GlobalNameSource {
 
     /**
      * {@code ApiManagementService_CheckNameAvailability}: a name outside the service name rule is {@code Invalid}, one
-     * the name registry holds in any subscription is {@code AlreadyExists}, in the
+     * the name registry holds in any subscription is {@code AlreadyExists}, and so is one an unexpired soft-deleted
+     * service holds, since a create of it is refused until it is purged; in the
      * {@code ApiManagementServiceNameAvailabilityResult} shape of the spec's example.
      */
     private Response checkNameAvailability(AzureRequest request) {
@@ -223,6 +334,10 @@ public class ApiManagementService implements GlobalNameSource {
         if (names.owner(cloud(request), CloudSuffix.APIM, name).isPresent()) {
             return nameAvailability(false, "AlreadyExists", "The API Management service name '" + name
                     + "' is already in use.");
+        }
+        if (!deletedServicesNamed(name).isEmpty()) {
+            return nameAvailability(false, "AlreadyExists", "The API Management service name '" + name
+                    + "' is held by a soft-deleted service; restore or purge it first.");
         }
         return nameAvailability(true, "Valid", "");
     }
@@ -248,13 +363,38 @@ public class ApiManagementService implements GlobalNameSource {
         return services.list(scope).stream().map(stored -> stored.value().toArm()).toList();
     }
 
-    /** Whether a service of exactly this name exists, in any scope: the gateway knows the name alone. */
-    public boolean hasServiceNamed(String serviceName) {
-        return services.all().stream().anyMatch(stored -> serviceName.equals(stored.value().name()));
+    /**
+     * The key prefix of the live service of exactly this name, in any scope: the gateway knows the name alone, and the
+     * name gate keeps it to one live service. The gateway selects that service's APIs, policies and the rest by this
+     * prefix rather than by name, so the children a soft-deleted service of the same name keeps are never reached.
+     */
+    public Optional<String> liveServiceKey(String serviceName) {
+        return services.all().stream()
+                .filter(stored -> serviceName.equals(stored.value().name()))
+                .map(stored -> serviceKey(stored.id().subscriptionId(), stored.id().resourceGroup(),
+                        stored.value().name()) + "/")
+                .findFirst();
     }
 
     private synchronized Response createOrUpdateService(AzureRequest request, ArmResourceId requested) {
         Map<String, Object> body = parseBody(request);
+        if (services.get(requested).isEmpty()) {
+            // "You can't reuse the name of the API Management instance while the instance is soft-deleted": only a
+            // restore of the service's own record brings the name back. The name is global, so a deleted service in
+            // any subscription holds it, until it is purged or its purge date passes. The deleted records are read
+            // here, past their purge date dropped, rather than claimed in the name registry, so no hold outlives one.
+            String key = requested.canonicalKey();
+            List<ArmResourceStore.Stored<ApimDeletedService>> named = deletedServicesNamed(requested.name());
+            Optional<ArmResourceStore.Stored<ApimDeletedService>> own =
+                    named.stream().filter(stored -> ownRecord(stored, key)).findFirst();
+            if (isRestore(body) && own.isPresent()) {
+                return restoreService(own.get());
+            }
+            if (!named.isEmpty()) {
+                return ArmErrors.error(409, "ServiceAlreadyExists", "Api service already exists: " + requested.name()
+                        + ". A soft-deleted service of this name exists; restore or purge it first.");
+            }
+        }
         ArmResourceStore.Written<ApimService> written = services.createOrUpdate(requested, existing -> {
             // A service keeps the casing of the PUT that created it, as ARM does.
             ArmResourceId id = existing.map(service -> serviceId(service.id())).orElse(requested);
@@ -263,6 +403,23 @@ public class ApiManagementService implements GlobalNameSource {
         LOG.infov("ARM: {0} API Management service {1}", written.created() ? "created" : "updated",
                 written.stored().value().name());
         return Response.ok(written.stored().value().toArm()).build();
+    }
+
+    /** Whether {@code stored} is the deleted record of the service whose canonical key is {@code key}. */
+    private static boolean ownRecord(ArmResourceStore.Stored<ApimDeletedService> stored, String key) {
+        return serviceId(stored.value().service().id()).canonicalKey().equals(key);
+    }
+
+    /** {@code properties.restore: true}: "all other properties will be ignored", so the service comes back as it was. */
+    private static boolean isRestore(Map<String, Object> body) {
+        return Boolean.TRUE.equals(cast(body.get("properties")).get("restore"));
+    }
+
+    private Response restoreService(ArmResourceStore.Stored<ApimDeletedService> deleted) {
+        deletedServices.delete(deleted.id());
+        ApimService service = services.put(deleted.value().service()).value();
+        LOG.infov("ARM: restored API Management service {0}", service.name());
+        return Response.ok(service.toArm()).build();
     }
 
     @Override
@@ -438,8 +595,25 @@ public class ApiManagementService implements GlobalNameSource {
         return resource == null ? notFound(path) : Response.ok(stripInternal(resource)).build();
     }
 
-    private void deleteService(ArmResourceId requested) {
-        ArmResourceId service = services.delete(requested).map(ArmResourceStore.Stored::id).orElse(requested);
+    /**
+     * {@code ApiManagementService_Delete}: the service moves to the deleted services, with its children left in place
+     * for a restore. A resource-group delete arrives here too, and Azure soft-deletes the service then as well.
+     */
+    private synchronized void deleteService(AzureRequest request, ArmResourceId requested) {
+        services.delete(requested).ifPresent(stored -> {
+            ApimService service = stored.value();
+            Instant deletedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+            String location = Objects.requireNonNullElse(service.location(),
+                    defaults.defaultLocation(request.scope()));
+            ArmResourceId id = deletedServiceId(request, stored.id().subscriptionId(), location, service.name());
+            deletedServices.put(new ApimDeletedService(id.id(), service.name(), locationDisplayName(request, location),
+                    deletedAt, deletedAt.plus(SOFT_DELETE_RETENTION), service));
+            LOG.infov("ARM: API Management service {0} is soft-deleted", service.name());
+        });
+    }
+
+    /** Drops every child of {@code service}: its APIs, operations, policies, products and the rest. */
+    private void dropChildren(ArmResourceId service) {
         String sub = service.subscriptionId();
         String rg = service.resourceGroup();
         String serviceName = service.name();
@@ -860,6 +1034,7 @@ public class ApiManagementService implements GlobalNameSource {
 
     public void clear() {
         services.clear();
+        deletedServices.clear();
         apis.clear();
         operations.clear();
         policies.clear();

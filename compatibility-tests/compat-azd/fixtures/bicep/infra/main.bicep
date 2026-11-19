@@ -26,3 +26,5 @@ output AZURE_RESOURCE_GROUP string = rg.name
 output STORAGE_ACCOUNT string = workload.outputs.storageAccount
 output SUBNET_RANGE string = workload.outputs.subnetRange
 output IDENTITY_COUNT int = workload.outputs.identityCount
+output LOG_WORKSPACE string = workload.outputs.logWorkspace
+output APIM_SERVICE string = workload.outputs.apimService

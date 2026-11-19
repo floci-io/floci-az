@@ -107,6 +107,12 @@ class ApiManagementHandlerTest {
         put("", "{\"location\":\"westeurope\",\"properties\":{\"publisherEmail\":\"a@b.c\",\"publisherName\":\"unit\"}}");
     }
 
+    /** A deleted service keeps its name until it is purged, so a test that creates it again purges it first. */
+    private static void purgeService() {
+        given().when().delete("/subscriptions/" + SUB + "/providers/Microsoft.ApiManagement/locations/westeurope"
+                + "/deletedservices/" + SERVICE + API).then().statusCode(200);
+    }
+
     private void createApi(String apiId, String path, boolean withBackend) {
         String serviceUrl = withBackend ? ",\"serviceUrl\":\"" + backendUrl() + "\"" : "";
         put("/apis/" + apiId, "{\"properties\":{\"displayName\":\"" + apiId + "\",\"path\":\"" + path + "\""
@@ -182,12 +188,13 @@ class ApiManagementHandlerTest {
     }
 
     @Test
-    void deletingTheServiceRemovesItsChildren() {
+    void deletingAndPurgingTheServiceRemovesItsChildren() {
         createService();
         createApi("orders", "orders", true);
         put("/products/starter", "{\"properties\":{}}");
 
         given().when().delete(SERVICE_ID + API).then().statusCode(200);
+        purgeService();
         createService();
 
         given().when().get(SERVICE_ID + "/apis" + API)
@@ -423,7 +430,7 @@ class ApiManagementHandlerTest {
     }
 
     @Test
-    void deletingTheServiceRemovesEveryChildSoARecreatedServiceStartsEmpty() throws IOException {
+    void deletingAndPurgingTheServiceRemovesEveryChildSoARecreatedServiceStartsEmpty() throws IOException {
         createService();
         createApi("orders", "orders", false);
         createOperation("orders", "get-order", "GET", "/items/{id}");
@@ -448,6 +455,7 @@ class ApiManagementHandlerTest {
         given().when().delete("/subscriptions/" + SUB + "/resourceGroups/" + RG.toUpperCase(Locale.ROOT)
                 + "/providers/Microsoft.ApiManagement/service/" + SERVICE.toUpperCase(Locale.ROOT) + API)
                 .then().statusCode(200);
+        purgeService();
         createService();
 
         for (String kind : List.of("/apis", "/products", "/subscriptions", "/namedValues", "/backends")) {

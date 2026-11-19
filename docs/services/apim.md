@@ -50,6 +50,30 @@ The policy engine intentionally supports a focused subset:
 - `<return-response>` with nested `<set-status code="...">` and `<set-body>`
 - Named-value interpolation with `{{name}}` in supported policy values
 
+## Deleted services
+
+A deleted service is soft-deleted, as in Azure, whether it is deleted on its own or with its resource group (when
+`parity-overrides.resource-group-delete` makes the group delete cascade). It stays recoverable for 48 hours, with its
+APIs, operations, policies, products, subscriptions, named values and backends:
+
+- `GET /subscriptions/{sub}/providers/Microsoft.ApiManagement/deletedservices` lists the deleted services.
+- `GET .../locations/{location}/deletedservices/{name}` answers one, with `serviceId`, `deletionDate` and
+  `scheduledPurgeDate`; `404` when there is none.
+- `DELETE` on the same path purges it and its child resources. It answers `200` at once, and `204` when there is
+  nothing to purge; Azure answers `202` and completes the purge later.
+- A create with `properties.restore: true` brings the service back as it was deleted, with its child resources; the
+  other properties of the request are ignored, as the spec says.
+- A deleted service keeps its name: as in Azure, the name can't be reused while the service is soft-deleted. Any
+  other create of it answers `409 ServiceAlreadyExists` until the deleted service is purged or its purge date passes:
+  a plain create of the deleted service itself, a create in another resource group or subscription, and a restore
+  aimed at another resource group. Restore or purge the deleted service first. (Which code Azure answers here is not
+  in the spec.) The azurerm provider restores a deleted service before it creates one, with
+  `recover_soft_deleted`, on by default.
+- The gateway serves only the live service's own APIs, policies and the rest, never those a deleted service keeps.
+
+While a service is soft-deleted, its child resources answer `404`. `azd down --purge` and the azurerm provider (with
+`purge_soft_delete_on_destroy`, on by default) purge the deleted service after deleting it.
+
 ## Service names
 
 A service name is a global DNS name (`{name}.azure-api.net`, `azure-api.us` in Azure US Government, `azure-api.cn` in
@@ -58,7 +82,7 @@ other scope is refused with `409 ServiceAlreadyExists` until the owner deletes i
 `404`, and its `DELETE` is a no-op `200` that leaves the owner's service in place. The name is unique across every
 cloud the emulator serves, since one gateway serves every service by name. `POST
 /subscriptions/{sub}/providers/Microsoft.ApiManagement/checkNameAvailability` answers from the same owners, in any
-subscription: `nameAvailable: false` with reason `AlreadyExists` for an owned name, `Invalid` for a name outside the
+subscription: `nameAvailable: false` with reason `AlreadyExists` for an owned name or one a soft-deleted service still holds, `Invalid` for a name outside the
 service name rule below, and otherwise `nameAvailable: true` with reason `Valid`. Paths that differ only in case address the same service and its child resources. With
 `parity-overrides.strict-names` a name outside 1 to 50 letters, digits and hyphens, starting with a letter and ending
 with a letter or digit, is refused with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).

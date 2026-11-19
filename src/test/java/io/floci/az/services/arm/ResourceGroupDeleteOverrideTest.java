@@ -67,6 +67,30 @@ class ResourceGroupDeleteOverrideTest {
             .body("properties.vaultId", equalTo(group("rg-kv") + "/providers/Microsoft.KeyVault/vaults/kv-cascade"));
     }
 
+    /** Azure soft-deletes the workspaces and API Management services of a deleted group, so azd purges them after. */
+    @Test
+    void theCascadeSoftDeletesAWorkspaceAndAnApiManagementService() {
+        String apimApi = "?api-version=2022-08-01";
+        String workspace = group("rg-soft") + "/providers/Microsoft.OperationalInsights/workspaces/soft-ws";
+        String apim = group("rg-soft") + "/providers/Microsoft.ApiManagement/service/soft-apim-cascade";
+        json("{\"location\":\"eastus\"}").when().put(group("rg-soft") + API).then().statusCode(201);
+        json("{\"location\":\"eastus\",\"properties\":{}}").when().put(workspace + MONITOR_API).then().statusCode(201);
+        json("{\"location\":\"eastus\",\"sku\":{\"name\":\"Consumption\",\"capacity\":0},"
+                + "\"properties\":{\"publisherEmail\":\"a@example.com\",\"publisherName\":\"a\"}}")
+            .when().put(apim + apimApi).then().statusCode(200);
+
+        given().when().delete(group("rg-soft") + API).then().statusCode(202);
+
+        given().when().get("/subscriptions/" + SUB + "/providers/Microsoft.OperationalInsights/deletedWorkspaces"
+                + MONITOR_API)
+            .then().statusCode(200)
+            .body("value.id", hasItem(workspace));
+        given().when().get("/subscriptions/" + SUB
+                + "/providers/Microsoft.ApiManagement/locations/eastus/deletedservices/soft-apim-cascade" + apimApi)
+            .then().statusCode(200)
+            .body("properties.serviceId", equalTo(apim));
+    }
+
     @Test
     void everyPutStays201() {
         json("{\"location\":\"eastus\"}").when().put(group("rg-del-only") + API).then().statusCode(201);
