@@ -123,6 +123,38 @@ class ServiceBusExpiryPluginTest {
         verify(scheduled, never()).cancel(anyBoolean());
     }
 
+    @Test
+    void aMessageExpiredToTheDeadLetterQueueCarriesTTLExpiredException() throws Exception {
+        configure(60_000);
+        route(message());
+        ArgumentCaptor<Runnable> task = ArgumentCaptor.forClass(Runnable.class);
+        verify(pool).schedule(task.capture(), anyLong(), any(TimeUnit.class));
+        AMQPStandardMessage copy = deadLetterCopy();
+        // Artemis routes the moved copy on the thread that asked for the move.
+        doAnswer(call -> {
+            plugin.beforeMessageRoute(copy, mock(RoutingContext.class), false, false);
+            return true;
+        }).when(queue).moveReference(anyLong(), any(), any(), anyBoolean());
+
+        task.getValue().run();
+
+        verify(queue).moveReference(MESSAGE_ID, SimpleString.of(DEAD_LETTER_ADDRESS), null, false);
+        assertEquals("TTLExpiredException", copy.getObjectProperty("DeadLetterReason"));
+        assertEquals("The message expired and was dead lettered.",
+                copy.getObjectProperty("DeadLetterErrorDescription"));
+    }
+
+    @Test
+    void aMessageRoutedToTheDeadLetterQueueOutsideAnExpiryIsLeftAlone() throws Exception {
+        configure(60_000);
+        AMQPStandardMessage copy = deadLetterCopy();
+
+        plugin.beforeMessageRoute(copy, mock(RoutingContext.class), false, false);
+
+        assertNull(copy.getObjectProperty("DeadLetterReason"));
+        assertNull(copy.getObjectProperty("DeadLetterErrorDescription"));
+    }
+
     private void configure(long ttlMillis) throws Exception {
         type.getMethod("configure", String.class, long.class, String.class)
                 .invoke(plugin, "orders", ttlMillis, DEAD_LETTER_ADDRESS);
@@ -146,6 +178,12 @@ class ServiceBusExpiryPluginTest {
         when(reference.getMessageID()).thenReturn(MESSAGE_ID);
         when(reference.getMessage()).thenReturn(message);
         return reference;
+    }
+
+    private static AMQPStandardMessage deadLetterCopy() {
+        AMQPStandardMessage copy = message();
+        copy.setAddress(DEAD_LETTER_ADDRESS);
+        return copy;
     }
 
     private static AMQPStandardMessage message() {

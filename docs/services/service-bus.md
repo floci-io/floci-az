@@ -306,6 +306,20 @@ unsettled peek-locked messages does not release them: each stays locked until it
 Azure. Session entities still release their messages when the session closes.
 Entities that omit either property fall back to the configured defaults above.
 
+### Dead-letter reasons
+
+A message the broker moves to the dead-letter queue carries the `DeadLetterReason` and
+`DeadLetterErrorDescription` application properties Azure
+[sets for it](https://learn.microsoft.com/azure/service-bus-messaging/service-bus-dead-letter-queues#moving-messages-to-the-dlq):
+
+| Cause | `DeadLetterReason` | `DeadLetterErrorDescription` |
+|---|---|---|
+| Delivery count exceeded `MaxDeliveryCount` (abandon or lock expiry) | `MaxDeliveryCountExceeded` | `Message could not be consumed after {MaxDeliveryCount} delivery attempts.` |
+| Time to live passed, with `DeadLetteringOnMessageExpiration` | `TTLExpiredException` | `The message expired and was dead lettered.` |
+
+An explicit dead-letter keeps the reason and description the client gave, and sets neither when
+the client gives none.
+
 ## Received message metadata
 
 Received messages expose broker-assigned `SequenceNumber` and `EnqueuedTime`, matching peek

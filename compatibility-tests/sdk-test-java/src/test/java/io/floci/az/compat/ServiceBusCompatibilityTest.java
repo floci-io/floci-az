@@ -457,7 +457,40 @@ class ServiceBusCompatibilityTest {
                     .stream().findFirst().orElse(null);
             assertNotNull(dlqMsg, "Message should be dead-lettered after exceeding MaxDeliveryCount");
             assertEquals(payload, dlqMsg.getBody().toString());
+            assertEquals("MaxDeliveryCountExceeded", dlqMsg.getDeadLetterReason());
+            assertEquals("Message could not be consumed after 2 delivery attempts.",
+                    dlqMsg.getDeadLetterErrorDescription());
             dlqReceiver.complete(dlqMsg);
+        }
+    }
+
+    @Test
+    @DisplayName("a message past its time to live is dead-lettered with the expiry reason")
+    void expiredMessageIsDeadLetteredWithTheExpiryReason() throws Exception {
+        String queue = uniqueName("ttl");
+        EmulatorConfig.ensureServiceBusQueue(queue,
+                "<DeadLetteringOnMessageExpiration>true</DeadLetteringOnMessageExpiration>");
+        String payload = "ttl-" + UUID.randomUUID();
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().queueName(queue).buildClient()) {
+            sender.sendMessage(new ServiceBusMessage(payload).setTimeToLive(Duration.ofSeconds(2)));
+        }
+
+        Thread.sleep(4_000);
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            assertEquals(0, receiver.receiveMessages(1, Duration.ofSeconds(2)).stream().count(),
+                    "An expired message is not delivered");
+        }
+
+        try (ServiceBusReceiverClient deadLetters = deadLetterReceiver(queue)) {
+            ServiceBusReceivedMessage expired = deadLetters.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(expired, "The expired message is dead-lettered");
+            assertEquals(payload, expired.getBody().toString());
+            assertEquals("TTLExpiredException", expired.getDeadLetterReason());
+            assertEquals("The message expired and was dead lettered.",
+                    expired.getDeadLetterErrorDescription());
+            deadLetters.complete(expired);
         }
     }
 
