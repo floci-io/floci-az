@@ -387,10 +387,21 @@ public final class KqlEngine {
         return inferredName(named.expr(), position);
     }
 
-    /** The columns a query's last operator produces, for a result with no rows: a projection or a summary. */
-    public static List<String> outputColumns(Query query, List<Map<String, Object>> rows) {
-        if (!rows.isEmpty() || query.ops().isEmpty()) {
+    /**
+     * The columns of a query's result: its rows' when it has any, else the ones the query is known to produce
+     * from its text and the tables' published schemas, so a result with no rows still names its columns. When
+     * those depend on the data, the names the last operator gives stand in: a projection's or a summary's.
+     */
+    public static List<String> outputColumns(Query query, List<Map<String, Object>> rows, Tables tables) {
+        if (!rows.isEmpty()) {
             return columns(rows);
+        }
+        List<String> known = schemaOf(query.source(), query.ops(), tables);
+        if (known != null) {
+            return known;
+        }
+        if (query.ops().isEmpty()) {
+            return List.of();
         }
         Op last = query.ops().getLast();
         List<String> names = new ArrayList<>();

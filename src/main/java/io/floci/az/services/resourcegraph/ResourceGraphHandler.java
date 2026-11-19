@@ -100,9 +100,10 @@ public class ResourceGraphHandler implements AzureServiceHandler {
 
         List<Map<String, Object>> rows;
         Kql.Query parsed;
+        KqlEngine.Tables view = scoped(tables.queryView(), subscriptions);
         try {
             parsed = Kql.parse(text);
-            rows = KqlEngine.run(parsed, scoped(tables.queryView(), subscriptions));
+            rows = KqlEngine.run(parsed, view);
         } catch (KqlException e) {
             LOG.debugf("Resource Graph query rejected: %s", e.getMessage());
             return queryError(e);
@@ -134,7 +135,7 @@ public class ResourceGraphHandler implements AzureServiceHandler {
         response.put("totalRecords", total);
         response.put("count", page.size());
         response.put("data", "table".equalsIgnoreCase(resultFormat)
-            ? table(KqlEngine.outputColumns(parsed, rows), rows, page) : objectArray(page));
+            ? table(KqlEngine.outputColumns(parsed, rows, view), rows, page) : objectArray(page));
         response.put("facets", List.of());
         // Every result pages through $skipToken, so Azure's truncation (results cut by a limit) never applies.
         response.put("resultTruncated", "false");

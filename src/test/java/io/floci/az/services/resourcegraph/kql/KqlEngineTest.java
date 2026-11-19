@@ -379,6 +379,41 @@ class KqlEngineTest {
     }
 
     @Test
+    void aResultWithNoRowsNamesItsColumnsFromTheKnownSchema() {
+        KqlEngine.Tables published = new KqlEngine.Tables() {
+            @Override
+            public List<Map<String, Object>> rows(String table) {
+                return table.equals("resources") ? List.of(row("id", "/a", "name", "a")) : null;
+            }
+
+            @Override
+            public List<String> columns(String table) {
+                return List.of("id", "name", "tags");
+            }
+        };
+        // No trailing projection: the table's published columns, followed through the operators.
+        assertEquals(List.of("id", "name", "tags"), outputColumns("resources | where name == 'nothing'", published));
+        assertEquals(List.of("id", "tags", "seen"),
+                outputColumns("resources | where name == 'nothing' | extend seen = 1 | project-away name | order by id asc", published));
+        assertEquals(List.of("id", "name", "tags", "id1", "name1"),
+                outputColumns("resources | where name == 'nothing' | join kind=inner (resources | project id, name) on id", published));
+        assertEquals(List.of("Count"), outputColumns("resources | where name == 'nothing' | count | where Count > 0", published));
+        // A result with rows names the columns its rows carry.
+        assertEquals(List.of("id", "name"), outputColumns("resources", published));
+
+        // Columns that depend on the data stay unknown, and the last operator's names stand in where it has any.
+        assertEquals(List.of(), outputColumns("resources | where name == 'nothing' | union (resources | where name == 'nothing')", published));
+        assertEquals(List.of("name", "kind"),
+                outputColumns("resources | where name == 'nothing' | project name, kind = type", tables()));
+        assertEquals(List.of(), outputColumns("resources | where name == 'nothing'", tables()));
+    }
+
+    private static List<String> outputColumns(String query, KqlEngine.Tables tables) {
+        Kql.Query parsed = Kql.parse(query);
+        return KqlEngine.outputColumns(parsed, KqlEngine.run(parsed, tables), tables);
+    }
+
+    @Test
     void selectorAggregatesExpandTheChosenRow() {
         List<Map<String, Object>> rows = run("""
                 resources | extend created = todatetime(properties.creationTime)
