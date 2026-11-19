@@ -322,7 +322,8 @@ public class ApiManagementService implements GlobalNameSource {
 
     /**
      * {@code ApiManagementService_CheckNameAvailability}: a name outside the service name rule is {@code Invalid}, one
-     * the name registry holds in any subscription is {@code AlreadyExists}, in the
+     * the name registry holds in any subscription is {@code AlreadyExists}, and so is one an unexpired soft-deleted
+     * service holds, since a create of it is refused until it is purged; in the
      * {@code ApiManagementServiceNameAvailabilityResult} shape of the spec's example.
      */
     private Response checkNameAvailability(AzureRequest request) {
@@ -333,6 +334,10 @@ public class ApiManagementService implements GlobalNameSource {
         if (names.owner(cloud(request), CloudSuffix.APIM, name).isPresent()) {
             return nameAvailability(false, "AlreadyExists", "The API Management service name '" + name
                     + "' is already in use.");
+        }
+        if (!deletedServicesNamed(name).isEmpty()) {
+            return nameAvailability(false, "AlreadyExists", "The API Management service name '" + name
+                    + "' is held by a soft-deleted service; restore or purge it first.");
         }
         return nameAvailability(true, "Valid", "");
     }

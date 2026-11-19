@@ -82,7 +82,7 @@ other scope is refused with `409 ServiceAlreadyExists` until the owner deletes i
 `404`, and its `DELETE` is a no-op `200` that leaves the owner's service in place. The name is unique across every
 cloud the emulator serves, since one gateway serves every service by name. `POST
 /subscriptions/{sub}/providers/Microsoft.ApiManagement/checkNameAvailability` answers from the same owners, in any
-subscription: `nameAvailable: false` with reason `AlreadyExists` for an owned name, `Invalid` for a name outside the
+subscription: `nameAvailable: false` with reason `AlreadyExists` for an owned name or one a soft-deleted service still holds, `Invalid` for a name outside the
 service name rule below, and otherwise `nameAvailable: true` with reason `Valid`. Paths that differ only in case address the same service and its child resources. With
 `parity-overrides.strict-names` a name outside 1 to 50 letters, digits and hyphens, starting with a letter and ending
 with a letter or digit, is refused with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
