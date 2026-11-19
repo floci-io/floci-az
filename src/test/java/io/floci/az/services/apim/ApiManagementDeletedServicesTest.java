@@ -158,25 +158,24 @@ class ApiManagementDeletedServicesTest {
     }
 
     @Test
-    void aRestoreInAnotherResourceGroupDoesNotBringBackTheDeletedService() {
+    void aServiceOfADeletedNameInAnotherResourceGroupIsRefusedUntilTheDeletedOneIsPurged() {
         createService();
         createApi();
         given().when().delete(SERVICE_ID + API).then().statusCode(200);
 
         String otherGroup = "/subscriptions/" + SUB + "/resourceGroups/test-rg-other"
                 + "/providers/Microsoft.ApiManagement/service/" + SERVICE;
-        // The record is the other group's service: with nothing of its own to restore, the request is a plain create.
-        given().contentType("application/json")
-                .body("{\"location\":\"westus\",\"sku\":{\"name\":\"Developer\",\"capacity\":1},"
-                        + "\"properties\":{\"restore\":true,\"publisherEmail\":\"other@contoso.com\","
-                        + "\"publisherName\":\"Other\"}}")
-                .when().put(otherGroup + API)
-                .then().statusCode(200)
-                .body("id", equalTo(otherGroup))
-                .body("properties.publisherName", equalTo("Other"));
-        given().when().get(otherGroup + "/apis" + API).then().statusCode(200).body("value", empty());
-        given().when().get(SERVICE_ID + API).then().statusCode(404);
+        // The subscription keeps one deleted service of a name, so a second one there could not be soft-deleted
+        // without overwriting the first: a create, or a restore aimed at the other group, is refused.
+        for (String body : new String[] {SERVICE_BODY, "{\"location\":\"westus\",\"properties\":{\"restore\":true}}"}) {
+            given().contentType("application/json").body(body).when().put(otherGroup + API)
+                    .then().statusCode(409).body("error.code", equalTo("ServiceAlreadyExists"));
+        }
         given().when().get(DELETED + API).then().statusCode(200).body("properties.serviceId", equalTo(SERVICE_ID));
+
+        given().when().delete(DELETED + API).then().statusCode(200);
+        given().contentType("application/json").body(SERVICE_BODY).when().put(otherGroup + API).then().statusCode(200);
+        given().when().get(otherGroup + "/apis" + API).then().statusCode(200).body("value", empty());
     }
 
     private static void createService() {

@@ -65,10 +65,11 @@ APIs, operations, policies, products, subscriptions, named values and backends:
   other properties of the request are ignored, as the spec says.
 - A plain create of the deleted service (the same subscription, resource group and name) is not refused: the deleted
   service and its child resources go, and a new service is created.
-- A restore brings back only the service deleted from the requested resource group; aimed at another group, it is a
-  plain create there. The deleted service does not hold its `azure-api.net` name, as a deleted Key Vault does not,
-  and the gateway serves only the live service's own APIs, policies and the rest, never those a deleted service of the
-  same name keeps.
+- A deleted service's id has no resource group, so a subscription holds one deleted service of a name. While it
+  exists, a create of that name in another resource group of the subscription, a restore aimed there included, answers
+  `409 ServiceAlreadyExists`; restore or purge the deleted service first. (Which code Azure answers here is not in the
+  spec; azurerm asks for "a different name/location".) Another subscription may take the name, and the gateway serves
+  only the live service's own APIs, policies and the rest, never those a deleted service of the same name keeps.
 
 While a service is soft-deleted, its child resources answer `404`. `azd down --purge` and the azurerm provider (with
 `purge_soft_delete_on_destroy`, on by default) purge the deleted service after deleting it.

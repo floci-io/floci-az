@@ -366,13 +366,18 @@ public class ApiManagementService implements GlobalNameSource {
     private synchronized Response createOrUpdateService(AzureRequest request, ArmResourceId requested) {
         Map<String, Object> body = parseBody(request);
         if (services.get(requested).isEmpty()) {
-            // Only the requested service's own record: a restore puts the service back under the id it was deleted
-            // from, so a record from another resource group is not this service's to restore.
+            // A deleted service's id names its subscription, location and name but no resource group, so the
+            // subscription holds one deleted service of a name: a service of that name in another resource group
+            // would overwrite it when deleted. azurerm answers this case with "pick a different name/location".
             String key = requested.canonicalKey();
-            List<ArmResourceStore.Stored<ApimDeletedService>> deleted =
-                    deletedServicesNamed(requested.subscriptionId(), requested.name()).stream()
-                            .filter(stored -> serviceId(stored.value().service().id()).canonicalKey().equals(key))
-                            .toList();
+            List<ArmResourceStore.Stored<ApimDeletedService>> named =
+                    deletedServicesNamed(requested.subscriptionId(), requested.name());
+            if (named.stream().anyMatch(stored -> !ownRecord(stored, key))) {
+                return ArmErrors.error(409, "ServiceAlreadyExists", "Api service already exists: " + requested.name()
+                        + ". A soft-deleted service of this name exists in another resource group; restore or purge"
+                        + " it first.");
+            }
+            List<ArmResourceStore.Stored<ApimDeletedService>> deleted = named;
             if (isRestore(body) && !deleted.isEmpty()) {
                 return restoreService(deleted.getFirst());
             }
@@ -391,6 +396,11 @@ public class ApiManagementService implements GlobalNameSource {
         LOG.infov("ARM: {0} API Management service {1}", written.created() ? "created" : "updated",
                 written.stored().value().name());
         return Response.ok(written.stored().value().toArm()).build();
+    }
+
+    /** Whether {@code stored} is the deleted record of the service whose canonical key is {@code key}. */
+    private static boolean ownRecord(ArmResourceStore.Stored<ApimDeletedService> stored, String key) {
+        return serviceId(stored.value().service().id()).canonicalKey().equals(key);
     }
 
     /** {@code properties.restore: true}: "all other properties will be ignored", so the service comes back as it was. */
