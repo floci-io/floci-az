@@ -63,6 +63,9 @@ public class ServiceBusConfigGenerator {
                           "io.floci.az.artemis.ServiceBusExpiryPlugin")
                   .end("broker-plugin")
                   .startAttr("broker-plugin", "class-name",
+                          "io.floci.az.artemis.ServiceBusDeadLetterPlugin")
+                  .end("broker-plugin")
+                  .startAttr("broker-plugin", "class-name",
                           "io.floci.az.artemis.ServiceBusManagementPlugin")
                   .end("broker-plugin")
                   .startAttr("broker-plugin", "class-name",
