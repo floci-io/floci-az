@@ -88,7 +88,8 @@ floci-az:
         flush-interval-ms: 5000
       search:
         flush-interval-ms: 5000
-      directory:                    # tenants, subscriptions (seeded, configured, first use) and, under the resource-group overrides, groups
+      directory:                    # tenants, subscriptions (seeded, configured, first use), management groups and their
+                                    # subscription placements and, under the resource-group overrides, groups
         flush-interval-ms: 5000
 
   # How closely floci-az follows Azure where Azure differs from what floci-az has always answered.
