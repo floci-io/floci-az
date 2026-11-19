@@ -474,7 +474,9 @@ public class ServiceBusServiceTest {
     void updatingATopicWithIfMatchAppliesTheNewSettings() {
         given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
                 .when().put(BASE + "/update-topic")
-                .then().statusCode(201);
+                .then().statusCode(201)
+                .body(containsString("<EnableSubscriptionPartitioning>false</EnableSubscriptionPartitioning>"))
+                .body(containsString("<IsAnonymousAccessible>false</IsAnonymousAccessible>"));
 
         given().header("If-Match", "*")
                 .body(entry("<TopicDescription xmlns=\"" + SB_NS + "\">"

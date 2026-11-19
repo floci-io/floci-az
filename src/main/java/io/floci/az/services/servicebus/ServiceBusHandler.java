@@ -37,6 +37,8 @@ import java.util.stream.Collectors;
 
 /**
  * HTTP management handler for the Service Bus service.
+ * Entity and rule mutations share this bean's monitor because topic updates also change
+ * subscription settings. Each stored change and its broker update must finish together.
  *
  * <p>Supports two routing modes:
  *
@@ -532,7 +534,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 lifetime, delivery, ServiceBusEntityXml.EntityMetadata.DEFAULTS);
     }
 
-    Response handleCreateQueue(String account, String namespace, String queueName,
+    synchronized Response handleCreateQueue(String account, String namespace, String queueName,
                                 boolean requiresSession,
                                 ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
                                 ServiceBusEntityXml.MessageLifetimeSettings lifetime,
@@ -567,7 +569,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
      * Applies a PUT with {@code If-Match} (the SDKs' update call) to an existing queue. A queue
      * that does not exist yet is created instead.
      */
-    private Response handleUpdateQueue(String account, String namespace, String queueName,
+    private synchronized Response handleUpdateQueue(String account, String namespace, String queueName,
                                        boolean requiresSession,
                                        ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
                                        ServiceBusEntityXml.MessageLifetimeSettings lifetime,
@@ -613,7 +615,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 requiresSession, duplicateDetection, lifetime, metadata);
     }
 
-    private Response handleDeleteQueue(String account, String namespace, String queueName) {
+    private synchronized Response handleDeleteQueue(String account, String namespace, String queueName) {
         String key = queueKey(account, namespace, queueName);
         if (store.get(key).isEmpty()) {
             return notFoundAtom("Queue not found: " + queueName);
@@ -682,7 +684,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 ServiceBusEntityXml.EntityMetadata.DEFAULTS);
     }
 
-    Response handleCreateTopic(
+    synchronized Response handleCreateTopic(
             String account, String namespace, String topicName,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime,
@@ -714,7 +716,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
      * Applies an update to an existing topic. Subscription expiry depends on the topic's
      * DefaultMessageTimeToLive, so every subscription is re-applied to the broker as well.
      */
-    private Response handleUpdateTopic(
+    private synchronized Response handleUpdateTopic(
             String account, String namespace, String topicName,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime,
@@ -745,7 +747,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return atomEntry(200, topicEntryXml(namespace, topic));
     }
 
-    private Response handleDeleteTopic(String account, String namespace, String topicName) {
+    private synchronized Response handleDeleteTopic(String account, String namespace, String topicName) {
         String topicKey = topicKey(account, namespace, topicName);
         if (store.get(topicKey).isEmpty()) {
             return notFoundAtom("Topic not found: " + topicName);
@@ -846,7 +848,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 () -> initialRule);
     }
 
-    private Response handleCreateSubscription(String account, String namespace,
+    private synchronized Response handleCreateSubscription(String account, String namespace,
                                                String topicName, String subName,
                                                boolean requiresSession,
                                                ServiceBusEntityXml.MessageLifetimeSettings lifetime,
@@ -893,7 +895,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Applies an update to an existing subscription; its rules are left as they are. */
-    private Response handleUpdateSubscription(String account, String namespace,
+    private synchronized Response handleUpdateSubscription(String account, String namespace,
                                               String topicName, String subName,
                                               ServiceBusEntityXml.MessageLifetimeSettings lifetime,
                                               ServiceBusEntityXml.DeliverySettings delivery,
@@ -1038,7 +1040,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         provisionSubscription(namespace, topic, sub, selector);
     }
 
-    private Response handleDeleteSubscription(String account, String namespace,
+    private synchronized Response handleDeleteSubscription(String account, String namespace,
                                                String topicName, String subName) {
         String key = subKey(account, namespace, topicName, subName);
         if (store.get(key).isEmpty()) {
@@ -1341,6 +1343,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "</DuplicateDetectionHistoryTimeWindow>"
                 + metadataXml(t.enableBatchedOperations(), t.autoDeleteOnIdle(), t.userMetadata())
                 + "<SupportOrdering>" + t.supportOrdering() + "</SupportOrdering>"
+                + "<EnableSubscriptionPartitioning>false</EnableSubscriptionPartitioning>"
+                + "<IsAnonymousAccessible>false</IsAnonymousAccessible>"
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
                 + runtimeMetadataXml(t.createdAt(), t.updatedAt())
