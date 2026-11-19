@@ -299,6 +299,24 @@ class IotHubArmServiceTest {
     }
 
     @Test
+    void aConditionalPutAfterADeleteDoesNotBringTheHubBack() {
+        // Client A reads the hub; client B deletes it; A's delayed update still carries the ETag it read.
+        String read = put("rg", "hub-deleted", MINIMAL_BODY).then().statusCode(201).extract().path("etag");
+        given().when().delete(hub("rg", "hub-deleted") + API).then().statusCode(200);
+
+        given().contentType("application/json").header("If-Match", read).body(MINIMAL_BODY)
+            .when().put(hub("rg", "hub-deleted") + API).then().statusCode(412)
+            .body("error.code", equalTo("PreconditionFailed"));
+        given().when().get(hub("rg", "hub-deleted") + API).then().statusCode(404);
+        given().when().post(hub("rg", "hub-deleted") + "/listkeys" + API).then().statusCode(404);
+
+        // An unconditional create, as the az CLI and Terraform send it, and one with If-Match: * still create.
+        put("rg", "hub-deleted", MINIMAL_BODY).then().statusCode(201);
+        given().contentType("application/json").header("If-Match", "*").body(MINIMAL_BODY)
+            .when().put(hub("rg", "hub-wildcard") + API).then().statusCode(201);
+    }
+
+    @Test
     void patchAndDeleteRefuseAStaleIfMatch() {
         String first = put("rg", "hub-concurrent", MINIMAL_BODY).then().statusCode(201).extract().path("etag");
         String second = put("rg", "hub-concurrent", MINIMAL_BODY).then().statusCode(201).extract().path("etag");

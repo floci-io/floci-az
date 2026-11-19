@@ -248,10 +248,10 @@ public class IotHubArmService {
             // Every check that reads the stored hub runs inside the store's lock, so a concurrent DELETE cannot
             // change the answer between the check and the write.
             written = hubs.createOrUpdate(id, existing -> {
-                existing.ifPresent(hub -> {
+                existing.ifPresentOrElse(hub -> {
                     refuseStaleEtag(hub, ifMatch);
                     refuseLocationChange(hub, location);
-                });
+                }, () -> refuseETagOfMissingHub(id, ifMatch));
                 // The id keeps the casing of the PUT that created the hub.
                 ArmResourceId stored = existing.map(hub -> ArmResourceId.parse(hub.id()).orElseThrow()).orElse(id);
                 List<AccessPolicy> policies = sentPolicies
@@ -902,6 +902,19 @@ public class IotHubArmService {
             throw new Refused(ArmErrors.error(412, "PreconditionFailed", "The IoT hub '" + hub.name()
                     + "' was changed since ETag '" + sent + "' was read; its current ETag is '" + hub.etag() + "'."));
         }
+    }
+
+    /**
+     * Refuses a PUT whose {@code If-Match} names an ETag when there is no hub: the version it was read at is gone, so
+     * the write is an update of a deleted hub, not a create. Without this, a delayed update would bring the hub back
+     * with new keys. {@code *} and no {@code If-Match} still create, as the az CLI and Terraform create without one.
+     */
+    private static void refuseETagOfMissingHub(ArmResourceId id, String ifMatch) {
+        if (ifMatch == null || ifMatch.isBlank() || "*".equals(ifMatch.trim())) {
+            return;
+        }
+        throw new Refused(ArmErrors.error(412, "PreconditionFailed", "The IoT hub '" + id.name()
+                + "' does not exist, so it cannot match ETag '" + ifMatch.trim() + "'."));
     }
 
     /** Refuses a PUT that moves an existing hub: ARM fixes a resource's location at creation. */

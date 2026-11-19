@@ -23,7 +23,9 @@ with their shared access policies and keys. Devices, telemetry and message routi
   `properties.authorizationPolicies` on a `PUT`, as `az iot hub policy` and
   `azurerm_iothub_shared_access_policy` do
 - **ETags**: every write changes the hub's `etag`. A `PUT`, `PATCH` or `DELETE` whose `If-Match` names an
-  older one is refused with `412 PreconditionFailed`; `*` and no `If-Match` at all both pass. An `authorizationPolicies` that
+  older one is refused with `412 PreconditionFailed`; `*` and no `If-Match` at all both pass. A `PUT`
+  with an ETag for a hub that no longer exists is refused the same way, so a delayed update cannot
+  bring a deleted hub back. An `authorizationPolicies` that
   is not a list of policy objects is refused with `400 InvalidRequestContent`; `null` keeps the policies
 - **Name availability**: `checkNameAvailability` reports a taken name as `AlreadyExists` and a malformed
   one as `Invalid`. Hub names are global, so a second hub with a taken name is refused with
