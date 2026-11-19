@@ -5,6 +5,7 @@ import com.azure.core.exception.HttpResponseException;
 import com.azure.core.http.HttpHeaderName;
 import com.azure.core.http.MatchConditions;
 import com.azure.core.http.rest.RequestOptions;
+import com.azure.search.documents.SearchClient;
 import com.azure.search.documents.indexes.SearchIndexClient;
 import com.azure.search.documents.indexes.SearchIndexClientBuilder;
 import com.azure.search.documents.indexes.models.CorsOptions;
@@ -17,6 +18,12 @@ import com.azure.search.documents.indexes.models.SearchServiceStatistics;
 import com.azure.search.documents.indexes.models.SearchSuggester;
 import com.azure.search.documents.indexes.models.VectorSearch;
 import com.azure.search.documents.indexes.models.VectorSearchProfile;
+import com.azure.search.documents.models.IndexAction;
+import com.azure.search.documents.models.IndexActionType;
+import com.azure.search.documents.models.IndexDocumentsBatch;
+import com.azure.search.documents.models.IndexDocumentsOptions;
+import com.azure.search.documents.models.IndexDocumentsResult;
+import com.azure.search.documents.models.IndexingResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
@@ -30,7 +37,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -216,6 +225,81 @@ class SearchCompatibilityTest {
         assertFalse(client.listIndexNames().stream().toList().contains("hotels-delete"));
         assertEquals(404, assertThrows(HttpResponseException.class,
                 () -> client.getIndex("hotels-delete")).getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("documents are uploaded, read back, selected and counted")
+    void documentsAreUploadedReadAndCounted() {
+        client.createIndex(hotels("hotels-docs"));
+        SearchClient docs = client.getSearchClient("hotels-docs");
+
+        IndexDocumentsResult uploaded = docs.indexDocuments(new IndexDocumentsBatch(
+                action(IndexActionType.UPLOAD, "hotelId", "1", "hotelName", "Fancy", "rating", 4.5,
+                        "address", Map.of("street", "Main", "city", "Helsinki"),
+                        "embedding", List.of(0.1, 0.2, 0.3, 0.4)),
+                action(IndexActionType.UPLOAD, "hotelId", "2", "hotelName", "Plain")));
+        assertEquals(List.of(201, 201), uploaded.getResults().stream().map(IndexingResult::getStatusCode).toList());
+
+        Map<String, Object> fetched = docs.getDocument("1").getAdditionalProperties();
+        assertEquals("Fancy", fetched.get("hotelName"));
+        assertEquals(Map.of("street", "Main", "city", "Helsinki"), fetched.get("address"));
+        // A vector field is not retrievable unless the index says so.
+        assertFalse(fetched.containsKey("embedding"));
+        assertEquals(List.of(), docs.getDocument("2").getAdditionalProperties().get("tags"));
+        Map<String, Object> selected = docs.getDocument("1", List.of("hotelName")).getAdditionalProperties();
+        assertEquals("Fancy", selected.get("hotelName"));
+        assertFalse(selected.containsKey("rating"));
+        assertEquals(2L, docs.getDocumentCount());
+        assertEquals(404, assertThrows(HttpResponseException.class,
+                () -> docs.getDocument("missing")).getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("a merge keeps what it does not send, and a missing key fails alone with 207")
+    void aMergeKeepsWhatItDoesNotSend() {
+        client.createIndex(hotels("hotels-merge"));
+        SearchClient docs = client.getSearchClient("hotels-merge");
+        docs.indexDocuments(new IndexDocumentsBatch(action(IndexActionType.UPLOAD, "hotelId", "1",
+                "hotelName", "Fancy", "address", Map.of("street", "Main", "city", "Helsinki"))));
+
+        docs.indexDocuments(new IndexDocumentsBatch(action(IndexActionType.MERGE, "hotelId", "1",
+                "address", Map.of("city", "Turku"))));
+        Map<String, Object> fetched = docs.getDocument("1").getAdditionalProperties();
+        assertEquals("Fancy", fetched.get("hotelName"));
+        assertEquals(Map.of("street", "Main", "city", "Turku"), fetched.get("address"));
+
+        IndexDocumentsResult mixed = docs.indexDocumentsWithResponse(new IndexDocumentsBatch(
+                        action(IndexActionType.MERGE_OR_UPLOAD, "hotelId", "3", "hotelName", "New"),
+                        action(IndexActionType.MERGE, "hotelId", "missing", "hotelName", "Never")),
+                new IndexDocumentsOptions().setThrowOnAnyError(false), null).getValue();
+        assertEquals(List.of(201, 404), mixed.getResults().stream().map(IndexingResult::getStatusCode).toList());
+        assertEquals("Document not found.", mixed.getResults().get(1).getErrorMessage());
+
+        docs.indexDocuments(new IndexDocumentsBatch(action(IndexActionType.DELETE, "hotelId", "1"),
+                action(IndexActionType.DELETE, "hotelId", "never")));
+        assertEquals(1L, docs.getDocumentCount());
+    }
+
+    @Test
+    @DisplayName("a malformed document refuses the whole batch with 400")
+    void aMalformedDocumentRefusesTheWholeBatch() {
+        client.createIndex(hotels("hotels-bad"));
+        SearchClient docs = client.getSearchClient("hotels-bad");
+
+        assertEquals(400, assertThrows(HttpResponseException.class, () -> docs.indexDocuments(
+                new IndexDocumentsBatch(action(IndexActionType.UPLOAD, "hotelId", "1"),
+                        action(IndexActionType.UPLOAD, "hotelId", "2", "rating", "not-a-number"))))
+                .getResponse().getStatusCode());
+        assertEquals(0L, docs.getDocumentCount());
+    }
+
+    /** An action of {@code type} on a document of the given names and values. */
+    private static IndexAction action(IndexActionType type, Object... namesAndValues) {
+        Map<String, Object> document = new LinkedHashMap<>();
+        for (int i = 0; i < namesAndValues.length; i += 2) {
+            document.put((String) namesAndValues[i], namesAndValues[i + 1]);
+        }
+        return new IndexAction().setActionType(type).setAdditionalProperties(document);
     }
 
     private static SearchIndex hotels(String name) {

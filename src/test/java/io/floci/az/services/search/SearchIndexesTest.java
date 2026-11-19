@@ -837,7 +837,10 @@ class SearchIndexesTest {
 
         given().when().get(BASE + "/synonymmaps" + API).then().statusCode(404)
             .body("error.code", equalTo("ResourceNotFound"));
-        given().when().get(BASE + "/indexes('later')/docs/$count" + API).then().statusCode(404);
+        // Queries come with the query engine.
+        given().when().get(BASE + "/indexes('later')/docs" + API).then().statusCode(404);
+        given().contentType("application/json").body("{}")
+            .when().post(BASE + "/indexes('later')/docs/search.post.search" + API).then().statusCode(404);
         given().when().patch(BASE + "/indexes('later')" + API).then().statusCode(405);
         given().when().get(BASE + "/servicestats/x" + API).then().statusCode(404);
         given().when().get(BASE + "/servicestats('x')" + API).then().statusCode(404);

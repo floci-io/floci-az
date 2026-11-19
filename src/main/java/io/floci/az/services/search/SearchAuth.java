@@ -53,10 +53,24 @@ public class SearchAuth {
     }
 
     /**
-     * The refusal for a management request (indexes, statistics) on {@code service}, or empty when it may go on.
-     * A query key reads documents only, so it is refused here.
+     * The refusal for a management request (indexes, statistics, document writes) on {@code service}, or empty
+     * when it may go on. A query key reads documents only, so it is refused here.
      */
     public Optional<Response> refuseManagement(AzureRequest req, Optional<SearchServiceResource> service) {
+        return refuse(req, service, false);
+    }
+
+    /**
+     * The refusal for a request that reads documents (a lookup or a count) on {@code service}, or empty when it may
+     * go on. A query key is enough: the spec gives query keys "read-only access to the documents collection of an
+     * index". Azure's answer to a query key was not recorded.
+     */
+    public Optional<Response> refuseDocumentRead(AzureRequest req, Optional<SearchServiceResource> service) {
+        return refuse(req, service, true);
+    }
+
+    private Optional<Response> refuse(AzureRequest req, Optional<SearchServiceResource> service,
+                                      boolean queryKeyAllowed) {
         if (!config.strictSearchKeys()) {
             return Optional.empty();
         }
@@ -76,7 +90,8 @@ public class SearchAuth {
             return Optional.of(SearchErrors.forbidden());
         }
         boolean admin = key.equals(service.get().primaryKey()) || key.equals(service.get().secondaryKey());
-        return admin ? Optional.empty() : Optional.of(SearchErrors.forbidden());
+        boolean query = queryKeyAllowed && service.get().queryKeys().stream().anyMatch(q -> key.equals(q.key()));
+        return admin || query ? Optional.empty() : Optional.of(SearchErrors.forbidden());
     }
 
     /**

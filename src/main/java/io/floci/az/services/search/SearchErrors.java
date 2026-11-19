@@ -73,6 +73,12 @@ final class SearchErrors {
         return error(404, "ResourceNotFound", message);
     }
 
+    /** A request on an index that does not exist: Azure answers it with no code. */
+    static Response indexNotFound(String service, String index) {
+        return error(404, NO_CODE, "No index with the name '" + index + "' was found in the service '" + service
+                + "'.");
+    }
+
     static Response preconditionFailed() {
         return error(412, NO_CODE, "The precondition given in one of the request headers evaluated to false. No"
                 + " change was made to the resource from this request.");

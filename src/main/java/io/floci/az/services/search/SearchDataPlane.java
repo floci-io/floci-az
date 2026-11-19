@@ -18,9 +18,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The data plane of a search service, as {@code https://{service}.search.windows.net} serves it: index management
- * and the service statistics so far. Documents, queries, synonym maps and indexers are not served yet and answer
- * {@code 404}.
+ * The data plane of a search service, as {@code https://{service}.search.windows.net} serves it: index management,
+ * documents (upload, merge, delete, lookup, count) and the service statistics so far. Queries, synonym maps and
+ * indexers are not served yet and answer {@code 404}.
  */
 @ApplicationScoped
 public class SearchDataPlane {
@@ -30,6 +30,7 @@ public class SearchDataPlane {
     /** Set by the routing filter on a path-style request, {@code /{service}-search/...}. */
     private static final String ACCOUNT_SUFFIX_HEADER = "x-floci-account-suffix";
     private static final String SERVICE_STATS = "servicestats";
+    private static final String INDEXES = "indexes";
 
     /** The limits Azure documents for every tier; they are reported, not enforced. */
     private static final int MAX_FIELDS_PER_INDEX = 1000;
@@ -76,13 +77,16 @@ public class SearchDataPlane {
     private final SearchArmService arm;
     private final SearchAuth auth;
     private final SearchIndexes indexes;
+    private final SearchDocuments documents;
 
     @Inject
-    public SearchDataPlane(EmulatorConfig config, SearchArmService arm, SearchAuth auth, SearchIndexes indexes) {
+    public SearchDataPlane(EmulatorConfig config, SearchArmService arm, SearchAuth auth, SearchIndexes indexes,
+                           SearchDocuments documents) {
         this.config = config;
         this.arm = arm;
         this.auth = auth;
         this.indexes = indexes;
+        this.documents = documents;
     }
 
     /** Serves one request addressed to a search service. */
@@ -111,10 +115,13 @@ public class SearchDataPlane {
 
         String operation = collection.toLowerCase(Locale.ROOT);
         boolean statistics = SERVICE_STATS.equals(operation);
+        boolean onDocuments = INDEXES.equals(operation) && name.isPresent() && !rest.isEmpty()
+                && SearchDocuments.addressesDocuments(rest.getFirst());
         // The ARM resource is read only when something needs it: the strict key check, or the SKU's quota.
         Optional<SearchServiceResource> declared = auth.enforced() || statistics
                 ? arm.findByName(req, service) : Optional.empty();
-        Optional<Response> refusal = auth.refuseManagement(req, declared);
+        Optional<Response> refusal = onDocuments && SearchDocuments.reads(rest)
+                ? auth.refuseDocumentRead(req, declared) : auth.refuseManagement(req, declared);
         if (refusal.isPresent()) {
             return refusal.get();
         }
@@ -127,15 +134,19 @@ public class SearchDataPlane {
             return "GET".equalsIgnoreCase(req.method())
                     ? serviceStatistics(req, cloud, service, declared) : SearchErrors.methodNotAllowed();
         }
+        if (onDocuments) {
+            return documents.handle(req, cloud, service, name.get(), rest, serviceUrl(req, service));
+        }
         return switch (operation) {
-            case "indexes" -> indexes.handle(req, cloud, service, name, rest, serviceUrl(req, service));
+            case INDEXES -> indexes.handle(req, cloud, service, name, rest, serviceUrl(req, service));
             default -> SearchErrors.notFound("This Azure AI Search operation is not served yet: " + collection);
         };
     }
 
     /**
-     * {@code GetServiceStatistics}. The index count is real, and the index quota is the SKU's; the counters of
-     * what floci-az does not serve yet are zero.
+     * {@code GetServiceStatistics}. The index and document counts are real, the storage sizes approximate (see
+     * {@link SearchDocuments#usage}), and the index quota is the SKU's; the counters of what floci-az does not serve
+     * yet are zero.
      */
     private Response serviceStatistics(AzureRequest req, String cloud, String service,
                                        Optional<SearchServiceResource> declared) {
@@ -145,14 +156,15 @@ public class SearchDataPlane {
         if (hasAliasesCounter(apiVersion)) {
             counters.put("aliasesCount", counter(0, null));
         }
-        counters.put("documentCount", counter(0, null));
+        SearchDocuments.Usage usage = documents.usage(cloud, service);
+        counters.put("documentCount", counter(usage.documents(), null));
         counters.put("indexesCount", counter(indexes.count(cloud, service), quotas.objects()));
         counters.put("indexersCount", counter(0, quotas.objects()));
         counters.put("dataSourcesCount", counter(0, quotas.objects()));
-        counters.put("storageSize", counter(0, quotas.storage()));
+        counters.put("storageSize", counter(usage.storageBytes(), quotas.storage()));
         counters.put("synonymMaps", counter(0, quotas.synonymMaps()));
         counters.put("skillsetCount", counter(0, quotas.objects()));
-        counters.put("vectorIndexSize", counter(0, quotas.vectorStorage()));
+        counters.put("vectorIndexSize", counter(usage.vectorBytes(), quotas.vectorStorage()));
         if (hasKnowledgeCounters(apiVersion)) {
             counters.put("knowledgeBasesCount", counter(0, null));
             counters.put("knowledgeSourcesCount", counter(0, null));
@@ -238,7 +250,7 @@ public class SearchDataPlane {
         return new Quotas(objects, tier.synonymMaps(), storage, vectors, perIndex);
     }
 
-    private static Map<String, Object> counter(int usage, Number quota) {
+    private static Map<String, Object> counter(long usage, Number quota) {
         Map<String, Object> counter = new LinkedHashMap<>();
         counter.put("usage", usage);
         counter.put("quota", quota);
