@@ -193,3 +193,66 @@ test("a deleted index is gone", async () => {
   expect(await indexNames()).not.toContain("hotels-delete");
   expect(await statusOf(client.getIndex("hotels-delete"))).toBe(404);
 });
+
+interface Hotel {
+  hotelId: string;
+  hotelName?: string | null;
+  rating?: number | null;
+  tags?: string[];
+  address?: { street?: string | null; city?: string | null } | null;
+  embedding?: number[];
+}
+
+test("documents are uploaded, read back, selected and counted", async () => {
+  await client.createIndex(hotels("hotels-docs"));
+  const docs = client.getSearchClient<Hotel>("hotels-docs");
+
+  const uploaded = await docs.uploadDocuments([
+    { hotelId: "1", hotelName: "Fancy", rating: 4.5, tags: ["pool"], address: { street: "Main", city: "Helsinki" },
+      embedding: [0.1, 0.2, 0.3, 0.4] },
+    { hotelId: "2", hotelName: "Plain", rating: 2.0 },
+  ]);
+  expect(uploaded.results.map((r) => [r.key, r.succeeded, r.statusCode])).toEqual([["1", true, 201], ["2", true, 201]]);
+
+  const fetched = await docs.getDocument("1");
+  expect(fetched.hotelName).toBe("Fancy");
+  expect(fetched.address).toEqual({ street: "Main", city: "Helsinki" });
+  // A vector field is not retrievable unless the index says so.
+  expect(fetched.embedding).toBeUndefined();
+  expect((await docs.getDocument("2")).tags).toEqual([]);
+  const selected = await docs.getDocument("1", { selectedFields: ["hotelName"] });
+  expect(selected.hotelName).toBe("Fancy");
+  expect(Object.keys(selected)).not.toContain("rating");
+  expect(await docs.getDocumentsCount()).toBe(2);
+  expect(await statusOf(docs.getDocument("missing"))).toBe(404);
+});
+
+test("a merge keeps what it does not send, and a missing key fails alone with 207", async () => {
+  await client.createIndex(hotels("hotels-merge"));
+  const docs = client.getSearchClient<Hotel>("hotels-merge");
+  await docs.uploadDocuments([{ hotelId: "1", hotelName: "Fancy", rating: 4.5, address: { street: "Main", city: "Helsinki" } }]);
+
+  await docs.mergeDocuments([{ hotelId: "1", rating: 5.0, address: { city: "Turku" } }]);
+  const fetched = await docs.getDocument("1");
+  expect(fetched.hotelName).toBe("Fancy");
+  expect(fetched.address).toEqual({ street: "Main", city: "Turku" });
+
+  const upserted = await docs.mergeOrUploadDocuments([{ hotelId: "1", hotelName: "Fancier" }, { hotelId: "3", hotelName: "New" }]);
+  expect(upserted.results.map((r) => r.statusCode)).toEqual([200, 201]);
+
+  const mixed = await docs.mergeDocuments([{ hotelId: "3", rating: 1.0 }, { hotelId: "missing", rating: 1.0 }]);
+  expect(mixed.results.map((r) => [r.key, r.succeeded, r.statusCode])).toEqual([["3", true, 200], ["missing", false, 404]]);
+  expect(mixed.results[1].errorMessage).toBe("Document not found.");
+
+  const deleted = await docs.deleteDocuments("hotelId", ["1", "never"]);
+  expect(deleted.results.map((r) => r.statusCode)).toEqual([200, 200]);
+  expect(await docs.getDocumentsCount()).toBe(1);
+});
+
+test("a malformed document refuses the whole batch", async () => {
+  await client.createIndex(hotels("hotels-bad"));
+  const docs = client.getSearchClient<Record<string, unknown>>("hotels-bad");
+
+  expect(await statusOf(docs.uploadDocuments([{ hotelId: "1" }, { hotelId: "2", rating: "not-a-number" }]))).toBe(400);
+  expect(await docs.getDocumentsCount()).toBe(0);
+});

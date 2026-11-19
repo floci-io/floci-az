@@ -6,6 +6,7 @@ using Azure.Core.Pipeline;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Indexes.Models;
+using Azure.Search.Documents.Models;
 
 namespace FlociAz.Compatibility;
 
@@ -136,6 +137,82 @@ public sealed class SearchCompatibilityTests
         // The index quota of the basic SKU the service was created with.
         await Assert.That(statistics.Counters.IndexCounter.Quota).IsEqualTo(15);
         await Assert.That(statistics.Limits.MaxFieldsPerIndex).IsEqualTo(1000);
+    }
+
+    [Test]
+    [Timeout(60_000)]
+    public async Task UploadsReadsAndCountsDocuments(CancellationToken cancellationToken)
+    {
+        await using var service = await SearchService.CreateAsync(cancellationToken);
+        await service.Client.CreateIndexAsync(Hotels("hotels-docs"), cancellationToken);
+        SearchClient docs = service.Client.GetSearchClient("hotels-docs");
+
+        Response<IndexDocumentsResult> uploaded = await docs.UploadDocumentsAsync(new[]
+        {
+            new SearchDocument
+            {
+                ["hotelId"] = "1", ["hotelName"] = "Fancy", ["rating"] = 4.5,
+                ["address"] = new SearchDocument { ["street"] = "Main", ["city"] = "Helsinki" },
+                ["embedding"] = new[] { 0.1f, 0.2f, 0.3f, 0.4f }
+            },
+            new SearchDocument { ["hotelId"] = "2", ["hotelName"] = "Plain", ["rating"] = double.NaN }
+        }, cancellationToken: cancellationToken);
+        await Assert.That(uploaded.Value.Results.Select(r => r.Status).ToArray()).IsEquivalentTo(new[] { 201, 201 });
+
+        SearchDocument fetched = await docs.GetDocumentAsync<SearchDocument>("1", cancellationToken: cancellationToken);
+        await Assert.That(fetched.GetString("hotelName")).IsEqualTo("Fancy");
+        await Assert.That(((SearchDocument)fetched["address"]).GetString("city")).IsEqualTo("Helsinki");
+        // A vector field is not retrievable unless the index says so.
+        await Assert.That(fetched.ContainsKey("embedding")).IsFalse();
+        // Azure keeps NaN as the string "NaN", which the SDK reads back as a double.
+        SearchDocument plain = await docs.GetDocumentAsync<SearchDocument>("2", cancellationToken: cancellationToken);
+        await Assert.That(double.IsNaN(plain.GetDouble("rating")!.Value)).IsTrue();
+
+        var select = new GetDocumentOptions { SelectedFields = { "hotelName" } };
+        SearchDocument selected = await docs.GetDocumentAsync<SearchDocument>("1", select, cancellationToken);
+        await Assert.That(selected.ContainsKey("rating")).IsFalse();
+        await Assert.That((long)await docs.GetDocumentCountAsync(cancellationToken)).IsEqualTo(2L);
+        await Assert.That(await StatusOf(() => docs.GetDocumentAsync<SearchDocument>(
+            "missing", cancellationToken: cancellationToken))).IsEqualTo(404);
+    }
+
+    [Test]
+    [Timeout(60_000)]
+    public async Task MergesAndDeletesDocumentsAndAnswersAMissingKeyWithMultiStatus(
+        CancellationToken cancellationToken)
+    {
+        await using var service = await SearchService.CreateAsync(cancellationToken);
+        await service.Client.CreateIndexAsync(Hotels("hotels-merge"), cancellationToken);
+        SearchClient docs = service.Client.GetSearchClient("hotels-merge");
+        await docs.UploadDocumentsAsync(new[]
+        {
+            new SearchDocument
+            {
+                ["hotelId"] = "1", ["hotelName"] = "Fancy",
+                ["address"] = new SearchDocument { ["street"] = "Main", ["city"] = "Helsinki" }
+            }
+        }, cancellationToken: cancellationToken);
+
+        await docs.MergeDocumentsAsync(new[]
+        {
+            new SearchDocument { ["hotelId"] = "1", ["address"] = new SearchDocument { ["city"] = "Turku" } }
+        }, cancellationToken: cancellationToken);
+        SearchDocument fetched = await docs.GetDocumentAsync<SearchDocument>("1", cancellationToken: cancellationToken);
+        await Assert.That(fetched.GetString("hotelName")).IsEqualTo("Fancy");
+        await Assert.That(((SearchDocument)fetched["address"]).GetString("street")).IsEqualTo("Main");
+        await Assert.That(((SearchDocument)fetched["address"]).GetString("city")).IsEqualTo("Turku");
+
+        var batch = IndexDocumentsBatch.Create(
+            IndexDocumentsAction.MergeOrUpload(new SearchDocument { ["hotelId"] = "3", ["hotelName"] = "New" }),
+            IndexDocumentsAction.Merge(new SearchDocument { ["hotelId"] = "missing", ["hotelName"] = "Never" }));
+        Response<IndexDocumentsResult> mixed = await docs.IndexDocumentsAsync(batch,
+            new IndexDocumentsOptions { ThrowOnAnyError = false }, cancellationToken);
+        await Assert.That(mixed.GetRawResponse().Status).IsEqualTo(207);
+        await Assert.That(mixed.Value.Results.Select(r => r.Status).ToArray()).IsEquivalentTo(new[] { 201, 404 });
+        await Assert.That(mixed.Value.Results[1].ErrorMessage).IsEqualTo("Document not found.");
+
+        await docs.DeleteDocumentsAsync("hotelId", new[] { "1", "never" }, cancellationToken: cancellationToken);
+        await Assert.That((long)await docs.GetDocumentCountAsync(cancellationToken)).IsEqualTo(1L);
     }
 
     private static SearchIndex Hotels(string name) => new(name)

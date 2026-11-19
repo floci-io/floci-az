@@ -61,6 +61,27 @@ class SearchAuthTest {
     }
 
     @Test
+    void aQueryKeyReadsDocumentsButCannotWriteThem() {
+        String admin = adminKey("primaryKey");
+        String queryKey = given().when().post(ARM_SERVICE + "/listQueryKeys" + ARM_API).then().statusCode(200)
+            .extract().path("value[0].key");
+        String docs = "/" + SERVICE + "-search/indexes('read')/docs";
+        String api = "?api-version=2025-09-01";
+        given().header("api-key", admin).contentType("application/json")
+            .body("{\"name\": \"read\", \"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true}]}")
+            .when().post(INDEXES).then().statusCode(201);
+        given().header("api-key", admin).contentType("application/json").body("{\"value\": [{\"id\": \"one\"}]}")
+            .when().post(docs + "/search.index" + api).then().statusCode(200);
+
+        given().header("api-key", queryKey).when().get(docs + "('one')" + api).then().statusCode(200);
+        given().header("api-key", queryKey).when().get(docs + "/$count" + api).then().statusCode(200);
+        given().header("api-key", queryKey).contentType("application/json").body("{\"value\": [{\"id\": \"two\"}]}")
+            .when().post(docs + "/search.index" + api).then().statusCode(403);
+        given().header("api-key", "not-a-key").when().get(docs + "('one')" + api).then().statusCode(403);
+        given().when().get(docs + "/$count" + api).then().statusCode(401);
+    }
+
+    @Test
     void aQueryKeyAndAnUnknownKeyAreForbiddenAndNoKeyIsChallenged() {
         String queryKey = given().when().post(ARM_SERVICE + "/listQueryKeys" + ARM_API).then().statusCode(200)
             .extract().path("value[0].key");

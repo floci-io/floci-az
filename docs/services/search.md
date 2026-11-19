@@ -2,13 +2,15 @@
 
 Compatible with the `Microsoft.Search` ARM management plane as the `azurerm_search_service` Terraform
 resource, the `azure-mgmt-search` SDKs and the `az search service`, `az search admin-key` and
-`az search query-key` commands use it, and with index management on the data plane as
-`SearchIndexClient` of the `azure-search-documents` SDKs uses it. Floci AZ serves search services with
-their admin and query API keys, and the index definitions of each service. The other `az search`
-command groups are not served yet: see [Notes & limitations](#notes-limitations).
+`az search query-key` commands use it, and with index management and documents on the data plane as
+`SearchIndexClient` and `SearchClient` of the `azure-search-documents` SDKs use them. Floci AZ serves
+search services with their admin and query API keys, the index definitions of each service, and the
+documents of each index. The other `az search` command groups are not served yet: see
+[Notes & limitations](#notes-limitations).
 
-> **Index management only, for now.** Documents, queries, synonym maps, indexers and skillsets are not
-> served yet. Those data-plane requests answer `404`.
+> **No queries yet.** Documents can be uploaded, merged, deleted, looked up by key and counted, but not
+> searched: queries, suggestions, autocomplete, synonym maps, indexers and skillsets are not served yet.
+> Those data-plane requests answer `404`.
 
 > **HTTP-only: no Docker.** Search services are in-process ARM state. There is no sidecar.
 
@@ -35,7 +37,10 @@ command groups are not served yet: see [Notes & limitations](#notes-limitations)
   `@odata.etag` and the `If-Match` / `If-None-Match` conditions. Field definitions are validated and
   answered with Azure's attribute defaults; scoring profiles, analyzers, suggesters, and the semantic
   and vector configuration are stored and answered as they were sent
-- **Statistics**: `search.stats` of an index and `servicestats` of the service
+- **Documents**: a batch of `upload`, `merge`, `mergeOrUpload` and `delete` actions, a lookup by key
+  with `$select`, and `$count`. Values are checked against their fields and answered in Azure's shapes
+- **Statistics**: `search.stats` of an index and `servicestats` of the service, with real document
+  counts
 
 ---
 
@@ -66,10 +71,20 @@ GET    /{name}-search/indexes('{index}')
 DELETE /{name}-search/indexes('{index}')             # If-Match, If-None-Match
 GET    /{name}-search/indexes('{index}')/search.stats
 GET    /{name}-search/servicestats
+
+POST   /{name}-search/indexes('{index}')/docs/search.index   # allowUnsafeKeys
+GET    /{name}-search/indexes('{index}')/docs('{key}')       # $select
+GET    /{name}-search/indexes('{index}')/docs/$count
 ```
 
-`indexes/{index}` is accepted for `indexes('{index}')`. Every request needs an `api-version`, and every
+`indexes/{index}` is accepted for `indexes('{index}')`, and `docs/{key}` for `docs('{key}')`. Every request needs an `api-version`, and every
 api-version is served the same way.
+
+The shapes below follow `2025-09-01`, but the SDKs send newer versions by default: Python
+`azure-search-documents` 12.1.0 and JavaScript `@azure/search-documents` 13.1.0 send `2026-10-01`,
+and Java `azure-search-documents` 12.0.1 and .NET `Azure.Search.Documents` 12.0.0 send `2026-04-01`.
+These are the versions the compatibility suites run at. Where a version's model differs, the
+response follows the request's version (see the `servicestats` counters below).
 
 ---
 
@@ -156,9 +171,11 @@ With `floci-az.parity-overrides.strict-search-keys` (on from `parity: strict`):
   `Bearer authorization="{login}/{tenant}/oauth2/authorize" resource="https://search.azure.com"`, as
   Azure does. The authority is the emulator's own login endpoint, and the audience is the cloud's
   (`https://search.azure.us` and `https://search.azure.cn` in the national clouds)
-- an `api-key` must be the primary or secondary admin key of the service. A query key and an unknown
-  key answer `403` with Azure's message, "The given API key doesn't match service's internal, primary
-  or secondary keys.": index management is an admin operation
+- an `api-key` must be the primary or secondary admin key of the service. An unknown key answers
+  `403` with Azure's message, "The given API key doesn't match service's internal, primary or
+  secondary keys." A query key may look up and count documents, the read-only access the spec gives
+  it, and is refused with `403` everywhere else: index management and a document batch need an admin
+  key. How Azure answers a query key was not recorded
 - a service whose ARM resource has `disableLocalAuth: true` refuses every `api-key` with `403`
 - an `Authorization: Bearer` token passes only when the service takes tokens: its `authOptions` is
   `aadOrApiKey`, or it has `disableLocalAuth: true`. A service with the default `apiKeyOnly` refuses
@@ -262,6 +279,60 @@ this property to null". Sending a different key rotates it.
 
 ---
 
+## Documents
+
+The operations follow the data-plane spec (`searchindex.json`, `2025-09-01`), and where it is silent the
+recording of a real service the index definitions follow. The status codes, error codes, `details` and
+messages below are Azure's, word for word.
+
+A batch, `POST docs/search.index` with `{"value": [...]}`, answers each action with its `key`,
+`status`, `errorMessage` and `statusCode`: `201` for a document it created, `200` for one it updated or
+deleted. It answers `200` when every action succeeds and `207` when one fails.
+
+- `upload` replaces the whole document. An action with no `@search.action` is an `upload`
+- `merge` replaces the fields it sends, and an explicit `null` clears one. A collection is replaced
+  whole, and a complex field that is not a collection merges field by field: merging
+  `address: {city}` keeps `address.postcode`. A `merge` of a key that does not exist fails that
+  action alone: `404`, `Document not found.`
+- `mergeOrUpload` merges into a document that exists, and uploads one that does not
+- `delete` answers `200` whether or not the document exists
+- two actions on one key run in order, and the last one wins
+
+Everything else that is wrong refuses the whole batch with `400`, and nothing in it is written:
+
+- a value that does not fit its field, an unknown field, or a `null` inside a collection, with an
+  empty `code`: `Cannot convert the literal 'not-a-number' to the expected type 'Edm.Double'.`,
+  `The property 'x' does not exist on type 'search.documentFields' ...`
+- an action that is not one of the four, a key that is missing or not valid, or a vector whose length
+  is not its field's `dimensions`, with a code, a `details` entry and the position of the action:
+  `The request is invalid. Details: actions : 0: Document key cannot be missing or empty.`
+- a batch with no actions (`MissingRequiredParameter`)
+
+A key holds letters, digits, `_`, `-` and `=`, does not start with `_`, and is at most 1024
+characters. `allowUnsafeKeys=true` lifts the rule on characters, as Azure's message offers. Keys are
+case-sensitive: `Case` and `case` are two documents.
+
+Values are kept and answered as Azure answers them:
+
+- an `Edm.Double` takes a number or the strings `"NaN"`, `"INF"` and `"-INF"`, which come back as
+  those strings
+- an `Edm.Int32` out of range is refused, and so is an `Edm.Int64` sent as a string
+- an `Edm.DateTimeOffset` comes back in UTC with a `Z`, to the millisecond, with no fraction when there
+  is none: `2026-01-02T12:00:00+02:00` is answered as `2026-01-02T10:00:00Z`
+- an `Edm.GeographyPoint` is GeoJSON. Azure accepts one with any `crs` or none, and answers it with
+  WGS 84's (`"crs": {"type": "name", "properties": {"name": "EPSG:4326"}}`), the coordinates unchanged
+
+A lookup, `GET docs('{key}')`, answers every retrievable field in the order of the index. A field the
+document does not have is `null`, an empty collection `[]`. A field with `retrievable: false`, such as
+a vector field by default, is left out. `$select` answers the fields it names, `address/city` for a
+sub-field, and refuses a field that is not retrievable or does not exist with `400`. A document that
+does not exist is `404` with no body, as on Azure. `docs/$count` answers the bare number as
+`text/plain; charset=utf-8`.
+
+Deleting an index deletes its documents, and so does deleting its service or resetting the emulator.
+
+---
+
 ## SKU limits
 
 | SKU | Replicas | Partitions |
@@ -297,15 +368,40 @@ floci-az:
 | Env var | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_SEARCH_ENABLED` | `true` | Enable/disable the service |
+| `FLOCI_AZ_STORAGE_SERVICES_SEARCH_MODE` | global `FLOCI_AZ_STORAGE_MODE` (`memory`) | Storage mode of the Search store |
+
+### Persistence
+
+Services, their keys, indexes and documents share one `search` store, which follows the
+[storage mode](../configuration/storage.md) (`memory` by default). With `persistent`, `hybrid` or `wal`
+they survive a restart: lookups, `$count`, ETags and the statistics come back as they were. Resource
+groups are kept apart, in memory, unless `resource-group-semantics` or `strict-resource-groups` is on
+(see [ARM](arm.md#resource-groups)). Without either, a restarted emulator still serves the service and
+its data, but its resource group answers `404`.
 
 ---
 
 ## Notes & limitations
 
-- **Index management is the whole data plane so far.** There are no documents, queries, synonym
-  maps, indexers, data sources or skillsets yet, and `search.analyze` is not served. An index reports
-  zero documents and zero bytes. Index aliases, a stable operation from api-version `2026-04-01`, are
-  not served either.
+- **No queries yet.** Documents are stored, but there are no queries (`docs`, `search.post.search`),
+  suggestions, autocomplete, synonym maps, indexers, data sources or skillsets yet, and `search.analyze`
+  is not served. Index aliases, a stable operation from api-version `2026-04-01`, are not served
+  either.
+- **Document statistics are counted at once and sized roughly.** Azure counts new documents a little
+  later; floci-az counts them as the batch answers. `storageSize` is the size of the documents' JSON
+  alone. Azure's also counts its index structures, so it is far larger (two small documents took 6222
+  bytes on the recorded service), and
+  `vectorIndexSize` is the size of their vectors' elements.
+- **A batch over the limits answers `413`.** A batch of more than 32000 actions, the limit Azure's own
+  message names, or of more than 16 MB is refused with `413`, which the SDKs answer by splitting the
+  batch. Azure's answer to either was not recorded: 1001 actions were accepted.
+- **Some document errors are not recorded.** The refusals of a value that is not a string, a boolean, a
+  date or a point, of a complex field that is not an object, and of a property inside a complex field
+  that the index does not have, take the shape of the recorded ones, but their words are floci-az's.
+  So do a `413`, and a batch whose body is not JSON. Whether `allowUnsafeKeys` also lifts the rule on a
+  leading underscore was not recorded; floci-az keeps that rule.
+- **A key holding `/` or `?` cannot be looked up.** With `allowUnsafeKeys` a key may hold either, but
+  a lookup reads the path after decoding it, so such a key is not found.
 - **Index sections are stored, not checked.** Scoring profiles, analyzers, tokenizers, suggesters, CORS
   options, and the semantic and vector configuration come back as they were sent. Only their JSON type
   is checked: a suggester that names a field the index does not have is accepted, where Azure refuses
