@@ -132,6 +132,15 @@ receiver, or a session processor. The broker translates Azure's AMQP session fil
 Artemis `JMSXGroupID` selector, which keeps each session on one receiver and preserves FIFO order
 within that session. Attach responses include Azure's `com.microsoft:locked-until-utc` property.
 
+When no unlocked session has messages, an accept-next-session receiver (and so a session processor)
+waits, as on Service Bus: the broker holds the link attach until a message arrives for a session
+nobody has locked, or a locked session is released, and then hands that session over. Several
+waiting receivers each get a different session. The wait lasts as long as the client asks for in
+the `com.microsoft:timeout` link property, which Azure SDKs set just under their operation timeout
+(`TryTimeout`, 60 seconds by default), or 60 seconds when the client sends none. When it runs out,
+the attach fails with `com.microsoft:timeout`, which the SDKs treat as "no session available" and
+retry. A waiting receiver checks for a session every 50 ms.
+
 Session locks expire after the entity `LockDuration` unless renewed. Azure SDK explicit and automatic
 session-lock renewal extend the deadline; closing the receiver releases ownership. Session state is
 not currently emulated.

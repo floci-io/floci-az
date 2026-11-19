@@ -28,6 +28,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -828,6 +830,50 @@ class ServiceBusCompatibilityTest {
             assertNotNull(message);
             assertEquals("b-0", message.getBody().toString());
             receiver.complete(message);
+        }
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("accept-next-session started before the send waits and takes the new session at once")
+    void acceptNextSessionWaitsForANewSession() throws Exception {
+        String queue = uniqueSessionQueue();
+        String sessionId = "late-" + UUID.randomUUID().toString().substring(0, 6);
+
+        try (ServiceBusSessionReceiverClient sessionReceiver = EmulatorConfig.serviceBusClientBuilder()
+                .sessionReceiver()
+                .queueName(queue)
+                .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .buildClient();
+             ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().queueName(queue).buildClient()) {
+            CompletableFuture<Long> acceptedAt = new CompletableFuture<>();
+            CompletableFuture<ServiceBusReceiverClient> accept = CompletableFuture.supplyAsync(() -> {
+                ServiceBusReceiverClient receiver = sessionReceiver.acceptNextSession();
+                acceptedAt.complete(System.nanoTime());
+                return receiver;
+            });
+
+            Thread.sleep(3000);
+            assertFalse(accept.isDone(),
+                    "with no session available the accept must wait for one, not fail at once");
+
+            ServiceBusMessage message = new ServiceBusMessage("late-0");
+            message.setSessionId(sessionId);
+            sender.sendMessage(message);
+            long sentAt = System.nanoTime();
+
+            try (ServiceBusReceiverClient receiver = accept.get(20, TimeUnit.SECONDS)) {
+                long lagMillis = TimeUnit.NANOSECONDS.toMillis(acceptedAt.get() - sentAt);
+                assertTrue(lagMillis < 2000,
+                        "the waiting accept must take the new session promptly, took " + lagMillis + " ms");
+                assertEquals(sessionId, receiver.getSessionId());
+                ServiceBusReceivedMessage received = receiver.receiveMessages(1, RECV_TIMEOUT)
+                        .stream().findFirst().orElse(null);
+                assertNotNull(received);
+                assertEquals("late-0", received.getBody().toString());
+                receiver.complete(received);
+            }
         }
     }
 
