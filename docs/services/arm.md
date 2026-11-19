@@ -478,6 +478,7 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 | `Microsoft.DBforMySQL/flexibleServers` | 3 to 63 lowercase letters, digits and hyphens, starting with a letter or digit and not ending with a hyphen |
 | `Microsoft.DBforPostgreSQL/flexibleServers` | 3 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
 | `Microsoft.Devices/IotHubs` | 3 to 50 letters, digits and hyphens, not all digits, not starting or ending with a hyphen |
+| `Microsoft.Devices/IotHubs/eventHubEndpoints/ConsumerGroups` | 1 to 50 letters, digits, hyphens, periods and underscores, or `$Default`; checked with or without `strict-names` |
 | `Microsoft.EventGrid/eventSubscriptions` | 3 to 64 letters, digits and hyphens |
 | `Microsoft.EventGrid/topics` | 3 to 50 letters, digits and hyphens |
 | `Microsoft.KeyVault/managedHSMs` | 3 to 24 letters, digits and hyphens, starting with a letter, ending with a letter or digit, no consecutive hyphens |

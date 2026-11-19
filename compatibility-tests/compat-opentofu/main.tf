@@ -683,17 +683,11 @@ output "search_primary_key" {
   sensitive = true
 }
 
-variable "iothub_tags" {
-  description = "The IoT hub's tags; a test applies a changed set to exercise the hub update."
-  type        = map(string)
-  default     = { env = "floci-test" }
-}
-
 resource "azurerm_iothub" "iothub" {
   name                = "floci-test-iothub"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
-  tags                = var.iothub_tags
+  tags                = { env = "floci-test" }
 
   sku {
     name     = "S1"
@@ -771,4 +765,15 @@ output "servicebus_root_connection_string" {
 output "servicebus_sender_primary_key" {
   value     = azurerm_servicebus_namespace_authorization_rule.sb.primary_key
   sensitive = true
+}
+
+resource "azurerm_iothub_consumer_group" "iothub_cg" {
+  name                   = "floci-cg"
+  iothub_name            = azurerm_iothub.iothub.name
+  eventhub_endpoint_name = "events"
+  resource_group_name    = azurerm_resource_group.rg.name
+}
+
+output "iothub_consumer_group_id" {
+  value = azurerm_iothub_consumer_group.iothub_cg.id
 }

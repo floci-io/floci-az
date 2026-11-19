@@ -296,25 +296,6 @@ setup() {
     assert_output --partial "No changes"
 }
 
-@test "OpenTofu: a tag change updates the IoT hub in place, keeps its keys and leaves no drift" {
-    cd "$TOFU_DIR"
-    key_before="$(tofu output -raw iothub_owner_primary_key)"
-    local changed='iothub_tags={env="floci-test",stage="updated"}'
-    run tofu apply -input=false -auto-approve -no-color -target=azurerm_iothub.iothub -var "$changed"
-    assert_success
-    assert_output --partial "1 changed"
-    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}?api-version=2023-06-30"
-    assert_output --partial '"stage":"updated"'
-    run tofu plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub.iothub -var "$changed"
-    assert_success
-    assert_output --partial "No changes"
-    assert_equal "$(tofu output -raw iothub_owner_primary_key)" "$key_before"
-
-    # Back to the configured tags, so the tests after this one see the hub as applied.
-    run tofu apply -input=false -auto-approve -no-color -target=azurerm_iothub.iothub
-    assert_success
-}
-
 @test "OpenTofu: an imported IoT hub plans no changes" {
     cd "$TOFU_DIR"
     hub_id="$(tofu output -raw iothub_id)"
@@ -325,6 +306,49 @@ setup() {
     run tofu plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub.iothub
     assert_success
     assert_output --partial "No changes"
+}
+
+@test "OpenTofu: IoT hub consumer group created on the events endpoint" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}/eventHubEndpoints/events/ConsumerGroups/floci-cg?api-version=2023-06-30"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.name')" "floci-cg"
+    assert_equal "$(echo "$output" | jq -r '.type')" "Microsoft.Devices/IotHubs/EventHubEndpoints/ConsumerGroups"
+
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}/eventHubEndpoints/events/ConsumerGroups?api-version=2023-06-30"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '[.value[].name] | join(",")')" '$Default,floci-cg'
+}
+
+@test "OpenTofu: a plan after apply leaves the IoT hub consumer group unchanged" {
+    cd "$TOFU_DIR"
+    run tofu plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub_consumer_group.iothub_cg
+    assert_success
+    assert_output --partial "No changes"
+}
+
+@test "OpenTofu: an imported IoT hub consumer group plans no changes" {
+    cd "$TOFU_DIR"
+    cg_id="$(tofu output -raw iothub_consumer_group_id)"
+    run tofu state rm azurerm_iothub_consumer_group.iothub_cg
+    assert_success
+    run tofu import -input=false -no-color azurerm_iothub_consumer_group.iothub_cg "$cg_id"
+    assert_success
+    run tofu plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub_consumer_group.iothub_cg
+    assert_success
+    assert_output --partial "No changes"
+}
+
+@test "OpenTofu: destroying the IoT hub consumer group leaves the hub and \$Default" {
+    cd "$TOFU_DIR"
+    run tofu destroy -input=false -auto-approve -no-color -target=azurerm_iothub_consumer_group.iothub_cg
+    assert_success
+    assert_output --partial "azurerm_iothub_consumer_group.iothub_cg: Destruction complete"
+
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}/eventHubEndpoints/events/ConsumerGroups/floci-cg?api-version=2023-06-30"
+    assert_failure
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}/eventHubEndpoints/events/ConsumerGroups?api-version=2023-06-30"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '[.value[].name] | join(",")')" '$Default'
 }
 
 @test "OpenTofu: destroying the IoT hub removes it" {

@@ -124,6 +124,80 @@ owner_key() {
     assert_equal "$(echo "$output" | jq -r '[.[] | select(.keyName == "floci-policy")] | length')" "0"
 }
 
+group_names() {
+    az_json iot hub consumer-group list --hub-name "$IOTHUB_NAME" -g "$RG_NAME" | jq -r '[.[].name] | join(",")'
+}
+
+has_group() {
+    az_json iot hub consumer-group list --hub-name "$IOTHUB_NAME" -g "$RG_NAME" \
+        | jq -r --arg n "$1" '[.[] | select(.name == $n)] | length'
+}
+
+@test "az iot hub consumer-group: a hub lists \$Default first" {
+    run group_names
+    assert_success
+    assert_equal "${output%%,*}" '$Default'
+}
+
+@test "az iot hub consumer-group: create, show and list a group" {
+    run az_json iot hub consumer-group create --hub-name "$IOTHUB_NAME" -g "$RG_NAME" -n floci-cg
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.name')" "floci-cg"
+
+    run az_json iot hub consumer-group show --hub-name "$IOTHUB_NAME" -g "$RG_NAME" -n floci-cg
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.type')" "Microsoft.Devices/IotHubs/EventHubEndpoints/ConsumerGroups"
+    assert [ -n "$(echo "$output" | jq -r '.properties.created // empty')" ]
+
+    assert_equal "$(has_group floci-cg)" "1"
+    az iot hub consumer-group delete --hub-name "$IOTHUB_NAME" -g "$RG_NAME" -n floci-cg -o none
+}
+
+@test "az iot hub consumer-group: a hub update keeps its groups" {
+    az iot hub consumer-group create --hub-name "$IOTHUB_NAME" -g "$RG_NAME" -n floci-cg-kept -o none
+
+    run az iot hub update -n "$IOTHUB_NAME" -g "$RG_NAME" --retention-day 2 -o none
+    assert_success
+
+    assert_equal "$(has_group floci-cg-kept)" "1"
+    az iot hub consumer-group delete --hub-name "$IOTHUB_NAME" -g "$RG_NAME" -n floci-cg-kept -o none
+}
+
+@test "az iot hub consumer-group: delete removes the group" {
+    az iot hub consumer-group create --hub-name "$IOTHUB_NAME" -g "$RG_NAME" -n floci-cg-gone -o none
+
+    run az iot hub consumer-group delete --hub-name "$IOTHUB_NAME" -g "$RG_NAME" -n floci-cg-gone -o none
+    assert_success
+
+    run az iot hub consumer-group show --hub-name "$IOTHUB_NAME" -g "$RG_NAME" -n floci-cg-gone -o none
+    assert_failure
+    assert_equal "$(has_group floci-cg-gone)" "0"
+    assert_equal "$(has_group '$Default')" "1"
+}
+
+@test "az iot hub list-skus: an S1 hub lists the Standard SKUs" {
+    run az_json iot hub list-skus -n "$IOTHUB_NAME" -g "$RG_NAME"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '[.[].sku.name] | join(",")')" "S1,S2,S3"
+    assert_equal "$(echo "$output" | jq -r '.[2].capacity.maximum')" "10"
+}
+
+@test "az iot hub show-quota-metrics: the S1 quotas with nothing counted" {
+    run az_json iot hub show-quota-metrics -n "$IOTHUB_NAME" -g "$RG_NAME"
+    assert_success
+    # The CLI itself prints TotalDeviceCount's maxValue as Unlimited, whatever the service answers.
+    assert_equal "$(echo "$output" | jq -r '[.[] | "\(.name)=\(.currentValue)/\(.maxValue)"] | join(",")')" \
+        "TotalMessages=0/400000,TotalDeviceCount=0/Unlimited"
+}
+
+@test "az iot hub show-stats: no devices registered" {
+    run az_json iot hub show-stats -n "$IOTHUB_NAME" -g "$RG_NAME"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.totalDeviceCount')" "0"
+    assert_equal "$(echo "$output" | jq -r '.enabledDeviceCount')" "0"
+    assert_equal "$(echo "$output" | jq -r '.disabledDeviceCount')" "0"
+}
+
 @test "az iot hub: delete removes the hub" {
     run az iot hub delete -n "$IOTHUB_NAME" -g "$RG_NAME" -o none
     assert_success
