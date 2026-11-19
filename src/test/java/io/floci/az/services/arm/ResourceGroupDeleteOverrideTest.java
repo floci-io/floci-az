@@ -144,4 +144,24 @@ class ResourceGroupDeleteOverrideTest {
         json(body).when().put(group("rg-other") + "/providers/Microsoft.Search/searchServices/idx-search" + searchApi)
             .then().statusCode(201);
     }
+
+    /** An IoT hub is listed with its group, deleted with it, and its global name is free again. */
+    @Test
+    void theCascadeDeletesAnIotHubAndFreesItsName() {
+        String iotApi = "?api-version=2023-06-30";
+        String body = "{\"location\":\"eastus\",\"sku\":{\"name\":\"S1\"}}";
+        json("{\"location\":\"eastus\"}").when().put(group("rg-iothub") + API).then().statusCode(201);
+        String hub = group("rg-iothub") + "/providers/Microsoft.Devices/IotHubs/cascade-hub";
+        json(body).when().put(hub + iotApi).then().statusCode(201);
+
+        given().when().get(group("rg-iothub") + "/resources" + API)
+            .then().statusCode(200)
+            .body("value.id", hasItem(hub));
+
+        given().when().delete(group("rg-iothub") + API).then().statusCode(202);
+
+        given().when().get(hub + iotApi).then().statusCode(404);
+        json(body).when().put(group("rg-other") + "/providers/Microsoft.Devices/IotHubs/cascade-hub" + iotApi)
+            .then().statusCode(201);
+    }
 }

@@ -618,3 +618,34 @@ output "search_primary_key" {
   value     = azurerm_search_service.search.primary_key
   sensitive = true
 }
+
+variable "iothub_tags" {
+  description = "The IoT hub's tags; a test applies a changed set to exercise the hub update."
+  type        = map(string)
+  default     = { env = "floci-test" }
+}
+
+resource "azurerm_iothub" "iothub" {
+  name                = "floci-test-iothub"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  tags                = var.iothub_tags
+
+  sku {
+    name     = "S1"
+    capacity = 1
+  }
+}
+
+output "iothub_id" {
+  value = azurerm_iothub.iothub.id
+}
+
+output "iothub_hostname" {
+  value = azurerm_iothub.iothub.hostname
+}
+
+output "iothub_owner_primary_key" {
+  value     = one([for policy in azurerm_iothub.iothub.shared_access_policy : policy.primary_key if policy.key_name == "iothubowner"])
+  sensitive = true
+}

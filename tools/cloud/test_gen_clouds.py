@@ -452,7 +452,8 @@ def test_apim_suffix_is_cross_checked_against_the_government_comparison():
     gov_compare = {"Azure Cache for Redis": ("redis.cache.windows.net", "redis.cache.usgovcloudapi.net"),
                    "API Management Gateway": ("azure-api.net", "azure-api.us"),
                    "Azure AI Search": ("search.windows.net", "search.azure.us"),
-                   "App Service": ("azurewebsites.net", "azurewebsites.us")}
+                   "App Service": ("azurewebsites.net", "azurewebsites.us"),
+                   "Azure IoT Hub": ("azure-devices.net", "azure-devices.us")}
     with_sdk = g.parse_go_environment(GO_GOV.replace(
         "    return &env", '    env.ApiManagement = ApiManagementAPI("azure-api.us")\n\n    return &env', 1))
     apim = g.build_suffixes("AzureUSGovernment", cli, with_sdk, gov_compare)["APIM"]
@@ -473,7 +474,8 @@ def test_doc_only_suffixes_read_the_government_comparison_rows():
     gov_compare = {"Azure Cache for Redis": ("redis.cache.windows.net", "redis.cache.usgovcloudapi.net"),
                    "API Management Gateway": ("azure-api.net", "azure-api.us"),
                    "Azure AI Search": ("search.windows.net", "search.azure.us"),
-                   "App Service": ("azurewebsites.net", "azurewebsites.us")}
+                   "App Service": ("azurewebsites.net", "azurewebsites.us"),
+                   "Azure IoT Hub": ("azure-devices.net", "azure-devices.us")}
     suffixes = g.build_suffixes("AzureUSGovernment", cli, go_env, gov_compare)
     assert suffixes["WEB"] == {"source": f"{g.GOV_COMPARE} (App Service, Azure Government)",
                                "value": "azurewebsites.us"}
@@ -481,6 +483,8 @@ def test_doc_only_suffixes_read_the_government_comparison_rows():
                                  "value": "redis.cache.usgovcloudapi.net"}
     assert suffixes["SEARCH"] == {"source": f"{g.GOV_COMPARE} (Azure AI Search, Azure Government)",
                                   "value": "search.azure.us"}
+    assert suffixes["IOTHUB"] == {"source": f"{g.GOV_COMPARE} (Azure IoT Hub, Azure Government)",
+                                  "value": "azure-devices.us"}
     without_web = {row: pair for row, pair in gov_compare.items() if row != "App Service"}
     with pytest.raises(g.SourceError, match="no App Service row"):
         g.build_suffixes("AzureUSGovernment", cli, go_env, without_web)

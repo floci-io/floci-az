@@ -324,6 +324,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig containerApps();
         ServiceStorageConfig email();
         ServiceStorageConfig search();
+        ServiceStorageConfig iothub();
         ServiceStorageConfig directory();
     }
 
@@ -346,6 +347,12 @@ public interface EmulatorConfig {
     }
 
     interface EmailServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** Azure IoT Hub: Microsoft.Devices/IotHubs on ARM. */
+    interface IotHubServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -398,6 +405,8 @@ public interface EmulatorConfig {
         EmailServiceConfig email();
 
         SearchServiceConfig search();
+
+        IotHubServiceConfig iothub();
     }
 
     /**

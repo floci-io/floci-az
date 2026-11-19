@@ -80,6 +80,12 @@ class SubscriptionWideListTest {
     }
 
     @Test
+    void iotHubsAreListedAcrossTheSubscription() {
+        assertListedAcrossGroups("Microsoft.Devices/IotHubs", "2023-06-30",
+            "{\"location\":\"eastus\",\"sku\":{\"name\":\"S1\"}}", "wide-iothub");
+    }
+
+    @Test
     void logAnalyticsWorkspacesAreListedAcrossTheSubscription() {
         assertListedAcrossGroups("Microsoft.OperationalInsights/workspaces", "2022-10-01",
             "{\"location\":\"eastus\"}", "wide-ws");

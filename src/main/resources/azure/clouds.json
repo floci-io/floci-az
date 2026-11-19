@@ -817,6 +817,10 @@
           "source": "azure-rest-api-specs/specification/eventgrid/data-plane/EventGrid/stable/2018-01-01/EventGrid.json (topic host {topic}.{region}-1.eventgrid.azure.net)",
           "value": "eventgrid.azure.net"
         },
+        "IOTHUB": {
+          "source": "azure-docs/articles/azure-government/compare-azure-government-global-azure.md (Azure IoT Hub, Azure Public)",
+          "value": "azure-devices.net"
+        },
         "KEYVAULT": {
           "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_public.go",
           "value": "vault.azure.net"
@@ -1185,6 +1189,10 @@
           "source": "UNSETTLED: EVENTGRID host suffix in AzureUSGovernment; no local source (the .NET Event Grid WebJobs extension accepts webhook origins eventgrid.azure.us and eventgrid.azure.cn, which is not evidence for the topic endpoint suffix)",
           "value": null
         },
+        "IOTHUB": {
+          "source": "azure-docs/articles/azure-government/compare-azure-government-global-azure.md (Azure IoT Hub, Azure Government)",
+          "value": "azure-devices.us"
+        },
         "KEYVAULT": {
           "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_gov.go",
           "value": "vault.usgovcloudapi.net"
@@ -1550,6 +1558,10 @@
         },
         "EVENTGRID": {
           "source": "UNSETTLED: EVENTGRID host suffix in AzureChinaCloud; no local source (the .NET Event Grid WebJobs extension accepts webhook origins eventgrid.azure.us and eventgrid.azure.cn, which is not evidence for the topic endpoint suffix)",
+          "value": null
+        },
+        "IOTHUB": {
+          "source": "UNSETTLED: Azure IoT Hub host suffix in AzureChinaCloud; no local source",
           "value": null
         },
         "KEYVAULT": {

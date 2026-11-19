@@ -107,6 +107,7 @@ class RoutingTableAssemblyTest {
         Map.entry("/providers/Microsoft.Cache/", "redis"),
         Map.entry("/providers/Microsoft.Communication/", "email"),
         Map.entry("/providers/Microsoft.Search/", "search"),
+        Map.entry("/providers/Microsoft.Devices/", "iothub"),
         Map.entry("/providers/Microsoft.App/", "containerapps"),
         Map.entry("/providers/Microsoft.Resources/", "deployments")
     );

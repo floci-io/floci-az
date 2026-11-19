@@ -102,7 +102,7 @@ API_VERSIONS = ["2018-01-01", "2019-05-01", "2022-09-01"]
 # Must stay in step with io.floci.az.core.cloud.CloudSuffix (CloudCatalogTest checks the Java side).
 SUFFIX_KEYS = ["BLOB", "DFS", "QUEUE", "TABLE", "KEYVAULT", "MHSM", "ACR", "SERVICEBUS", "SIGNALR", "APPCONFIG",
                "SQL", "POSTGRES", "MYSQL", "MARIADB", "REDIS", "EVENTGRID", "CONTAINERAPPS", "COMMUNICATION", "AKS",
-               "ACI", "APIM", "WEB", "SEARCH"]
+               "ACI", "APIM", "WEB", "SEARCH", "IOTHUB"]
 STORAGE_SERVICES = {"BLOB": "blob", "DFS": "dfs", "QUEUE": "queue", "TABLE": "table"}
 # CloudSuffix -> (cloud.py CloudSuffixes attribute, go-azure-sdk environment field). Either may be None.
 SDK_SUFFIXES = {
@@ -129,6 +129,7 @@ GOV_CROSSCHECK_SUFFIXES = {
 GOV_DOC_ONLY_SUFFIXES = {
     "REDIS": "Azure Cache for Redis",
     "WEB": "App Service",
+    "IOTHUB": "Azure IoT Hub",
 }
 # Public-cloud-only suffixes read from one REST spec or test file each: (file, literal that must appear).
 PUBLIC_EVIDENCE = {

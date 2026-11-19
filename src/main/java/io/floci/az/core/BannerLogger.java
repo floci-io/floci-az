@@ -221,6 +221,9 @@ public class BannerLogger {
         if (config.services().search().enabled()) {
             sb.append(serviceStatus("search", true, getStorageMode("search")));
         }
+        if (config.services().iothub().enabled()) {
+            sb.append(serviceStatus("iothub", true, getStorageMode("iothub")));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info(webConsoleLine(config));
         LOGGER.info(tlsLine(config));
@@ -324,6 +327,7 @@ public class BannerLogger {
             case "monitor"   -> config.storage().services().monitor().mode().orElse(config.storage().mode());
             case "email"     -> config.storage().services().email().mode().orElse(config.storage().mode());
             case "search"    -> config.storage().services().search().mode().orElse(config.storage().mode());
+            case "iothub"    -> config.storage().services().iothub().mode().orElse(config.storage().mode());
             case "directory" -> config.storage().services().directory().mode().orElse(config.storage().mode());
             default          -> config.storage().mode();
         };
