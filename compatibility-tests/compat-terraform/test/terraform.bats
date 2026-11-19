@@ -265,6 +265,78 @@ setup() {
     assert_equal "$output" "$listed"
 }
 
+@test "Terraform: IoT hub created with its host name, Succeeded and Active" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}?api-version=2023-06-30"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.type')" "Microsoft.Devices/IotHubs"
+    assert_equal "$(echo "$output" | jq -r '.sku.name')" "S1"
+    assert_equal "$(echo "$output" | jq -r '.properties.provisioningState')" "Succeeded"
+    assert_equal "$(echo "$output" | jq -r '.properties.state')" "Active"
+    assert_equal "$(echo "$output" | jq -r '.properties.hostName')" "${IOTHUB_NAME}.azure-devices.net"
+
+    run terraform -chdir="$TF_DIR" output -raw iothub_hostname
+    assert_success
+    assert_output "${IOTHUB_NAME}.azure-devices.net"
+}
+
+@test "Terraform: IoT hub owner key is the one the hub lists" {
+    run curl -sf -X POST -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}/IotHubKeys/iothubowner/listkeys?api-version=2023-06-30"
+    assert_success
+    listed="$(echo "$output" | jq -r '.primaryKey')"
+    run terraform -chdir="$TF_DIR" output -raw iothub_owner_primary_key
+    assert_success
+    assert_equal "$output" "$listed"
+}
+
+@test "Terraform: a plan after apply leaves the IoT hub unchanged" {
+    cd "$TF_DIR"
+    run terraform plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub.iothub
+    assert_success
+    assert_output --partial "No changes"
+}
+
+@test "Terraform: a tag change updates the IoT hub in place, keeps its keys and leaves no drift" {
+    cd "$TF_DIR"
+    key_before="$(terraform output -raw iothub_owner_primary_key)"
+    local changed='iothub_tags={env="floci-test",stage="updated"}'
+    run terraform apply -input=false -auto-approve -no-color -target=azurerm_iothub.iothub -var "$changed"
+    assert_success
+    assert_output --partial "1 changed"
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}?api-version=2023-06-30"
+    assert_output --partial '"stage":"updated"'
+    run terraform plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub.iothub -var "$changed"
+    assert_success
+    assert_output --partial "No changes"
+    assert_equal "$(terraform output -raw iothub_owner_primary_key)" "$key_before"
+
+    # Back to the configured tags, so the tests after this one see the hub as applied.
+    run terraform apply -input=false -auto-approve -no-color -target=azurerm_iothub.iothub
+    assert_success
+}
+
+@test "Terraform: an imported IoT hub plans no changes" {
+    cd "$TF_DIR"
+    hub_id="$(terraform output -raw iothub_id)"
+    run terraform state rm azurerm_iothub.iothub
+    assert_success
+    run terraform import -input=false -no-color azurerm_iothub.iothub "$hub_id"
+    assert_success
+    run terraform plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub.iothub
+    assert_success
+    assert_output --partial "No changes"
+}
+
+@test "Terraform: destroying the IoT hub removes it" {
+    cd "$TF_DIR"
+    run terraform destroy -input=false -auto-approve -no-color -target=azurerm_iothub.iothub
+    assert_success
+    assert_output --partial "azurerm_iothub.iothub: Destruction complete"
+
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}?api-version=2023-06-30"
+    assert_failure
+}
+
 @test "Terraform: container registry created with Succeeded state" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ContainerRegistry/registries/${ACR_NAME}"
     assert_success

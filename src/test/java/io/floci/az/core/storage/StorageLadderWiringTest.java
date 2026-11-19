@@ -58,4 +58,12 @@ class StorageLadderWiringTest {
                 "storage.services.search must exist for the per-service override to be reachable");
         assertEquals(InMemoryStorage.class, storageFactory.create("search").getClass());
     }
+
+    @Test
+    @DisplayName("iothub resolves its own ServiceStorageConfig and follows the global mode by default")
+    void iotHubIsWiredIntoTheLadder() {
+        assertNotNull(config.storage().services().iothub(),
+                "storage.services.iothub must exist for the per-service override to be reachable");
+        assertEquals(InMemoryStorage.class, storageFactory.create("iothub").getClass());
+    }
 }

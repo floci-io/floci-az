@@ -125,4 +125,18 @@ class AdminResetTest {
         // 201, not 200: the service is new again, and its global name was released with it.
         given().contentType("application/json").body(body).when().put(service).then().statusCode(201);
     }
+
+    @Test
+    void resetClearsIotHubsAndFreesTheirNames() {
+        String hub = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-reset"
+                + "/providers/Microsoft.Devices/IotHubs/reset-hub?api-version=2023-06-30";
+        String body = "{\"location\": \"eastus\", \"sku\": {\"name\": \"S1\"}}";
+        given().contentType("application/json").body(body).when().put(hub).then().statusCode(201);
+
+        given().when().post("/_admin/reset")
+                .then().statusCode(204);
+
+        given().when().get(hub).then().statusCode(404);
+        given().contentType("application/json").body(body).when().put(hub).then().statusCode(201);
+    }
 }

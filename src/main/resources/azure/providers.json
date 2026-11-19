@@ -1736,6 +1736,43 @@
       ]
     },
     {
+      "namespace": "Microsoft.Devices",
+      "resourceTypes": [
+        {
+          "resourceType": "IotHubs",
+          "apiVersions": ["2026-05-01-preview", "2026-03-01-preview", "2025-08-01-preview", "2023-06-30", "2023-06-30-preview", "2022-11-15-preview", "2022-04-30-preview", "2021-07-02", "2021-07-02-preview", "2021-07-01", "2021-07-01-preview", "2021-03-31", "2021-03-03-preview", "2021-02-01-preview", "2020-08-31", "2020-08-31-preview", "2020-08-01", "2020-07-10-preview", "2020-06-15", "2020-04-01", "2020-03-01", "2019-11-04", "2019-07-01-preview", "2019-03-22", "2019-03-22-preview", "2018-12-01-preview", "2018-04-01", "2018-01-22", "2017-07-01", "2017-01-19", "2016-02-03"]
+        },
+        {
+          "resourceType": "IotHubs/certificates",
+          "apiVersions": ["2026-05-01-preview", "2026-03-01-preview", "2025-08-01-preview", "2023-06-30", "2023-06-30-preview", "2022-11-15-preview", "2022-04-30-preview", "2021-07-02", "2021-07-02-preview", "2021-07-01", "2021-07-01-preview", "2021-03-31", "2021-03-03-preview", "2021-02-01-preview", "2020-08-31", "2020-08-31-preview", "2020-08-01", "2020-07-10-preview", "2020-06-15", "2020-04-01", "2020-03-01", "2019-11-04", "2019-07-01-preview", "2019-03-22", "2019-03-22-preview", "2018-12-01-preview", "2018-04-01", "2018-01-22", "2017-07-01"]
+        },
+        {
+          "resourceType": "IotHubs/eventHubEndpoints/ConsumerGroups",
+          "apiVersions": ["2026-05-01-preview", "2026-03-01-preview", "2025-08-01-preview", "2023-06-30", "2023-06-30-preview", "2022-11-15-preview", "2022-04-30-preview", "2021-07-02", "2021-07-02-preview", "2021-07-01", "2021-07-01-preview", "2021-03-31", "2021-03-03-preview", "2021-02-01-preview", "2020-08-31", "2020-08-31-preview", "2020-08-01", "2020-07-10-preview", "2020-06-15", "2020-04-01", "2020-03-01", "2019-11-04", "2019-07-01-preview", "2019-03-22", "2019-03-22-preview", "2018-12-01-preview", "2018-04-01", "2018-01-22", "2017-07-01", "2017-01-19", "2016-02-03"]
+        },
+        {
+          "resourceType": "iotHubs/privateEndpointConnections",
+          "apiVersions": ["2026-05-01-preview", "2026-03-01-preview", "2025-08-01-preview", "2023-06-30", "2023-06-30-preview", "2022-11-15-preview", "2022-04-30-preview", "2021-07-02", "2021-07-02-preview", "2021-07-01", "2021-07-01-preview", "2021-03-31", "2021-03-03-preview", "2021-02-01-preview", "2020-08-31", "2020-08-31-preview", "2020-08-01", "2020-07-10-preview", "2020-06-15", "2020-04-01", "2020-03-01"]
+        },
+        {
+          "resourceType": "provisioningServices",
+          "apiVersions": ["2026-03-01-preview", "2025-02-01-preview", "2023-03-01-preview", "2022-12-12", "2022-02-05", "2021-10-15", "2020-09-01-preview", "2020-03-01", "2020-01-01", "2018-01-22", "2017-11-15", "2017-08-21-preview"]
+        },
+        {
+          "resourceType": "provisioningServices/certificates",
+          "apiVersions": ["2026-03-01-preview", "2025-02-01-preview", "2023-03-01-preview", "2022-12-12", "2022-02-05", "2021-10-15", "2020-09-01-preview", "2020-03-01", "2020-01-01", "2018-01-22", "2017-11-15", "2017-08-21-preview"]
+        },
+        {
+          "resourceType": "provisioningServices/privateEndpointConnections",
+          "apiVersions": ["2026-03-01-preview", "2025-02-01-preview", "2023-03-01-preview", "2022-12-12", "2022-02-05", "2021-10-15", "2020-09-01-preview", "2020-03-01"]
+        },
+        {
+          "resourceType": "provisioningServices/privateLinkResources",
+          "apiVersions": ["2026-03-01-preview", "2025-02-01-preview"]
+        }
+      ]
+    },
+    {
       "namespace": "Microsoft.EventGrid",
       "resourceTypes": [
         {

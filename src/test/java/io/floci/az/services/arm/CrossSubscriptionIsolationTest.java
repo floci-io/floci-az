@@ -153,6 +153,9 @@ class CrossSubscriptionIsolationTest {
                         409, "Conflict"),
                 new GlobalKind(new Kind("search service", "Microsoft.Search/searchServices", "xsub-search", "2025-05-01",
                         "{\"location\":\"eastus\",\"sku\":{\"name\":\"basic\"}}"),
+                        409, "Conflict"),
+                new GlobalKind(new Kind("IoT hub", "Microsoft.Devices/IotHubs", "xsub-iothub", "2023-06-30",
+                        "{\"location\":\"eastus\",\"sku\":{\"name\":\"S1\"}}"),
                         409, "Conflict"));
     }
 

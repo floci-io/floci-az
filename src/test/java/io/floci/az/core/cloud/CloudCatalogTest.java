@@ -98,6 +98,8 @@ class CloudCatalogTest {
         assertEquals(Optional.of("azure-api.cn"), china.suffix(CloudSuffix.APIM));
         assertEquals(Optional.of("search.azure.us"), gov.suffix(CloudSuffix.SEARCH));
         assertEquals(Optional.of("search.azure.cn"), china.suffix(CloudSuffix.SEARCH));
+        assertEquals(Optional.of("azure-devices.us"), gov.suffix(CloudSuffix.IOTHUB));
+        assertEquals(Optional.empty(), china.suffix(CloudSuffix.IOTHUB));
     }
 
     @Test

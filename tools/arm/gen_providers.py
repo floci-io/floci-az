@@ -53,6 +53,7 @@ NAMESPACES = [
     "Microsoft.DBforMariaDB",
     "Microsoft.DBforMySQL",
     "Microsoft.DBforPostgreSQL",
+    "Microsoft.Devices",
     "Microsoft.EventGrid",
     "Microsoft.Insights",
     "Microsoft.KeyVault",

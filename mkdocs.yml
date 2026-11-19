@@ -103,6 +103,7 @@ nav:
     - Azure Monitor / Log Analytics: services/monitor.md
     - Communication Services Email: services/email.md
     - Azure AI Search: services/search.md
+    - Azure IoT Hub: services/iothub.md
     - Managed Identity: services/managed-identity.md
     - Azure Policy: services/policy.md
     - Azure RBAC: services/authorization.md

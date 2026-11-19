@@ -265,6 +265,78 @@ setup() {
     assert_equal "$output" "$listed"
 }
 
+@test "OpenTofu: IoT hub created with its host name, Succeeded and Active" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}?api-version=2023-06-30"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.type')" "Microsoft.Devices/IotHubs"
+    assert_equal "$(echo "$output" | jq -r '.sku.name')" "S1"
+    assert_equal "$(echo "$output" | jq -r '.properties.provisioningState')" "Succeeded"
+    assert_equal "$(echo "$output" | jq -r '.properties.state')" "Active"
+    assert_equal "$(echo "$output" | jq -r '.properties.hostName')" "${IOTHUB_NAME}.azure-devices.net"
+
+    run tofu -chdir="$TOFU_DIR" output -raw iothub_hostname
+    assert_success
+    assert_output "${IOTHUB_NAME}.azure-devices.net"
+}
+
+@test "OpenTofu: IoT hub owner key is the one the hub lists" {
+    run curl -sf -X POST -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}/IotHubKeys/iothubowner/listkeys?api-version=2023-06-30"
+    assert_success
+    listed="$(echo "$output" | jq -r '.primaryKey')"
+    run tofu -chdir="$TOFU_DIR" output -raw iothub_owner_primary_key
+    assert_success
+    assert_equal "$output" "$listed"
+}
+
+@test "OpenTofu: a plan after apply leaves the IoT hub unchanged" {
+    cd "$TOFU_DIR"
+    run tofu plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub.iothub
+    assert_success
+    assert_output --partial "No changes"
+}
+
+@test "OpenTofu: a tag change updates the IoT hub in place, keeps its keys and leaves no drift" {
+    cd "$TOFU_DIR"
+    key_before="$(tofu output -raw iothub_owner_primary_key)"
+    local changed='iothub_tags={env="floci-test",stage="updated"}'
+    run tofu apply -input=false -auto-approve -no-color -target=azurerm_iothub.iothub -var "$changed"
+    assert_success
+    assert_output --partial "1 changed"
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}?api-version=2023-06-30"
+    assert_output --partial '"stage":"updated"'
+    run tofu plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub.iothub -var "$changed"
+    assert_success
+    assert_output --partial "No changes"
+    assert_equal "$(tofu output -raw iothub_owner_primary_key)" "$key_before"
+
+    # Back to the configured tags, so the tests after this one see the hub as applied.
+    run tofu apply -input=false -auto-approve -no-color -target=azurerm_iothub.iothub
+    assert_success
+}
+
+@test "OpenTofu: an imported IoT hub plans no changes" {
+    cd "$TOFU_DIR"
+    hub_id="$(tofu output -raw iothub_id)"
+    run tofu state rm azurerm_iothub.iothub
+    assert_success
+    run tofu import -input=false -no-color azurerm_iothub.iothub "$hub_id"
+    assert_success
+    run tofu plan -input=false -no-color -detailed-exitcode -target=azurerm_iothub.iothub
+    assert_success
+    assert_output --partial "No changes"
+}
+
+@test "OpenTofu: destroying the IoT hub removes it" {
+    cd "$TOFU_DIR"
+    run tofu destroy -input=false -auto-approve -no-color -target=azurerm_iothub.iothub
+    assert_success
+    assert_output --partial "azurerm_iothub.iothub: Destruction complete"
+
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Devices/IotHubs/${IOTHUB_NAME}?api-version=2023-06-30"
+    assert_failure
+}
+
 @test "OpenTofu: container registry created with Succeeded state" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ContainerRegistry/registries/${ACR_NAME}"
     assert_success
