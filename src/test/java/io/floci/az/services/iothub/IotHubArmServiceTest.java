@@ -379,6 +379,23 @@ class IotHubArmServiceTest {
     }
 
     @Test
+    void basicAndStandardHubsHaveAtMostThirtyTwoPartitions() {
+        for (String sku : new String[] {"S1", "B1"}) {
+            put("rg", "hub-p32-" + sku.toLowerCase(), "{\"location\": \"westus2\", \"sku\": {\"name\": \"" + sku
+                    + "\", \"capacity\": 1}, \"properties\": {\"eventHubEndpoints\": {\"events\": "
+                    + "{\"partitionCount\": 32}}}}")
+                .then().statusCode(201)
+                .body("properties.eventHubEndpoints.events.partitionIds", hasSize(32));
+            put("rg", "hub-p33-" + sku.toLowerCase(), "{\"location\": \"westus2\", \"sku\": {\"name\": \"" + sku
+                    + "\", \"capacity\": 1}, \"properties\": {\"eventHubEndpoints\": {\"events\": "
+                    + "{\"partitionCount\": 33}}}}")
+                .then().statusCode(400)
+                .body("code", equalTo(400016))
+                .body("message", equalTo("Invalid PartitionCount 33 - value must be between 2 and 32."));
+        }
+    }
+
+    @Test
     void anUnknownTlsVersionIsRefusedWithAzuresError() {
         put("rg", "hub-tls", """
                 {"location": "westus2", "sku": {"name": "S1"}, "properties": {"minTlsVersion": "2.5"}}""")

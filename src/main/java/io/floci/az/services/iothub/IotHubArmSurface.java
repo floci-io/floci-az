@@ -30,6 +30,18 @@ public class IotHubArmSurface implements ArmSurfaceProvider {
             + "digits, and does not start or end with a hyphen.");
 
     /**
+     * 1 to 50 letters, digits, hyphens, periods and underscores, or the built-in {@code $Default}. The characters are
+     * azurerm's {@code IoTHubConsumerGroupName} rule (the portal's); the 50 is Event Hubs' AMQP limit on a consumer
+     * group name, since IoT Hub's own documentation states none. Checked in every mode, so a name the handler stores
+     * always fits it; {@code $Default} matches ignoring case, as the group names do.
+     */
+    static final NameRule CONSUMER_GROUP_NAME = new NameRule(1, 50,
+        Pattern.compile("(?i:\\$Default)|[0-9a-zA-Z._-]{1,50}"),
+        "InvalidResourceName",
+        "The resource name '%s' is invalid: a consumer group name is 1 to 50 letters, digits, hyphens, periods and "
+            + "underscores.").inEveryMode();
+
+    /**
      * A hub name is a global DNS label under {@code azure-devices.net}. No public source gives Azure's create-conflict
      * answer, so ARM's generic {@code Conflict} stands in, with the message Azure gives for the name in
      * {@code checkNameAvailability}.
@@ -41,7 +53,9 @@ public class IotHubArmSurface implements ArmSurfaceProvider {
         new ArmSurface(NAMESPACE, ArmLane.FILTER, List.of(
             ArmResourceType.resourceGroup(NAMESPACE, "IotHubs", LocationPolicy.REQUIRED)
                 .withName(IOT_HUB_NAME)
-                .withGlobalName(IOT_HUB_DNS_NAME))));
+                .withGlobalName(IOT_HUB_DNS_NAME),
+            ArmResourceType.child(NAMESPACE, "IotHubs/eventHubEndpoints/ConsumerGroups")
+                .withName(CONSUMER_GROUP_NAME))));
 
     @Override
     public List<ArmSurface> armSurfaces() {

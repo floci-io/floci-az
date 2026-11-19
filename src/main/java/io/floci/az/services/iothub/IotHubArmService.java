@@ -18,6 +18,7 @@ import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.entra.TokenIssuer;
 import io.floci.az.services.iothub.IotHubModels.AccessPolicy;
+import io.floci.az.services.iothub.IotHubModels.ConsumerGroup;
 import io.floci.az.services.iothub.IotHubModels.IotHubResource;
 import io.floci.az.services.managedidentity.ManagedIdentityModels.UserAssignedIdentity;
 import io.floci.az.services.managedidentity.ManagedIdentityStore;
@@ -26,8 +27,12 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -108,9 +113,13 @@ public class IotHubArmService {
     /** The read-only properties of {@code EventHubProperties}. */
     private static final Set<String> READ_ONLY_EVENT_HUB = Set.of("partitionIds", "path", "endpoint");
 
-    private static final String EVENTS_ENDPOINT = "events";
+    private static final String EVENTS_ENDPOINT = IotHubModels.EVENTS_ENDPOINT;
     private static final int MIN_PARTITIONS = 2;
-    private static final int MAX_PARTITIONS = 128;
+    /**
+     * "The maximum limit of device-to-cloud partitions for basic tier and standard tier IoT hubs is 32" (Learn, IoT
+     * Hub scaling). azurerm's own check allows up to 128, but Azure's limit is the one that answers.
+     */
+    private static final int MAX_PARTITIONS = 32;
     private static final int DEFAULT_PARTITIONS = 4;
     private static final int DEFAULT_RETENTION_DAYS = 1;
     /** Device-to-cloud retention Azure allows, in days; the free tier keeps one day only. */
@@ -118,6 +127,11 @@ public class IotHubArmService {
     /** The units each SKU allows, from Azure's IoT Hub limits; the rest allow {@link #DEFAULT_MAX_UNITS}. */
     private static final Map<String, Integer> MAX_UNITS = Map.of("F1", 1, "S3", 10, "B3", 10);
     private static final int DEFAULT_MAX_UNITS = 200;
+    /** "You can have up to 20 consumer groups for each IoT hub" (Learn, the built-in endpoint), for every tier. */
+    private static final int MAX_CONSUMER_GROUPS = 20;
+
+    /** The read-only views of a hub, lower-cased: {@code skus}, {@code quotaMetrics} and {@code IotHubStats}. */
+    private static final Set<String> HUB_VIEWS = Set.of("skus", "quotametrics", "iothubstats");
 
     private static final String IDENTITY_NONE = "None";
     private static final String IDENTITY_SYSTEM = "SystemAssigned";
@@ -159,10 +173,15 @@ public class IotHubArmService {
     private Response route(AzureRequest req) {
         String path = withoutQuery(req.resourcePath());
         String method = req.method().toUpperCase(Locale.ROOT);
-        List<String> tail = segments(ArmPaths.afterProvider(path, IotHubArmSurface.NAMESPACE, ""));
+        // A tenant-rooted path (providers/Microsoft.Devices/operations) has no slash before its provider marker.
+        String markerPath = path.startsWith("/") ? path : "/" + path;
+        List<String> tail = segments(ArmPaths.afterProvider(markerPath, IotHubArmSurface.NAMESPACE, ""));
 
         if (tail.size() == 1 && tail.getFirst().equalsIgnoreCase("checkNameAvailability")) {
             return "POST".equals(method) ? checkNameAvailability(req) : methodNotAllowed();
+        }
+        if (tail.size() == 1 && tail.getFirst().equalsIgnoreCase("operations")) {
+            return "GET".equals(method) ? ok(Map.of("value", IotHubCatalog.OPERATIONS)) : methodNotAllowed();
         }
         if (tail.isEmpty() || !tail.getFirst().equalsIgnoreCase(HUBS_SEGMENT)) {
             return unknownPath(tail);
@@ -190,10 +209,94 @@ public class IotHubArmService {
         if (tail.size() == 3 && tail.get(2).equalsIgnoreCase("listkeys")) {
             return "POST".equals(method) ? listKeys(id.get()) : methodNotAllowed();
         }
+        if (tail.size() == 3 && HUB_VIEWS.contains(tail.get(2).toLowerCase(Locale.ROOT))) {
+            if (!"GET".equals(method)) {
+                return methodNotAllowed();
+            }
+            return hubs.get(id.get())
+                    .map(stored -> ok(hubView(tail.get(2).toLowerCase(Locale.ROOT), stored.value())))
+                    .orElseGet(() -> hubNotFound(id.get()));
+        }
         if (tail.size() == 5 && tail.get(2).equalsIgnoreCase("IotHubKeys") && tail.get(4).equalsIgnoreCase("listkeys")) {
             return "POST".equals(method) ? keysForKeyName(id.get(), tail.get(3)) : methodNotAllowed();
         }
+        // Clients spell these segments differently: the az CLI sends ConsumerGroups, azurerm consumerGroups.
+        if (tail.size() >= 5 && tail.size() <= 6 && tail.get(2).equalsIgnoreCase("eventHubEndpoints")
+                && tail.get(4).equalsIgnoreCase("ConsumerGroups")) {
+            String endpoint = tail.get(3);
+            if (tail.size() == 5) {
+                return "GET".equals(method) ? listConsumerGroups(id.get(), endpoint) : methodNotAllowed();
+            }
+            // The path is already percent-decoded: %24Default arrives as $Default.
+            String group = tail.get(5);
+            return switch (method) {
+                case "PUT" -> createConsumerGroup(req, id.get(), endpoint, group);
+                case "GET" -> getConsumerGroup(id.get(), endpoint, group);
+                case "DELETE" -> deleteConsumerGroup(id.get(), endpoint, group);
+                default -> methodNotAllowed();
+            };
+        }
         return unknownPath(tail);
+    }
+
+    // ── Hub views ────────────────────────────────────────────────────────────
+
+    /**
+     * {@code IotHubResource_GetValidSkus}, {@code _GetQuotaMetrics} and {@code _GetStats}, answered as Azure answered
+     * the az CLI. The two lists come in one page, without a {@code nextLink}.
+     */
+    private static Object hubView(String view, IotHubResource hub) {
+        return switch (view) {
+            case "skus" -> Map.of("value", validSkus(hub.sku()));
+            case "quotametrics" -> Map.of("value", IotHubCatalog.quotaMetrics(hub.sku(), hub.capacity()));
+            default -> IotHubCatalog.registryStatistics();
+        };
+    }
+
+    /**
+     * The SKUs a hub can move to ({@link #canMoveTo}), each with the units it allows: an S1 hub lists S1, S2 and S3,
+     * as Azure answered, and a Basic hub its own tier's SKUs and then Standard's.
+     */
+    private static List<Map<String, Object>> validSkus(String current) {
+        List<Map<String, Object>> skus = new ArrayList<>();
+        SKU_TIERS.keySet().stream()
+                .filter(name -> canMoveTo(current, name))
+                .sorted()
+                .forEach(name -> {
+                    Map<String, Object> capacity = new LinkedHashMap<>();
+                    capacity.put("minimum", 1);
+                    capacity.put("maximum", MAX_UNITS.getOrDefault(name, DEFAULT_MAX_UNITS));
+                    capacity.put("default", 1);
+                    capacity.put("scaleType", FREE_SKU.equals(name) ? "None" : "Manual");
+                    Map<String, Object> sku = new LinkedHashMap<>();
+                    sku.put("resourceType", IotHubModels.IOT_HUBS);
+                    Map<String, Object> skuInfo = new LinkedHashMap<>();
+                    skuInfo.put("name", name);
+                    skuInfo.put("tier", SKU_TIERS.get(name));
+                    sku.put("sku", skuInfo);
+                    sku.put("capacity", capacity);
+                    skus.add(sku);
+                });
+        return skus;
+    }
+
+    /**
+     * Whether a hub on SKU {@code from} can move to {@code to}: within its tier, or from Basic to Standard. Learn's
+     * "Upgrade an IoT hub": "You can only upgrade from the basic tier to the standard tier", "you can't downgrade to a
+     * lower tier", and "You can't change the tier of a free or standard hub".
+     */
+    private static boolean canMoveTo(String from, String to) {
+        String fromTier = SKU_TIERS.get(from);
+        String toTier = SKU_TIERS.get(to);
+        return fromTier.equals(toTier) || ("Basic".equals(fromTier) && "Standard".equals(toTier));
+    }
+
+    private static void refuseSkuChange(IotHubResource hub, String sku) {
+        if (!canMoveTo(hub.sku(), sku)) {
+            throw new Refused(invalid("IoT hub '" + hub.name() + "' cannot move from " + hub.sku() + " ("
+                    + SKU_TIERS.get(hub.sku()) + ") to " + sku + " (" + SKU_TIERS.get(sku) + "): a hub changes SKU"
+                    + " within its tier, or from Basic to Standard."));
+        }
     }
 
     // ── Hubs ─────────────────────────────────────────────────────────────────
@@ -251,6 +354,7 @@ public class IotHubArmService {
                 existing.ifPresentOrElse(hub -> {
                     refuseStaleEtag(hub, ifMatch);
                     refuseLocationChange(hub, location);
+                    refuseSkuChange(hub, sku.get());
                 }, () -> refuseETagOfMissingHub(id, ifMatch));
                 // The id keeps the casing of the PUT that created the hub.
                 ArmResourceId stored = existing.map(hub -> ArmResourceId.parse(hub.id()).orElseThrow()).orElse(id);
@@ -276,7 +380,10 @@ public class IotHubArmService {
                         existing.map(IotHubResource::createdAt).orElseGet(IotHubArmService::now),
                         existing.map(IotHubResource::eventHubPath).orElseGet(() -> newEventHubPath(stored.name())),
                         existing.map(IotHubResource::eventHubNamespace)
-                                .orElseGet(() -> newEventHubNamespace(stored.name())));
+                                .orElseGet(() -> newEventHubNamespace(stored.name())),
+                        // A hub PUT replaces the hub's body, which never lists its groups: they stay. A new hub
+                        // gets $Default, created with it.
+                        existing.map(IotHubResource::consumerGroups).orElse(null));
             });
         } catch (Refused refusal) {
             return refusal.response();
@@ -376,6 +483,168 @@ public class IotHubArmService {
                 .map(policy -> ok(policy.toArm()))
                 .orElseGet(() -> ArmErrors.notFound("The shared access policy '" + keyName + "' was not found on IoT"
                         + " hub '" + id.name() + "'."));
+    }
+
+    // ── Consumer groups ──────────────────────────────────────────────────────
+
+    /** {@code IotHubResource_ListEventHubConsumerGroups}: {@code $Default} first, then in creation order. */
+    private Response listConsumerGroups(ArmResourceId id, String endpoint) {
+        Optional<ArmResourceStore.Stored<IotHubResource>> hub = hubs.get(id);
+        if (hub.isEmpty()) {
+            return hubNotFound(id);
+        }
+        if (!EVENTS_ENDPOINT.equalsIgnoreCase(endpoint)) {
+            return endpointNotFound(id, endpoint);
+        }
+        IotHubResource stored = hub.get().value();
+        return ok(Map.of("value", groupsOf(stored, endpoint).stream()
+                .map(group -> consumerGroupToArm(stored, group, null))
+                .toList()));
+    }
+
+    /** {@code IotHubResource_GetEventHubConsumerGroup}. */
+    private Response getConsumerGroup(ArmResourceId id, String endpoint, String name) {
+        Optional<ArmResourceStore.Stored<IotHubResource>> hub = hubs.get(id);
+        if (hub.isEmpty()) {
+            return hubNotFound(id);
+        }
+        if (!EVENTS_ENDPOINT.equalsIgnoreCase(endpoint)) {
+            return endpointNotFound(id, endpoint);
+        }
+        IotHubResource stored = hub.get().value();
+        return findGroup(stored, endpoint, name)
+                .map(group -> ok(consumerGroupToArm(stored, group, null)))
+                .orElseGet(() -> consumerGroupNotFound(id, name));
+    }
+
+    /**
+     * {@code IotHubResource_CreateEventHubConsumerGroup}: {@code 200} with the group, which echoes the name the body
+     * sent ({@code properties.name}, required), as Azure answered the az CLI. A PUT of a group that exists answers it
+     * as it is, keeping its creation time.
+     */
+    private Response createConsumerGroup(AzureRequest req, ArmResourceId id, String endpoint, String name) {
+        Map<String, Object> body = ArmJson.parseBodyStrict(req);
+        // The name's syntax is the gate's (IotHubArmSurface.CONSUMER_GROUP_NAME, checked in every mode). A missing
+        // hub answers before anything about the request's body, as the other consumer group verbs answer it.
+        Optional<ArmResourceStore.Stored<IotHubResource>> current = hubs.get(id);
+        if (current.isEmpty()) {
+            return hubNotFound(id);
+        }
+        // The body the spec requires (EventHubConsumerGroupBodyDescription): {"properties": {"name": "<name>"}}.
+        if (!(body.get("properties") instanceof Map<?, ?> properties)) {
+            return invalid("The request body has no 'properties' object: a consumer group is created with"
+                    + " {\"properties\": {\"name\": \"" + name + "\"}}.");
+        }
+        if (!(properties.get("name") instanceof String sentName)) {
+            return invalid("The request body's 'properties.name' must be the consumer group's name, as a string.");
+        }
+        if (!name.equalsIgnoreCase(sentName)) {
+            return invalid("The consumer group name in the body ('" + sentName + "') is not the one in the path ('"
+                    + name + "').");
+        }
+        // A repeated PUT answers the group it has without writing the hub again. A group created or deleted after
+        // this read is the update's to see, under the store's lock.
+        Optional<ConsumerGroup> had = findGroup(current.get().value(), endpoint, name);
+        if (had.isPresent()) {
+            return ok(consumerGroupToArm(current.get().value(), had.get(), sentName));
+        }
+        ArmResourceStore.Stored<IotHubResource> written;
+        try {
+            Optional<ArmResourceStore.Stored<IotHubResource>> updated = hubs.update(id, hub -> {
+                if (!EVENTS_ENDPOINT.equalsIgnoreCase(endpoint)) {
+                    throw new Refused(endpointNotFound(id, endpoint));
+                }
+                // A group created since the read above: answered as it is, and the write is aborted, not repeated.
+                Optional<ConsumerGroup> created = findGroup(hub, endpoint, name);
+                if (created.isPresent()) {
+                    throw new Refused(ok(consumerGroupToArm(hub, created.get(), sentName)));
+                }
+                if (groupsOf(hub, endpoint).size() >= MAX_CONSUMER_GROUPS) {
+                    throw new Refused(invalid("IoT hub '" + hub.name() + "' already has " + MAX_CONSUMER_GROUPS
+                            + " consumer groups on endpoint '" + EVENTS_ENDPOINT + "', the most a hub can have."));
+                }
+                List<ConsumerGroup> groups = new ArrayList<>(hub.consumerGroups());
+                groups.add(new ConsumerGroup(EVENTS_ENDPOINT, name, now()));
+                return hub.withConsumerGroups(groups);
+            });
+            if (updated.isEmpty()) {
+                return hubNotFound(id);
+            }
+            written = updated.get();
+        } catch (Refused refusal) {
+            return refusal.response();
+        }
+        IotHubResource hub = written.value();
+        ConsumerGroup group = findGroup(hub, endpoint, name).orElseThrow();
+        LOG.infov("ARM: consumer group {0} on IoT hub {1}", group.name(), hub.id());
+        return ok(consumerGroupToArm(hub, group, sentName));
+    }
+
+    /** {@code IotHubResource_DeleteEventHubConsumerGroup}: {@code 200} with no body. {@code $Default} stays. */
+    private Response deleteConsumerGroup(ArmResourceId id, String endpoint, String name) {
+        try {
+            Optional<ArmResourceStore.Stored<IotHubResource>> updated = hubs.update(id, hub -> {
+                if (!EVENTS_ENDPOINT.equalsIgnoreCase(endpoint)) {
+                    throw new Refused(endpointNotFound(id, endpoint));
+                }
+                ConsumerGroup group = findGroup(hub, endpoint, name)
+                        .orElseThrow(() -> new Refused(consumerGroupNotFound(id, name)));
+                if (IotHubModels.DEFAULT_CONSUMER_GROUP.equalsIgnoreCase(group.name())) {
+                    throw new Refused(invalid("The consumer group '" + IotHubModels.DEFAULT_CONSUMER_GROUP
+                            + "' cannot be deleted."));
+                }
+                return hub.withConsumerGroups(hub.consumerGroups().stream()
+                        .filter(other -> other != group)
+                        .toList());
+            });
+            if (updated.isEmpty()) {
+                return hubNotFound(id);
+            }
+        } catch (Refused refusal) {
+            return refusal.response();
+        }
+        LOG.infov("ARM: deleted consumer group {0} on IoT hub {1}", name, id.id());
+        return Response.ok().build();
+    }
+
+    private static List<ConsumerGroup> groupsOf(IotHubResource hub, String endpoint) {
+        return hub.consumerGroups().stream().filter(group -> group.endpoint().equalsIgnoreCase(endpoint)).toList();
+    }
+
+    /** The group named {@code name}, matched ignoring case as Event Hubs matches consumer group names. */
+    private static Optional<ConsumerGroup> findGroup(IotHubResource hub, String endpoint, String name) {
+        return groupsOf(hub, endpoint).stream().filter(group -> group.name().equalsIgnoreCase(name)).findFirst();
+    }
+
+    /**
+     * The group as Azure answered it: {@code created} in RFC 1123, {@code etag} null, and the name URL-encoded in the
+     * id ({@code %24Default}). Only a PUT's answer echoes the name it sent, under {@code properties.properties}, in
+     * the request's spelling even when it matched a stored group spelt otherwise; {@code sentName} is null otherwise.
+     */
+    private static Map<String, Object> consumerGroupToArm(IotHubResource hub, ConsumerGroup group, String sentName) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("created", DateTimeFormatter.RFC_1123_DATE_TIME
+                .format(Instant.parse(group.createdAt()).atZone(ZoneOffset.UTC)));
+        if (sentName != null) {
+            properties.put("properties", Map.of("name", sentName));
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("properties", properties);
+        body.put("id", hub.id() + "/eventHubEndpoints/" + group.endpoint() + "/ConsumerGroups/"
+                + URLEncoder.encode(group.name(), StandardCharsets.UTF_8));
+        body.put("name", group.name());
+        body.put("type", IotHubModels.CONSUMER_GROUPS);
+        body.put("etag", null);
+        return body;
+    }
+
+    private static Response endpointNotFound(ArmResourceId id, String endpoint) {
+        return ArmErrors.notFound("IoT hub '" + id.name() + "' has no Event Hub-compatible endpoint '" + endpoint
+                + "': its only one is '" + EVENTS_ENDPOINT + "'.");
+    }
+
+    private static Response consumerGroupNotFound(ArmResourceId id, String name) {
+        return ArmErrors.notFound("The consumer group '" + name + "' was not found on IoT hub '" + id.name() + "'.");
     }
 
     // ── Resource index, global names, reset ──────────────────────────────────

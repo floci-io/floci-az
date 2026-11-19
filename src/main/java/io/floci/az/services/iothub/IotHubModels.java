@@ -16,6 +16,12 @@ public final class IotHubModels {
 
     /** The resource type of a hub, spelled as Azure spells it in {@code id} and {@code type}. */
     public static final String IOT_HUBS = "Microsoft.Devices/IotHubs";
+    /** The resource type of a consumer group, spelled as Azure answers it in {@code type}. */
+    public static final String CONSUMER_GROUPS = "Microsoft.Devices/IotHubs/EventHubEndpoints/ConsumerGroups";
+    /** The built-in Event Hub-compatible endpoint: the only one a hub has. */
+    public static final String EVENTS_ENDPOINT = "events";
+    /** The consumer group every endpoint has from the hub's creation, and which cannot be deleted. */
+    public static final String DEFAULT_CONSUMER_GROUP = "$Default";
 
     private IotHubModels() {
     }
@@ -44,6 +50,18 @@ public final class IotHubModels {
     }
 
     /**
+     * A consumer group of an Event Hub-compatible endpoint ({@code EventHubConsumerGroupInfo}).
+     *
+     * @param endpoint  the endpoint it reads, {@code events}
+     * @param name      the group name, as the PUT that created it spelt it
+     * @param createdAt when it was created, ISO-8601; answered in RFC 1123 as Azure does
+     */
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ConsumerGroup(String endpoint, String name, String createdAt) {
+    }
+
+    /**
      * A {@code Microsoft.Devices/IotHubs} resource. The response body is built from it by {@code IotHubArmService},
      * which adds what the hub derives rather than stores: the host name, the state, and the read-only fields of the
      * built-in Event Hub-compatible endpoint.
@@ -64,6 +82,8 @@ public final class IotHubModels {
      * @param createdAt         when the hub was created, for {@code systemData}
      * @param eventHubPath      the name of the built-in Event Hub-compatible endpoint, fixed at creation
      * @param eventHubNamespace the namespace label of that endpoint, fixed at creation
+     * @param consumerGroups    the consumer groups of the endpoints, in creation order; a hub stored before they were
+     *                          served loads with the {@code $Default} group of {@code events}, created with the hub
      */
     @RegisterForReflection
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -82,11 +102,18 @@ public final class IotHubModels {
             long version,
             String createdAt,
             String eventHubPath,
-            String eventHubNamespace
+            String eventHubNamespace,
+            List<ConsumerGroup> consumerGroups
     ) {
 
         public IotHubResource {
             policies = policies == null ? List.of() : List.copyOf(policies);
+            consumerGroups = consumerGroups == null ? defaultConsumerGroups(createdAt) : List.copyOf(consumerGroups);
+        }
+
+        /** The groups of a new hub: {@code $Default} on {@code events}, created with it. */
+        public static List<ConsumerGroup> defaultConsumerGroups(String createdAt) {
+            return List.of(new ConsumerGroup(EVENTS_ENDPOINT, DEFAULT_CONSUMER_GROUP, createdAt));
         }
 
         /**
@@ -102,7 +129,16 @@ public final class IotHubModels {
         /** This hub with other tags, one write later. */
         public IotHubResource withTags(Map<String, Object> newTags) {
             return new IotHubResource(id, name, location, newTags, sku, capacity, identity, properties, policies,
-                    incarnation, version + 1, createdAt, eventHubPath, eventHubNamespace);
+                    incarnation, version + 1, createdAt, eventHubPath, eventHubNamespace, consumerGroups);
+        }
+
+        /**
+         * This hub with other consumer groups. The version stays: a group is a sub-resource with no ETag of its own,
+         * and a hub's body does not list its groups, so its ETag does not change.
+         */
+        public IotHubResource withConsumerGroups(List<ConsumerGroup> groups) {
+            return new IotHubResource(id, name, location, tags, sku, capacity, identity, properties, policies,
+                    incarnation, version, createdAt, eventHubPath, eventHubNamespace, groups);
         }
     }
 }
