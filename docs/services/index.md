@@ -15,7 +15,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Cosmos DB multi-API** | _(engine sidecars)_ | ✅ MongoDB, PostgreSQL, Cassandra, Gremlin, Table, NoSQL (opt-in Docker engines) |
 | **Key Vault** | `/{account}-keyvault/` | ✅ Self-signed certificates with PFX/PEM secrets; secrets & keys CRUD, versioning, soft-delete, properties update, backup/restore, rotation, RSA/EC/oct crypto, `/rng`, Managed HSM |
 | **Event Hubs** | AMQP `:5672` / Kafka `:9093` | ✅ AMQP 1.0 (Artemis), Kafka-compatible (Redpanda, opt-in) |
-| **Service Bus** | `/{account}-servicebus/` + AMQP `:5673` | ✅ Queues, topics, subscriptions (dynamic); AMQP 1.0 via Artemis sidecar or mocked |
+| **Service Bus** | `/{account}-servicebus/` + AMQP `:5673` | ✅ Queues, topics, subscriptions (dynamic); AMQP 1.0 via Artemis sidecar or mocked; ARM management plane (`Microsoft.ServiceBus`: namespaces, entities, rules, authorization rules and keys) |
 | **Azure SQL Database** | ARM path + `/{account}-sql/` | ✅ Servers, databases, firewall rules; ARM-only by default, managed SQL Server opt-in |
 | **Azure Database for PostgreSQL** | ARM path (`Microsoft.DBforPostgreSQL`) + `/{account}-postgres/` | ✅ Flexible servers, databases, firewall rules, configurations; Docker-backed `postgres` containers or mocked |
 | **Azure Database for MySQL** | ARM path (`Microsoft.DBforMySQL`) + `/{account}-mysql/` | ✅ Flexible servers, databases, firewall rules, configurations; Docker-backed `mysql` containers or mocked |

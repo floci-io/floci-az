@@ -116,6 +116,16 @@ class ArmSurfaceGoldenTest {
         Microsoft.Resources/deployments                                                RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
         Microsoft.Resources/resourceGroups                                             SUBSCRIPTION    REQUIRED  ARM_HANDLER
         Microsoft.Search/searchServices                                                RESOURCE_GROUP  REQUIRED  FILTER
+        Microsoft.ServiceBus/namespaces                                                RESOURCE_GROUP  REQUIRED  FILTER
+        Microsoft.ServiceBus/namespaces/AuthorizationRules                             RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.ServiceBus/namespaces/disasterRecoveryConfigs                        RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.ServiceBus/namespaces/networkRuleSets                                RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.ServiceBus/namespaces/queues                                         RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.ServiceBus/namespaces/queues/authorizationRules                      RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.ServiceBus/namespaces/topics                                         RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.ServiceBus/namespaces/topics/authorizationRules                      RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.ServiceBus/namespaces/topics/subscriptions                           RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.ServiceBus/namespaces/topics/subscriptions/rules                     RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Sql/servers                                                          RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.Sql/servers/connectionPolicies                                       RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Sql/servers/databases                                                RESOURCE_GROUP  OPTIONAL  FILTER
@@ -172,6 +182,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Network/virtualNetworks/subnets  1-80    null    0    null
         Microsoft.OperationalInsights/workspaces    4-63    null    0    null
         Microsoft.Search/searchServices    2-60    SEARCH    409    Conflict
+        Microsoft.ServiceBus/namespaces    6-50    SERVICEBUS    409    Conflict
         Microsoft.Sql/servers                  1-63     SQL     400    NameAlreadyExists
         Microsoft.Sql/servers/databases        1-128    null    0      null
         Microsoft.Sql/servers/firewallRules    1-128    null    0      null

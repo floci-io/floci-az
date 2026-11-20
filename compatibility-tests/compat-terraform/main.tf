@@ -649,3 +649,62 @@ output "iothub_owner_primary_key" {
   value     = one([for policy in azurerm_iothub.iothub.shared_access_policy : policy.primary_key if policy.key_name == "iothubowner"])
   sensitive = true
 }
+
+resource "azurerm_servicebus_namespace" "sb" {
+  name                = "floci-test-sbns"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  sku                 = "Standard"
+
+  tags = {
+    env = "floci-test"
+  }
+}
+
+resource "azurerm_servicebus_queue" "sb" {
+  name                                 = "orders"
+  namespace_id                         = azurerm_servicebus_namespace.sb.id
+  max_delivery_count                   = 5
+  lock_duration                        = "PT30S"
+  dead_lettering_on_message_expiration = true
+}
+
+resource "azurerm_servicebus_topic" "sb" {
+  name         = "events"
+  namespace_id = azurerm_servicebus_namespace.sb.id
+}
+
+resource "azurerm_servicebus_subscription" "sb" {
+  name               = "audit"
+  topic_id           = azurerm_servicebus_topic.sb.id
+  max_delivery_count = 3
+}
+
+resource "azurerm_servicebus_subscription_rule" "sb" {
+  name            = "high-priority"
+  subscription_id = azurerm_servicebus_subscription.sb.id
+  filter_type     = "SqlFilter"
+  sql_filter      = "priority > 5"
+}
+
+resource "azurerm_servicebus_namespace_authorization_rule" "sb" {
+  name         = "sender"
+  namespace_id = azurerm_servicebus_namespace.sb.id
+  listen       = false
+  send         = true
+  manage       = false
+}
+
+output "servicebus_namespace_id" {
+  value = azurerm_servicebus_namespace.sb.id
+}
+
+output "servicebus_root_connection_string" {
+  value     = azurerm_servicebus_namespace.sb.default_primary_connection_string
+  sensitive = true
+}
+
+output "servicebus_sender_primary_key" {
+  value     = azurerm_servicebus_namespace_authorization_rule.sb.primary_key
+  sensitive = true
+}

@@ -46,6 +46,65 @@ Entity CRUD is served over HTTP at `/{account}-servicebus/`:
 | `GET` | `/{account}-servicebus/{topic}/subscriptions/{sub}/rules` | List subscription rules |
 | `PUT` / `GET` / `DELETE` | `/{account}-servicebus/{topic}/subscriptions/{sub}/rules/{rule}` | Manage a subscription rule |
 
+## ARM management plane (Microsoft.ServiceBus)
+
+Service Bus is also served on the ARM plane, so `azurerm_servicebus_*` resources, `az servicebus` and
+Bicep or ARM templates can create namespaces and entities. Shapes follow the resource-manager spec at
+`2024-01-01`, the version the azurerm provider pins; `2026-01-01`, which the az CLI sends, only adds
+properties, and every version in the provider manifest is accepted.
+
+| Method | Path under `/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ServiceBus/` | Operation |
+|---|---|---|
+| `PUT` / `GET` / `PATCH` / `DELETE` | `namespaces/{ns}` | Create, read, update, delete a namespace |
+| `GET` | `namespaces` (also at subscription level) | List namespaces |
+| `PUT` / `GET` / `DELETE` | `namespaces/{ns}/queues/{queue}`, `.../topics/{topic}` | Manage a queue or a topic |
+| `PUT` / `GET` / `DELETE` | `.../topics/{topic}/subscriptions/{sub}` | Manage a subscription |
+| `PUT` / `GET` / `DELETE` | `.../subscriptions/{sub}/rules/{rule}` | Manage a SQL or correlation filter rule |
+| `PUT` / `GET` / `DELETE` | `namespaces/{ns}/AuthorizationRules/{rule}`, `.../queues/{queue}/authorizationRules/{rule}`, `.../topics/{topic}/authorizationRules/{rule}` | Manage a shared access authorization rule |
+| `POST` | `.../{rule}/listKeys`, `.../{rule}/regenerateKeys` | Read or regenerate a rule's keys |
+| `PUT` / `GET` | `namespaces/{ns}/networkRuleSets/default` | The namespace network rule set |
+| `GET` | `namespaces/{ns}/disasterRecoveryConfigs` | List geo-disaster recovery aliases (always empty) |
+| `POST` | `/subscriptions/{sub}/providers/Microsoft.ServiceBus/CheckNameAvailability` | Check a namespace name |
+
+Each collection path above also answers `GET` with a list.
+
+**One namespace, both APIs.** An ARM namespace is the broker namespace of the same name. Creating it
+starts its broker (a mocked one when `mocked: true`), and its queues, topics, subscriptions and rules
+are the entities the Atom API and the AMQP data plane see: a queue created through ARM is reachable
+over AMQP and at `/{account}-servicebus/{ns}/queues/{queue}` at once, and an entity created over the
+Atom API under that namespace shows in the ARM listings. Namespaces created only through the Atom API,
+`default` among them, are not ARM resources.
+
+Every namespace gets the `RootManageSharedAccessKey` rule with `Listen`, `Send` and `Manage`, and its
+name is a global DNS name: a second namespace of the same name in any subscription is refused with
+`409 Conflict`, and `CheckNameAvailability` answers `NameInUse`. No public source gives Azure's code
+for that conflict, so ARM's generic `Conflict` stands in. A name is 6 to 50 letters, digits and
+hyphens, starts with a letter, ends with a letter or digit, and does not end in `-sb` or `-mgmt`.
+
+How it departs from Azure:
+
+- **No polling.** A namespace `PUT` and `DELETE` are long-running in Azure. floci-az finishes the write
+  before answering, so the body already reads `provisioningState: Succeeded` and no
+  `Azure-AsyncOperation` header is sent, which ends the clients' polling at once.
+- **Connection strings name the broker.** `listKeys` answers
+  `Endpoint=sb://{host}:{port};SharedAccessKeyName={rule};SharedAccessKey={key};UseDevelopmentEmulator=true`,
+  with `;EntityPath={entity}` for a queue or topic rule. The host and port are the AMQP endpoint
+  `GET /{account}-servicebus/namespaces` reports for that namespace, because nothing serves
+  `{ns}.servicebus.windows.net`. The keys are real random values, but floci-az does not check them.
+- **Entities are not updated in place yet.** A `PUT` of a queue, topic or subscription that exists
+  answers it unchanged, as the Atom API does; the ARM-only properties it sends (`status`,
+  `enablePartitioning`, `enableExpress`, `forwardTo` and similar) are stored and echoed, but the broker
+  settings stay as they were created. Rules, authorization rules and namespaces are updated.
+- **The network rule set is stored, not enforced**, and is answered with Azure's defaults
+  (`defaultAction: Allow`) until one is written.
+- **Message counts** come from the broker for queues; subscriptions report `0`.
+- **No geo-disaster recovery pairing.** `disasterRecoveryConfigs` lists no alias, which is what azurerm
+  reads after writing an authorization rule on a Premium namespace, and creating an alias is refused
+  with `400`.
+- **Durations keep millisecond precision.** A duration is answered in the spelling it was sent in when
+  it means the same number of milliseconds, so the unbounded `P10675199DT2H48M5.4775807S` azurerm 4.x
+  sends by default reads back unchanged.
+
 ## Declarative topology (Config.json)
 
 At startup, floci-az applies a declarative topology file in the
