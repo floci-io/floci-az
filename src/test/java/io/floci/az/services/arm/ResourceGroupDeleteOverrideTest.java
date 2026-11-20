@@ -164,4 +164,28 @@ class ResourceGroupDeleteOverrideTest {
         json(body).when().put(group("rg-other") + "/providers/Microsoft.Devices/IotHubs/cascade-hub" + iotApi)
             .then().statusCode(201);
     }
+
+    /**
+     * A Service Bus namespace is listed with its group and deleted with it, its queue on the broker too, and its
+     * global name is free again.
+     */
+    @Test
+    void theCascadeDeletesAServiceBusNamespaceWithItsQueueAndFreesItsName() {
+        String sbApi = "?api-version=2024-01-01";
+        String body = "{\"location\":\"eastus\",\"sku\":{\"name\":\"Standard\"}}";
+        json("{\"location\":\"eastus\"}").when().put(group("rg-sb") + API).then().statusCode(201);
+        String namespace = group("rg-sb") + "/providers/Microsoft.ServiceBus/namespaces/cascade-sbns";
+        json(body).when().put(namespace + sbApi).then().statusCode(201);
+        json("{\"properties\":{}}").when().put(namespace + "/queues/orders" + sbApi).then().statusCode(200);
+
+        given().when().get(group("rg-sb") + "/resources" + API)
+            .then().statusCode(200)
+            .body("value.id", hasItem(namespace));
+
+        given().when().delete(group("rg-sb") + API).then().statusCode(202);
+
+        given().when().get("/devstoreaccount1-servicebus/cascade-sbns/queues/orders").then().statusCode(404);
+        json(body).when().put(group("rg-other") + "/providers/Microsoft.ServiceBus/namespaces/cascade-sbns" + sbApi)
+            .then().statusCode(201);
+    }
 }

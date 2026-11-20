@@ -1869,6 +1869,62 @@
           "resourceType" : "searchServices"
         } ]
       }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.ServiceBus",
+        "namespace" : "Microsoft.ServiceBus",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "namespaces"
+        }, {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "namespaces/queues"
+        }, {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "namespaces/topics"
+        }, {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "namespaces/topics/subscriptions"
+        }, {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "namespaces/topics/subscriptions/rules"
+        }, {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "namespaces/AuthorizationRules"
+        }, {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "namespaces/queues/authorizationRules"
+        }, {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "namespaces/topics/authorizationRules"
+        }, {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "namespaces/networkRuleSets"
+        }, {
+          "apiVersions" : [ "2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "namespaces/disasterRecoveryConfigs"
+        } ]
+      }, {
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Sql",
         "namespace" : "Microsoft.Sql",
         "registrationPolicy" : "RegistrationRequired",

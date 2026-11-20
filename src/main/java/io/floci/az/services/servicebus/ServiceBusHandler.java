@@ -9,6 +9,7 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -90,14 +91,25 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private final EmulatorConfig config;
     private final ServiceBusNamespaceManager namespaceManager;
     private final StorageBackend<String, StoredObject> store;
+    /** The {@code Microsoft.ServiceBus} management plane; null for a handler built without one, as in unit tests. */
+    private final ServiceBusArmService arm;
 
     @Inject
     public ServiceBusHandler(EmulatorConfig config,
                               ServiceBusNamespaceManager namespaceManager,
-                              StorageFactory storageFactory) {
+                              StorageFactory storageFactory,
+                              ServiceBusArmService arm) {
         this.config = config;
         this.namespaceManager = namespaceManager;
         this.store = storageFactory.create("servicebus");
+        this.arm = arm;
+    }
+
+    /** A handler without the management plane, for tests of the Atom API. */
+    ServiceBusHandler(EmulatorConfig config,
+                      ServiceBusNamespaceManager namespaceManager,
+                      StorageFactory storageFactory) {
+        this(config, namespaceManager, storageFactory, null);
     }
 
     @Override
@@ -117,6 +129,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return ServiceRoutes.builder()
                 .host(".servicebus.windows.net")
                 .account("-servicebus", "servicebus")
+                .provider(ServiceBusArmSurface.NAMESPACE)
                 .build();
 
     }
@@ -125,6 +138,10 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     public Response handle(AzureRequest req) {
         String path = req.resourcePath();
         String account = req.accountName();
+
+        if (arm != null && ArmPaths.hasProvider(path, ServiceBusArmSurface.NAMESPACE)) {
+            return arm.handle(req);
+        }
 
         // ── Spec paths (start with $) ─────────────────────────────────────────
         if ("$namespaceinfo".equals(path)) {
@@ -555,7 +572,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return atomEntry(201, queueEntryXml(namespace, queue));
     }
 
-    private Response handleDeleteQueue(String account, String namespace, String queueName) {
+    Response handleDeleteQueue(String account, String namespace, String queueName) {
         String key = queueKey(account, namespace, queueName);
         if (store.get(key).isEmpty()) {
             return notFoundAtom("Queue not found: " + queueName);
@@ -646,7 +663,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return atomEntry(201, topicEntryXml(namespace, topic));
     }
 
-    private Response handleDeleteTopic(String account, String namespace, String topicName) {
+    Response handleDeleteTopic(String account, String namespace, String topicName) {
         String topicKey = topicKey(account, namespace, topicName);
         if (store.get(topicKey).isEmpty()) {
             return notFoundAtom("Topic not found: " + topicName);
@@ -738,8 +755,18 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                        ServiceBusEntityXml.DeliverySettings delivery,
                                        ServiceBusModels.RuleEntity initialRule) {
         return handleCreateSubscription(account, namespace, topicName, subName,
-                requiresSession, lifetime, delivery, ServiceBusEntityXml.EntityMetadata.DEFAULTS,
-                () -> initialRule);
+                requiresSession, lifetime, delivery, ServiceBusEntityXml.EntityMetadata.DEFAULTS, initialRule);
+    }
+
+    Response handleCreateSubscription(String account, String namespace,
+                                       String topicName, String subName,
+                                       boolean requiresSession,
+                                       ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                       ServiceBusEntityXml.DeliverySettings delivery,
+                                       ServiceBusEntityXml.EntityMetadata metadata,
+                                       ServiceBusModels.RuleEntity initialRule) {
+        return handleCreateSubscription(account, namespace, topicName, subName,
+                requiresSession, lifetime, delivery, metadata, () -> initialRule);
     }
 
     private Response handleCreateSubscription(String account, String namespace,
@@ -875,7 +902,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         provisionSubscription(namespace, topic, sub, selector);
     }
 
-    private Response handleDeleteSubscription(String account, String namespace,
+    Response handleDeleteSubscription(String account, String namespace,
                                                String topicName, String subName) {
         String key = subKey(account, namespace, topicName, subName);
         if (store.get(key).isEmpty()) {
@@ -1327,27 +1354,27 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     // ── Storage key helpers ───────────────────────────────────────────────────
 
-    private static String queuePrefix(String account, String namespace) {
+    static String queuePrefix(String account, String namespace) {
         return "sb/" + account + "/" + namespace + "/queues/";
     }
 
-    private static String queueKey(String account, String namespace, String queueName) {
+    static String queueKey(String account, String namespace, String queueName) {
         return queuePrefix(account, namespace) + queueName;
     }
 
-    private static String topicPrefix(String account, String namespace) {
+    static String topicPrefix(String account, String namespace) {
         return "sb/" + account + "/" + namespace + "/topics/";
     }
 
-    private static String topicKey(String account, String namespace, String topicName) {
+    static String topicKey(String account, String namespace, String topicName) {
         return topicPrefix(account, namespace) + topicName;
     }
 
-    private static String subPrefix(String account, String namespace, String topicName) {
+    static String subPrefix(String account, String namespace, String topicName) {
         return "sb/" + account + "/" + namespace + "/topics/" + topicName + "/subscriptions/";
     }
 
-    private static String subKey(String account, String namespace, String topicName, String subName) {
+    static String subKey(String account, String namespace, String topicName, String subName) {
         return subPrefix(account, namespace, topicName) + subName;
     }
 
@@ -1360,11 +1387,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return store.scan(k -> k.startsWith(prefix) && k.indexOf('/', prefix.length()) < 0);
     }
 
-    private static String rulePrefix(String account, String namespace, String topicName, String subName) {
+    static String rulePrefix(String account, String namespace, String topicName, String subName) {
         return subKey(account, namespace, topicName, subName) + "/rules/";
     }
 
-    private static String ruleKey(String account, String namespace, String topicName,
+    static String ruleKey(String account, String namespace, String topicName,
                                    String subName, String ruleName) {
         return rulePrefix(account, namespace, topicName, subName) + ruleName;
     }

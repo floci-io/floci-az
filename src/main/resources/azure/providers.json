@@ -3088,6 +3088,75 @@
       ]
     },
     {
+      "namespace": "Microsoft.ServiceBus",
+      "resourceTypes": [
+        {
+          "resourceType": "namespaces",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01"]
+        },
+        {
+          "resourceType": "namespaces/AuthorizationRules",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01"]
+        },
+        {
+          "resourceType": "namespaces/disasterRecoveryConfigs",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01"]
+        },
+        {
+          "resourceType": "namespaces/disasterRecoveryConfigs/authorizationRules",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01"]
+        },
+        {
+          "resourceType": "namespaces/ipfilterrules",
+          "apiVersions": ["2018-01-01-preview"]
+        },
+        {
+          "resourceType": "namespaces/migrationConfigurations",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01"]
+        },
+        {
+          "resourceType": "namespaces/networkRuleSets",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01"]
+        },
+        {
+          "resourceType": "namespaces/networkSecurityPerimeterConfigurations",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview"]
+        },
+        {
+          "resourceType": "namespaces/privateEndpointConnections",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview"]
+        },
+        {
+          "resourceType": "namespaces/queues",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01"]
+        },
+        {
+          "resourceType": "namespaces/queues/authorizationRules",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01"]
+        },
+        {
+          "resourceType": "namespaces/topics",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01"]
+        },
+        {
+          "resourceType": "namespaces/topics/authorizationRules",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01"]
+        },
+        {
+          "resourceType": "namespaces/topics/subscriptions",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01", "2015-08-01"]
+        },
+        {
+          "resourceType": "namespaces/topics/subscriptions/rules",
+          "apiVersions": ["2026-07-01-preview", "2026-01-01", "2025-05-01-preview", "2024-01-01", "2023-01-01-preview", "2022-10-01-preview", "2022-01-01-preview", "2021-11-01", "2021-06-01-preview", "2021-01-01-preview", "2018-01-01-preview", "2017-04-01"]
+        },
+        {
+          "resourceType": "namespaces/virtualnetworkrules",
+          "apiVersions": ["2018-01-01-preview"]
+        }
+      ]
+    },
+    {
       "namespace": "Microsoft.Sql",
       "resourceTypes": [
         {

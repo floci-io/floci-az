@@ -65,6 +65,7 @@ NAMESPACES = [
     "Microsoft.ResourceGraph",
     "Microsoft.Resources",
     "Microsoft.Search",
+    "Microsoft.ServiceBus",
     "Microsoft.Sql",
     "Microsoft.Storage",
     "Microsoft.Web",

@@ -34,6 +34,7 @@ export ACR_NAME="flocitestacr"
 export REDIS_NAME="floci-test-redis"
 export SEARCH_NAME="floci-test-search"
 export IOTHUB_NAME="floci-test-iothub"
+export SB_NAMESPACE_NAME="floci-test-azcli-sbns"
 
 # Dev storage key (well-known Azurite key floci-az accepts) — used to build a
 # data-plane connection string, mirroring azfloci/azfloci.py.

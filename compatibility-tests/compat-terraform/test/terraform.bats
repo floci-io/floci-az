@@ -337,6 +337,69 @@ setup() {
     assert_failure
 }
 
+@test "Terraform: Service Bus namespace created Succeeded, with its endpoint and the root rule" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ServiceBus/namespaces/${SB_NAMESPACE_NAME}?api-version=2024-01-01"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.sku.name')" "Standard"
+    assert_equal "$(echo "$output" | jq -r '.properties.provisioningState')" "Succeeded"
+    assert_equal "$(echo "$output" | jq -r '.properties.serviceBusEndpoint')" "https://${SB_NAMESPACE_NAME}.servicebus.windows.net:443/"
+
+    run curl -sf -X POST -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ServiceBus/namespaces/${SB_NAMESPACE_NAME}/AuthorizationRules/RootManageSharedAccessKey/listKeys?api-version=2024-01-01"
+    assert_success
+    listed="$(echo "$output" | jq -r '.primaryConnectionString')"
+    run terraform -chdir="$TF_DIR" output -raw servicebus_root_connection_string
+    assert_success
+    assert_equal "$output" "$listed"
+}
+
+@test "Terraform: a Service Bus queue created through ARM is the queue the Atom API serves" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ServiceBus/namespaces/${SB_NAMESPACE_NAME}/queues/orders?api-version=2024-01-01"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.maxDeliveryCount')" "5"
+    assert_equal "$(echo "$output" | jq -r '.properties.lockDuration')" "PT30S"
+
+    run curl -sf "${FLOCI_AZ_ENDPOINT}/devstoreaccount1-servicebus/${SB_NAMESPACE_NAME}/queues/orders"
+    assert_success
+    assert_output --partial "<MaxDeliveryCount>5</MaxDeliveryCount>"
+}
+
+@test "Terraform: the Service Bus subscription rule and the sender rule's key are the stored ones" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ServiceBus/namespaces/${SB_NAMESPACE_NAME}/topics/events/subscriptions/audit/rules/high-priority?api-version=2024-01-01"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.sqlFilter.sqlExpression')" "priority > 5"
+
+    run curl -sf -X POST -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ServiceBus/namespaces/${SB_NAMESPACE_NAME}/AuthorizationRules/sender/listKeys?api-version=2024-01-01"
+    assert_success
+    listed="$(echo "$output" | jq -r '.primaryKey')"
+    run terraform -chdir="$TF_DIR" output -raw servicebus_sender_primary_key
+    assert_success
+    assert_equal "$output" "$listed"
+}
+
+@test "Terraform: a plan after apply leaves the Service Bus resources unchanged" {
+    cd "$TF_DIR"
+    run terraform plan -input=false -no-color -detailed-exitcode \
+        -target=azurerm_servicebus_namespace.sb -target=azurerm_servicebus_queue.sb \
+        -target=azurerm_servicebus_topic.sb -target=azurerm_servicebus_subscription.sb \
+        -target=azurerm_servicebus_subscription_rule.sb -target=azurerm_servicebus_namespace_authorization_rule.sb
+    assert_success
+    assert_output --partial "No changes"
+}
+
+@test "Terraform: destroying the Service Bus namespace removes it and its queue" {
+    cd "$TF_DIR"
+    run terraform destroy -input=false -auto-approve -no-color -target=azurerm_servicebus_namespace.sb
+    assert_success
+    assert_output --partial "azurerm_servicebus_namespace.sb: Destruction complete"
+
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ServiceBus/namespaces/${SB_NAMESPACE_NAME}?api-version=2024-01-01"
+    assert_failure
+    run curl -sf "${FLOCI_AZ_ENDPOINT}/devstoreaccount1-servicebus/${SB_NAMESPACE_NAME}/queues/orders"
+    assert_failure
+}
+
 @test "Terraform: container registry created with Succeeded state" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ContainerRegistry/registries/${ACR_NAME}"
     assert_success
