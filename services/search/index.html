@@ -1,0 +1,3180 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fast, free, open-source local Azure emulator">
+      
+      
+      
+        <link rel="canonical" href="https://floci.io/floci-az/services/search/">
+      
+      
+        <link rel="prev" href="../email/">
+      
+      
+        <link rel="next" href="../iothub/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/floci.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
+    
+    
+      
+        <title>Azure AI Search - Floci-AZ</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Umami analytics — tracks docs visits (privacy-friendly, cookieless) -->
+  <script defer src="https://cloud.umami.is/script.js" data-website-id="b2ab8ccd-4619-4b94-bfa6-e8870961d6eb"></script>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#azure-ai-search" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Floci-AZ" class="md-header__button md-logo" aria-label="Floci-AZ" data-md-component="logo">
+      
+  <img src="../../assets/floci-header.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Floci-AZ
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Azure AI Search
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/floci-io/floci-az" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    floci-io/floci-az
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/quick-start/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../configuration/docker-compose/" class="md-tabs__link">
+          
+  
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../ui/" class="md-tabs__link">
+          
+  
+  
+  Web Console
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Services
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Floci-AZ" class="md-nav__button md-logo" aria-label="Floci-AZ" data-md-component="logo">
+      
+  <img src="../../assets/floci-header.svg" alt="logo">
+
+    </a>
+    Floci-AZ
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/floci-io/floci-az" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    floci-io/floci-az
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/azure-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure CLI & SDK Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../terraform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terraform / OpenTofu
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/docker-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/docker-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/ports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ports Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/endpoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Emulator Endpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/advanced/application-yml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    application.yml Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web Console
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Web Console
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ui/console-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Console Contract v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Services
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Services
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../arm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Resource Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blob/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blob Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../queue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Queue Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Table Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../functions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Functions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../app-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    App Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signalr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure SignalR Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../key-vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Key Vault
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entra/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Entra ID
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../graph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../event-hub/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Hubs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../service-bus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Bus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cosmos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cosmos DB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure SQL Database
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../postgresql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Database for PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mysql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Database for MySQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mariadb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Database for MariaDB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Kubernetes Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../container-apps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Container Apps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../apim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Virtual Network
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Virtual Machines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../redis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Cache for Redis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../acr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Container Registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Container Instances
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../event-grid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Grid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../monitor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Monitor / Log Analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../email/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Communication Services Email
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure AI Search
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure AI Search
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quickstart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quickstart
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quickstart">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#azure-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Azure CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python-sdk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python SDK
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#terraform-opentofu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terraform / OpenTofu
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#response-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#index-definitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index definitions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sku-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SKU limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#persistence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes &amp; limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../iothub/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure IoT Hub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managed-identity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed Identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authorization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure RBAC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resourcegraph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Resource Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managementgroups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Management Groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ARM Template Deployments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quickstart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quickstart
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quickstart">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#azure-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Azure CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python-sdk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python SDK
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#terraform-opentofu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terraform / OpenTofu
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#response-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#index-definitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index definitions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sku-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SKU limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#persistence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes &amp; limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="azure-ai-search">Azure AI Search</h1>
+<p>Compatible with the <code>Microsoft.Search</code> ARM management plane as the <code>azurerm_search_service</code> Terraform
+resource, the <code>azure-mgmt-search</code> SDKs and the <code>az search service</code>, <code>az search admin-key</code> and
+<code>az search query-key</code> commands use it, and with index management and documents on the data plane as
+<code>SearchIndexClient</code> and <code>SearchClient</code> of the <code>azure-search-documents</code> SDKs use them. Floci AZ serves
+search services with their admin and query API keys, the index definitions of each service, and the
+documents of each index. The other <code>az search</code> command groups are not served yet: see
+<a href="#notes-limitations">Notes &amp; limitations</a>.</p>
+<blockquote>
+<p><strong>No queries yet.</strong> Documents can be uploaded, merged, deleted, looked up by key and counted, but not
+searched: queries, suggestions, autocomplete, synonym maps, indexers and skillsets are not served yet.
+Those data-plane requests answer <code>404</code>.</p>
+<p><strong>HTTP-only: no Docker.</strong> Search services are in-process ARM state. There is no sidecar.</p>
+</blockquote>
+<hr />
+<h2 id="features">Features</h2>
+<ul>
+<li><strong>Search services</strong>: <code>Microsoft.Search/searchServices</code> CreateOrUpdate, Update (<code>PATCH</code>), Get,
+  Delete, and List by resource group and by subscription. A service is <code>succeeded</code> and <code>running</code> as
+  soon as the <code>PUT</code> answers; there is no provisioning delay</li>
+<li><strong>Admin keys</strong>: <code>listAdminKeys</code> and <code>regenerateAdminKey/{primary|secondary}</code>. Regenerating one key
+  leaves the other untouched</li>
+<li><strong>Query keys</strong>: <code>listQueryKeys</code>, <code>createQueryKey/{name}</code> and <code>deleteQueryKey/{key}</code>. A new service
+  has one unnamed query key, as in Azure. Deleting a key answers <code>200</code>, a key the service does not have
+  answers <code>204</code>, so a repeated delete succeeds, and a missing service answers <code>404</code></li>
+<li><strong>Name availability</strong>: <code>checkNameAvailability</code> reports a taken name as <code>AlreadyExists</code> and a
+  malformed one as <code>Invalid</code></li>
+<li><strong>Managed identity</strong>: <code>SystemAssigned</code>, <code>UserAssigned</code> and <code>SystemAssigned, UserAssigned</code>. A
+  system-assigned identity gets a <code>principalId</code> and <code>tenantId</code> that stay stable across updates. Each
+  user-assigned identity reads back the <code>principalId</code> and <code>clientId</code> of the
+  <a href="../managed-identity/">managed identity</a> it names, and one that does not exist is refused with
+  <code>400 FailedIdentityOperation</code>. Ids a caller sends are read-only and are not echoed</li>
+<li><strong>Indexes</strong>: create (<code>POST</code> and <code>PUT</code>), update, get, list with <code>$select</code>, and delete, with
+  <code>@odata.etag</code> and the <code>If-Match</code> / <code>If-None-Match</code> conditions. Field definitions are validated and
+  answered with Azure's attribute defaults; scoring profiles, analyzers, suggesters, and the semantic
+  and vector configuration are stored and answered as they were sent</li>
+<li><strong>Documents</strong>: a batch of <code>upload</code>, <code>merge</code>, <code>mergeOrUpload</code> and <code>delete</code> actions, a lookup by key
+  with <code>$select</code>, and <code>$count</code>. Values are checked against their fields and answered in Azure's shapes</li>
+<li><strong>Statistics</strong>: <code>search.stats</code> of an index and <code>servicestats</code> of the service, with real document
+  counts</li>
+</ul>
+<hr />
+<h2 id="endpoints">Endpoints</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>PUT/GET/PATCH/DELETE .../providers/Microsoft.Search/searchServices/{name}
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Search/searchServices
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>GET    /subscriptions/{sub}/providers/Microsoft.Search/searchServices
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>POST   /subscriptions/{sub}/providers/Microsoft.Search/checkNameAvailability
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>POST   .../searchServices/{name}/listAdminKeys
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>POST   .../searchServices/{name}/regenerateAdminKey/{primary|secondary}
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>POST   .../searchServices/{name}/listQueryKeys            # GET is accepted too
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>POST   .../searchServices/{name}/createQueryKey/{keyName}
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>DELETE .../searchServices/{name}/deleteQueryKey/{key}
+</code></pre></div>
+<p>A service's <code>properties.endpoint</code> is <code>https://{name}.search.windows.net</code> (the cloud's own search
+suffix under <code>floci-az.cloud</code>). The data plane is served on that host form and on the path-style
+<code>/{name}-search/</code> prefix:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>POST   /{name}-search/indexes
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>GET    /{name}-search/indexes                        # $select
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>PUT    /{name}-search/indexes('{index}')             # If-Match, If-None-Match
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>GET    /{name}-search/indexes('{index}')
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>DELETE /{name}-search/indexes('{index}')             # If-Match, If-None-Match
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>GET    /{name}-search/indexes('{index}')/search.stats
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>GET    /{name}-search/servicestats
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>POST   /{name}-search/indexes('{index}')/docs/search.index   # allowUnsafeKeys
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>GET    /{name}-search/indexes('{index}')/docs('{key}')       # $select
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>GET    /{name}-search/indexes('{index}')/docs/$count
+</code></pre></div>
+<p><code>indexes/{index}</code> is accepted for <code>indexes('{index}')</code>, and <code>docs/{key}</code> for <code>docs('{key}')</code>. Every request needs an <code>api-version</code>, and every
+api-version is served the same way.</p>
+<p>The shapes below follow <code>2025-09-01</code>, but the SDKs send newer versions by default: Python
+<code>azure-search-documents</code> 12.1.0 and JavaScript <code>@azure/search-documents</code> 13.1.0 send <code>2026-10-01</code>,
+and Java <code>azure-search-documents</code> 12.0.1 and .NET <code>Azure.Search.Documents</code> 12.0.0 send <code>2026-04-01</code>.
+These are the versions the compatibility suites run at. Where a version's model differs, the
+response follows the request's version (see the <code>servicestats</code> counters below).</p>
+<hr />
+<h2 id="quickstart">Quickstart</h2>
+<h3 id="azure-cli">Azure CLI</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>az<span class="w"> </span>group<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>my-rg<span class="w"> </span>-l<span class="w"> </span>eastus
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>az<span class="w"> </span>search<span class="w"> </span>service<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>my-search<span class="w"> </span>-g<span class="w"> </span>my-rg<span class="w"> </span>-l<span class="w"> </span>eastus<span class="w"> </span>--sku<span class="w"> </span>basic
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>az<span class="w"> </span>search<span class="w"> </span>service<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>my-search<span class="w"> </span>-g<span class="w"> </span>my-rg<span class="w"> </span>--query<span class="w"> </span>endpoint<span class="w"> </span>-o<span class="w"> </span>tsv
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>az<span class="w"> </span>search<span class="w"> </span>admin-key<span class="w"> </span>show<span class="w"> </span>--service-name<span class="w"> </span>my-search<span class="w"> </span>-g<span class="w"> </span>my-rg
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>az<span class="w"> </span>search<span class="w"> </span>query-key<span class="w"> </span>create<span class="w"> </span>--service-name<span class="w"> </span>my-search<span class="w"> </span>-g<span class="w"> </span>my-rg<span class="w"> </span>-n<span class="w"> </span>my-app
+</code></pre></div>
+<h3 id="python-sdk">Python SDK</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">azure.core.credentials</span><span class="w"> </span><span class="kn">import</span> <span class="n">AzureKeyCredential</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">azure.search.documents.indexes</span><span class="w"> </span><span class="kn">import</span> <span class="n">SearchIndexClient</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">azure.search.documents.indexes.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">SearchableField</span><span class="p">,</span> <span class="n">SearchIndex</span><span class="p">,</span> <span class="n">SimpleField</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">client</span> <span class="o">=</span> <span class="n">SearchIndexClient</span><span class="p">(</span><span class="s2">"http://localhost:4577/my-search-search"</span><span class="p">,</span> <span class="n">AzureKeyCredential</span><span class="p">(</span><span class="s2">"&lt;admin key&gt;"</span><span class="p">))</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">client</span><span class="o">.</span><span class="n">create_index</span><span class="p">(</span><span class="n">SearchIndex</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">"hotels"</span><span class="p">,</span> <span class="n">fields</span><span class="o">=</span><span class="p">[</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">SimpleField</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">"hotelId"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s2">"Edm.String"</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">SearchableField</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">"hotelName"</span><span class="p">),</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="p">]))</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="nb">print</span><span class="p">([</span><span class="n">name</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">client</span><span class="o">.</span><span class="n">list_index_names</span><span class="p">()])</span>
+</code></pre></div>
+<p>The endpoint is the emulator's address followed by <code>/{service name}-search</code>. The Python SDK accepts a
+plain <code>http</code> endpoint and the JavaScript SDK does with <code>allowInsecureConnection: true</code>. The Java and
+.NET SDKs send an API key over <code>https</code> only: use the emulator's TLS endpoint (<code>FLOCI_AZ_TLS_ENABLED=true</code>,
+with its certificate from <code>/_floci/tls-cert</code> trusted).</p>
+<h3 id="terraform-opentofu">Terraform / OpenTofu</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kr">resource</span><span class="w"> </span><span class="nc">"azurerm_search_service"</span><span class="w"> </span><span class="nv">"search"</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="na">name</span><span class="w">                </span><span class="o">=</span><span class="w"> </span><span class="s2">"my-search"</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="na">resource_group_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">azurerm_resource_group.rg.name</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="na">location</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="nv">azurerm_resource_group.rg.location</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="na">sku</span><span class="w">                 </span><span class="o">=</span><span class="w"> </span><span class="s2">"basic"</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">}</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="kr">output</span><span class="w"> </span><span class="nv">"search_primary_key"</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="na">value</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="nv">azurerm_search_service.search.primary_key</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span><span class="na">sensitive</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">true</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="p">}</span>
+</code></pre></div>
+<hr />
+<h2 id="response-shape">Response shape</h2>
+<p>The shapes follow the resource-manager spec (<code>2025-05-01</code>) and the responses Azure gives the <code>az</code>
+CLI:</p>
+<ul>
+<li><code>PUT</code> answers <code>201</code> on create and <code>200</code> on update, with no polling headers</li>
+<li><code>location</code> is answered as a display name (<code>East US</code>), while the generic resource listings carry the
+  canonical one (<code>eastus</code>)</li>
+<li><code>provisioningState</code> is <code>succeeded</code> and <code>status</code> is <code>running</code>, both lowercase</li>
+<li><code>tags</code> is <code>{}</code> when the client sent none</li>
+<li><code>authOptions</code> is <code>{"apiKeyOnly":{}}</code>, or <code>null</code> when <code>disableLocalAuth</code> is <code>true</code></li>
+<li><code>semanticSearch</code> defaults to <code>free</code>, <code>publicNetworkAccess</code> to <code>Enabled</code>, and <code>replicaCount</code> and
+  <code>partitionCount</code> to <code>1</code></li>
+<li><code>knowledgeRetrieval</code> (from <code>2026-03-01-preview</code>) appears once a client has set it, and is kept across
+  later updates</li>
+<li>The keys never appear on the resource: only the key operations return them</li>
+</ul>
+<hr />
+<h2 id="authentication">Authentication</h2>
+<p>By default the data plane accepts any <code>api-key</code> or <code>Authorization: Bearer</code> header, or none, and it
+serves a service name that was never created through ARM, as Key Vault does for a vault with no ARM
+resource.</p>
+<p>With <code>floci-az.parity-overrides.strict-search-keys</code> (on from <code>parity: strict</code>):</p>
+<ul>
+<li>a service that ARM does not hold answers <code>403</code></li>
+<li>a request with no credential answers <code>401</code> with no body and the challenge
+  <code>Bearer authorization="{login}/{tenant}/oauth2/authorize" resource="https://search.azure.com"</code>, as
+  Azure does. The authority is the emulator's own login endpoint, and the audience is the cloud's
+  (<code>https://search.azure.us</code> and <code>https://search.azure.cn</code> in the national clouds)</li>
+<li>an <code>api-key</code> must be the primary or secondary admin key of the service. An unknown key answers
+  <code>403</code> with Azure's message, "The given API key doesn't match service's internal, primary or
+  secondary keys." A query key may look up and count documents, the read-only access the spec gives
+  it, and is refused with <code>403</code> everywhere else: index management and a document batch need an admin
+  key. How Azure answers a query key was not recorded</li>
+<li>a service whose ARM resource has <code>disableLocalAuth: true</code> refuses every <code>api-key</code> with <code>403</code></li>
+<li>an <code>Authorization: Bearer</code> token passes only when the service takes tokens: its <code>authOptions</code> is
+  <code>aadOrApiKey</code>, or it has <code>disableLocalAuth: true</code>. A service with the default <code>apiKeyOnly</code> refuses
+  it with <code>401</code>, no body and <code>Bearer realm="Azure Cognitive Search" error="invalid_token"</code>, the answer
+  Azure gives a token it cannot use</li>
+<li>a token that passes is not validated: <code>strict-tokens</code> applies to ARM requests only, and no role
+  assignment is checked</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FLOCI_AZ_PARITY_OVERRIDES_STRICT_SEARCH_KEYS</code></td>
+<td>on from <code>parity: strict</code></td>
+<td>Check the service and its admin key on the data plane</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="index-definitions">Index definitions</h2>
+<p>The shapes follow the data-plane spec (<code>2025-09-01</code>) and its examples, and a recording of a real
+service (Free tier, api-version <code>2025-09-01</code>, November 2026) where the spec is silent. The status
+codes, error <code>code</code> values, <code>details</code> and messages below are Azure's, word for word:</p>
+<ul>
+<li><code>POST /indexes</code> answers <code>201</code>, or <code>400 ResourceNameAlreadyInUse</code> with the detail
+  <code>CannotCreateExistingIndex</code> for a name that is taken (Azure does not answer <code>409</code>). <code>PUT</code> answers
+  <code>201</code> for a new index and <code>200</code> for one that exists, always with the definition. A <code>201</code> carries a
+  <code>Location</code> that ends in <code>?api-version=</code> and the request's version</li>
+<li>Every definition carries <code>@odata.etag</code>, quoted, and the same tag in a strong <code>ETag</code> header. The
+  tag changes on each write. An update that changes nothing writes nothing: the tag stays, and the
+  <code>200</code> carries no <code>@odata.etag</code> and no <code>ETag</code>, as on Azure. <code>If-Match</code> and <code>If-None-Match</code> take the
+  tag quoted, weak (<code>W/"..."</code>) or bare, or <code>*</code>, and a failed condition answers <code>412</code> with an empty
+  <code>code</code></li>
+<li>A <code>GET</code> of a missing index answers <code>404</code> with an empty <code>code</code>. A <code>DELETE</code> of one answers <code>404</code>
+  <code>OperationNotAllowed</code> with the detail <code>IndexNotFoundInService</code>, or <code>412</code> when it carries <code>If-Match</code>,
+  even <code>If-Match: *</code></li>
+<li>A simple field is answered with <code>searchable</code>, <code>filterable</code>, <code>retrievable</code>, <code>stored</code>, <code>sortable</code>,
+  <code>facetable</code> and <code>key</code>, then <code>indexAnalyzer</code>, <code>searchAnalyzer</code>, <code>analyzer</code>, <code>normalizer</code>,
+  <code>dimensions</code>, <code>vectorSearchProfile</code> and <code>vectorEncoding</code>, <code>null</code> when unset, then <code>synonymMaps</code>.
+  What the request left out gets Azure's default: <code>true</code>, except that only strings and vectors are
+  <code>searchable</code>, a multi-valued field (a collection, or any simple field under a
+  <code>Collection(Edm.ComplexType)</code>, however deep) is not <code>sortable</code>, a <code>Edm.GeographyPoint</code> is not
+  <code>facetable</code>, a vector field is neither <code>filterable</code>, <code>sortable</code> nor <code>facetable</code>, and a vector field
+  is not <code>retrievable</code> (the spec: "Default is true for simple fields, false for vector fields")</li>
+<li>A boolean attribute sent as the string <code>"true"</code> or <code>"false"</code> is read as the boolean, as Azure reads
+  it; any other string is refused</li>
+<li>A complex field is answered with its <code>fields</code> and no attributes of its own, apart from properties a
+  newer api-version adds, which come back as they were sent</li>
+<li>The sections a request leaves out are answered as empty lists or <code>null</code>, <code>description</code> included, and
+  <code>similarity</code> as BM25 with <code>null</code> parameters. A custom analyzer gains empty <code>tokenFilters</code> and
+  <code>charFilters</code>. <code>vectorSearch</code> is answered with <code>algorithms</code>, <code>profiles</code>, <code>vectorizers</code> and
+  <code>compressions</code>; a profile gains a <code>null</code> <code>vectorizer</code> and <code>compression</code>, and an <code>hnsw</code> algorithm the
+  default <code>hnswParameters</code> (<code>metric: cosine</code>, <code>m: 4</code>, <code>efConstruction: 400</code>, <code>efSearch: 500</code>, each
+  only where the request left it out) and a <code>null</code> <code>exhaustiveKnnParameters</code>. An <code>exhaustiveKnn</code>
+  algorithm gains <code>metric: cosine</code> and a <code>null</code> <code>hnswParameters</code>; that one is not recorded</li>
+</ul>
+<p>A value that does not fit the model, such as <code>"fields": "id"</code>, a <code>synonymMaps</code> entry that is not a
+name, or a body that is not a JSON object, is refused with <code>400</code> and an empty <code>code</code>. Azure's reader
+words it as <code>Cannot convert the literal '3' to the expected type 'Edm.String'.</code>, and the body <code>null</code> as
+<code>An unexpected 'PrimitiveValue' node was found when reading from the JSON reader. A 'StartObject'
+node was expected.</code> A <code>PUT</code> whose body names another index than its URL is refused with <code>400</code> and the
+code <code>"400"</code>, as on Azure. The two names must be the same, letter for letter.</p>
+<p>Any other definition is refused with <code>400 OperationNotAllowed</code> when:</p>
+<ul>
+<li>the index has no <code>name</code>, or the name is not 2 to 128 lowercase letters, digits, dashes and
+  underscores, starting with a letter or digit and with no consecutive dashes or underscores, as
+  Microsoft's <a href="https://learn.microsoft.com/rest/api/searchservice/naming-rules">naming rules</a> set out</li>
+<li>it does not have exactly one <code>key</code> field (Azure's detail <code>MissingKeyField</code>), or the key is not a
+  top-level <code>Edm.String</code></li>
+<li>a field name does not start with a letter, holds anything but letters, digits and underscores,
+  begins with <code>azureSearch</code>, or is used twice at one level</li>
+<li>a field type is not one the spec lists, or <code>Edm.Single</code>, <code>Edm.Half</code>, <code>Edm.Int16</code>, <code>Edm.SByte</code> or
+  <code>Edm.Byte</code> is used outside <code>Collection(...)</code></li>
+<li>a vector field has no <code>dimensions</code> from 2 to 4096, or names a <code>vectorSearchProfile</code> that
+  <code>vectorSearch.profiles</code> does not define</li>
+<li>a complex field has no sub-fields, or a simple field has some</li>
+<li>a complex field sets any of <code>key</code>, <code>searchable</code>, <code>filterable</code>, <code>retrievable</code>, <code>stored</code>,
+  <code>sortable</code>, <code>facetable</code>, <code>analyzer</code>, <code>searchAnalyzer</code>, <code>indexAnalyzer</code> or <code>normalizer</code>, even to
+  <code>false</code>, or a non-empty <code>synonymMaps</code>: the spec says they "must be null for complex fields"</li>
+<li>a field other than a string or a vector is <code>searchable</code>, a vector field is not <code>searchable</code>, or a
+  vector field is <code>filterable</code>, <code>sortable</code> or <code>facetable</code></li>
+<li>a multi-valued field is <code>sortable</code>, or a <code>Edm.GeographyPoint</code> field is <code>facetable</code></li>
+<li>the key field is not <code>retrievable</code> or not <code>stored</code></li>
+<li>a field other than a vector has <code>stored: false</code>, or a field with <code>stored: false</code> is <code>retrievable</code></li>
+</ul>
+<p>An update may add fields, and sub-fields to a complex field. It is refused with
+<code>400 OperationNotAllowed</code> when it removes a field (<code>Existing field(s) 'title' cannot be deleted.</code>,
+detail <code>CannotDeleteExistingField</code>) or changes the <code>type</code>, <code>key</code>, <code>searchable</code>, <code>filterable</code>,
+<code>sortable</code>, <code>facetable</code>, <code>stored</code>, <code>analyzer</code>, <code>indexAnalyzer</code>, <code>normalizer</code>, <code>dimensions</code>,
+<code>vectorSearchProfile</code> or <code>vectorEncoding</code> of one that exists (<code>Existing field 'rating' cannot be
+changed.</code>, detail <code>CannotChangeExistingField</code>). A field it adds with <code>stored: false</code> is refused too, as
+<code>stored: false</code> is for index creation only. <code>retrievable</code>, <code>searchAnalyzer</code> and <code>synonymMaps</code> may
+change, as the spec allows.</p>
+<p>An update that adds an analyzer, normalizer, tokenizer, token filter or char filter, or changes a
+parameter of <code>similarity</code> (such as <code>k1</code>), needs <code>allowIndexDowntime=true</code>. Without it the update is
+refused with <code>400</code>, an empty <code>code</code> and Azure's message: "An index with the name 'x' in service 'y'
+could not be updated. Index update not allowed because it would cause downtime. ...". Sending the
+components the index already has needs no parameter, and nor does adding a field. The <code>similarity</code>
+algorithm cannot change at all: <code>400</code>, "Similarity type cannot be changed on existing indexes." An
+update that leaves out <code>similarity</code> keeps the stored one, and one that leaves out <code>encryptionKey</code> or
+sends it as <code>null</code> keeps the stored key, as the spec says the service "will ignore attempts to set
+this property to null". Sending a different key rotates it.</p>
+<hr />
+<h2 id="documents">Documents</h2>
+<p>The operations follow the data-plane spec (<code>searchindex.json</code>, <code>2025-09-01</code>), and where it is silent the
+recording of a real service the index definitions follow. The status codes, error codes, <code>details</code> and
+messages below are Azure's, word for word.</p>
+<p>A batch, <code>POST docs/search.index</code> with <code>{"value": [...]}</code>, answers each action with its <code>key</code>,
+<code>status</code>, <code>errorMessage</code> and <code>statusCode</code>: <code>201</code> for a document it created, <code>200</code> for one it updated or
+deleted. It answers <code>200</code> when every action succeeds and <code>207</code> when one fails.</p>
+<ul>
+<li><code>upload</code> replaces the whole document. An action with no <code>@search.action</code> is an <code>upload</code></li>
+<li><code>merge</code> replaces the fields it sends, and an explicit <code>null</code> clears one. A collection is replaced
+  whole, and a complex field that is not a collection merges field by field: merging
+  <code>address: {city}</code> keeps <code>address.postcode</code>. A <code>merge</code> of a key that does not exist fails that
+  action alone: <code>404</code>, <code>Document not found.</code></li>
+<li><code>mergeOrUpload</code> merges into a document that exists, and uploads one that does not</li>
+<li><code>delete</code> answers <code>200</code> whether or not the document exists</li>
+<li>two actions on one key run in order, and the last one wins</li>
+</ul>
+<p>Everything else that is wrong refuses the whole batch with <code>400</code>, and nothing in it is written:</p>
+<ul>
+<li>a value that does not fit its field, an unknown field, or a <code>null</code> inside a collection, with an
+  empty <code>code</code>: <code>Cannot convert the literal 'not-a-number' to the expected type 'Edm.Double'.</code>,
+  <code>The property 'x' does not exist on type 'search.documentFields' ...</code></li>
+<li>an action that is not one of the four, a key that is missing or not valid, or a vector whose length
+  is not its field's <code>dimensions</code>, with a code, a <code>details</code> entry and the position of the action:
+  <code>The request is invalid. Details: actions : 0: Document key cannot be missing or empty.</code></li>
+<li>a batch with no actions (<code>MissingRequiredParameter</code>)</li>
+</ul>
+<p>A key holds letters, digits, <code>_</code>, <code>-</code> and <code>=</code>, does not start with <code>_</code>, and is at most 1024
+characters. <code>allowUnsafeKeys=true</code> lifts the rule on characters, as Azure's message offers. Keys are
+case-sensitive: <code>Case</code> and <code>case</code> are two documents.</p>
+<p>Values are kept and answered as Azure answers them:</p>
+<ul>
+<li>an <code>Edm.Double</code> takes a number or the strings <code>"NaN"</code>, <code>"INF"</code> and <code>"-INF"</code>, which come back as
+  those strings</li>
+<li>an <code>Edm.Int32</code> out of range is refused, and so is an <code>Edm.Int64</code> sent as a string</li>
+<li>an <code>Edm.DateTimeOffset</code> comes back in UTC with a <code>Z</code>, to the millisecond, with no fraction when there
+  is none: <code>2026-01-02T12:00:00+02:00</code> is answered as <code>2026-01-02T10:00:00Z</code></li>
+<li>an <code>Edm.GeographyPoint</code> is GeoJSON. Azure accepts one with any <code>crs</code> or none, and answers it with
+  WGS 84's (<code>"crs": {"type": "name", "properties": {"name": "EPSG:4326"}}</code>), the coordinates unchanged</li>
+</ul>
+<p>A lookup, <code>GET docs('{key}')</code>, answers every retrievable field in the order of the index. A field the
+document does not have is <code>null</code>, an empty collection <code>[]</code>. A field with <code>retrievable: false</code>, such as
+a vector field by default, is left out. <code>$select</code> answers the fields it names, <code>address/city</code> for a
+sub-field, and refuses a field that is not retrievable or does not exist with <code>400</code>. A document that
+does not exist is <code>404</code> with no body, as on Azure. <code>docs/$count</code> answers the bare number as
+<code>text/plain; charset=utf-8</code>.</p>
+<p>Deleting an index deletes its documents, and so does deleting its service or resetting the emulator.</p>
+<hr />
+<h2 id="sku-limits">SKU limits</h2>
+<table>
+<thead>
+<tr>
+<th>SKU</th>
+<th>Replicas</th>
+<th>Partitions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>free</code></td>
+<td>1</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>basic</code></td>
+<td>1 to 3</td>
+<td>1 to 3</td>
+</tr>
+<tr>
+<td><code>standard</code>, <code>standard2</code>, <code>standard3</code></td>
+<td>1 to 12</td>
+<td>1, 2, 3, 4, 6 or 12</td>
+</tr>
+<tr>
+<td><code>standard3</code> with <code>hostingMode: HighDensity</code></td>
+<td>1 to 12</td>
+<td>1 to 3</td>
+</tr>
+<tr>
+<td><code>storage_optimized_l1</code>, <code>storage_optimized_l2</code></td>
+<td>1 to 12</td>
+<td>1, 2, 3, 4, 6 or 12</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Replicas times partitions is at most 36 search units</li>
+<li><code>hostingMode: HighDensity</code> is accepted on <code>standard3</code> only</li>
+<li><code>basic</code> gets the three partitions of a service created after April 2024. Older Azure services are
+  limited to one</li>
+<li>Not enforced: regional availability, subscription quota (such as one <code>free</code> service per
+  subscription), which SKUs offer semantic search, and Azure's restrictions on changing the SKU of an
+  existing service</li>
+</ul>
+<p>The limits come from the <code>2025-05-01</code> spec and Microsoft's
+<a href="https://learn.microsoft.com/azure/search/search-limits-quotas-capacity">service limits</a> page.</p>
+<hr />
+<h2 id="configuration">Configuration</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">floci-az</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">services</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">search</span><span class="p">:</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FLOCI_AZ_SERVICES_SEARCH_ENABLED</code></td>
+<td><code>true</code></td>
+<td>Enable/disable the service</td>
+</tr>
+<tr>
+<td><code>FLOCI_AZ_STORAGE_SERVICES_SEARCH_MODE</code></td>
+<td>global <code>FLOCI_AZ_STORAGE_MODE</code> (<code>memory</code>)</td>
+<td>Storage mode of the Search store</td>
+</tr>
+</tbody>
+</table>
+<h3 id="persistence">Persistence</h3>
+<p>Services, their keys, indexes and documents share one <code>search</code> store, which follows the
+<a href="../../configuration/storage/">storage mode</a> (<code>memory</code> by default). With <code>persistent</code>, <code>hybrid</code> or <code>wal</code>
+they survive a restart: lookups, <code>$count</code>, ETags and the statistics come back as they were. Resource
+groups are kept apart, in memory, unless <code>resource-group-semantics</code> or <code>strict-resource-groups</code> is on
+(see <a href="../arm/#resource-groups">ARM</a>). Without either, a restarted emulator still serves the service and
+its data, but its resource group answers <code>404</code>.</p>
+<hr />
+<h2 id="notes-limitations">Notes &amp; limitations</h2>
+<ul>
+<li><strong>No queries yet.</strong> Documents are stored, but there are no queries (<code>docs</code>, <code>search.post.search</code>),
+  suggestions, autocomplete, synonym maps, indexers, data sources or skillsets yet, and <code>search.analyze</code>
+  is not served. Index aliases, a stable operation from api-version <code>2026-04-01</code>, are not served
+  either.</li>
+<li><strong>Document statistics are counted at once and sized roughly.</strong> Azure counts new documents a little
+  later; floci-az counts them as the batch answers. <code>storageSize</code> is the size of the documents' JSON
+  alone. Azure's also counts its index structures, so it is far larger (two small documents took 6222
+  bytes on the recorded service), and
+  <code>vectorIndexSize</code> is the size of their vectors' elements.</li>
+<li><strong>A batch over the limits answers <code>413</code>.</strong> A batch of more than 32000 actions, the limit Azure's own
+  message names, or of more than 16 MB is refused with <code>413</code>, which the SDKs answer by splitting the
+  batch. Azure's answer to either was not recorded: 1001 actions were accepted.</li>
+<li><strong>Some document errors are not recorded.</strong> The refusals of a value that is not a string, a boolean, a
+  date or a point, of a complex field that is not an object, and of a property inside a complex field
+  that the index does not have, take the shape of the recorded ones, but their words are floci-az's.
+  So do a <code>413</code>, and a batch whose body is not JSON. Whether <code>allowUnsafeKeys</code> also lifts the rule on a
+  leading underscore was not recorded; floci-az keeps that rule.</li>
+<li><strong>A key holding <code>/</code> or <code>?</code> cannot be looked up.</strong> With <code>allowUnsafeKeys</code> a key may hold either, but
+  a lookup reads the path after decoding it, so such a key is not found.</li>
+<li><strong>Index sections are stored, not checked.</strong> Scoring profiles, analyzers, tokenizers, suggesters, CORS
+  options, and the semantic and vector configuration come back as they were sent. Only their JSON type
+  is checked: a suggester that names a field the index does not have is accepted, where Azure refuses
+  it, and so are an analyzer name that is not defined and a vector profile whose algorithm is not.
+  The one reference checked is a vector field's profile. A property a newer api-version adds is kept
+  and answered too. These rules of the spec are not enforced either, and wait for the phases that use
+  the sections:</li>
+<li><code>analyzer</code> only on a searchable field, never together with <code>searchAnalyzer</code> or <code>indexAnalyzer</code></li>
+<li><code>searchAnalyzer</code> and <code>indexAnalyzer</code> set together, and neither naming a language analyzer</li>
+<li><code>normalizer</code> only on a field that is <code>filterable</code>, <code>sortable</code> or <code>facetable</code></li>
+<li><code>synonymMaps</code> only on a searchable field, with at most one map</li>
+<li>a suggester's required <code>searchMode</code> and <code>sourceFields</code>, and its source fields being searchable</li>
+<li>the required <code>allowedOrigins</code> of <code>corsOptions</code></li>
+<li>the required <code>algorithm</code> of a vector profile</li>
+<li><strong><code>allowIndexDowntime</code> takes nothing offline.</strong> With the parameter, a new analysis component is
+  added at once, and requests to the index keep being served. Changing or removing an existing
+  component is not refused.</li>
+<li><strong>Bearer tokens are not validated on the data plane.</strong> By default a request with
+  <code>Authorization: Bearer</code> and any token is served. With <code>strict-search-keys</code> the service must take
+  tokens, but the token itself is still not checked, and no Search role (such as Search Service
+  Contributor) is required.</li>
+<li><strong>Some data-plane errors are not recorded.</strong> The codes and messages of the index operations above
+  are Azure's. The rest are descriptive and not verified against Azure: the refusals of a definition
+  that break a rule (<code>OperationNotAllowed</code>, with Azure's code but floci-az's words, apart from the
+  missing key field), a missing <code>api-version</code> (<code>MissingRequiredParameter</code>), an unserved path
+  (<code>ResourceNotFound</code>), a wrong method (<code>MethodNotAllowed</code>), and the <code>403</code> for a query key, an
+  undeclared service or a service with <code>disableLocalAuth</code>. Match on the status code, as the SDKs do.</li>
+<li><strong><code>Location</code> names no port.</strong> Azure writes <code>https://{service}.search.windows.net:443/indexes(...)</code>
+  with the port spelled out. floci-az writes the URL the request addressed, with no port added.</li>
+<li><strong>An index write can outlive its service's delete.</strong> An index write that started before the
+  service's ARM delete can finish after it, and leave that index behind for a service of the same
+  name. Under the default lenient mode an index can be written to a service ARM does not hold anyway.</li>
+<li><strong>An update without <code>similarity</code> keeps the stored one.</strong> Whether Azure treats a missing <code>similarity</code>
+  on an existing index as no change or refuses it is not verified.</li>
+<li><strong>An ETag changes only on a write.</strong> After an update with <code>allowIndexDowntime=true</code>, the recorded
+  service later answered the index under a new ETag that no request explains, presumably as the index
+  came back online. floci-az takes nothing offline, so its tag stays until the next write.</li>
+<li><strong><code>encryptionKey</code> is stored, not used.</strong> Nothing is encrypted, the Key Vault key is not checked,
+  and a <code>free</code> service accepts a key, although the spec says customer-managed keys are not available
+  for free services.</li>
+<li><strong>A <code>PUT</code> always answers the definition.</strong> The spec requires <code>Prefer: return=representation</code>, which
+  every SDK sends, so a <code>PUT</code> without it is answered the same way.</li>
+<li><strong>Limits are reported, not enforced.</strong> <code>servicestats</code> reports the quotas of the service's SKU from
+  Microsoft's <a href="https://learn.microsoft.com/azure/search/search-limits-quotas-capacity">service limits</a>
+  page (<code>standard</code> with one partition for a service ARM does not hold), and the field limits Azure
+  documents. Nothing stops a service or an index beyond them.</li>
+<li>indexes, indexers, data sources and skillsets: 3 on <code>free</code>, 15 on <code>basic</code>, 50 on <code>standard</code>, 200
+    on <code>standard2</code> and <code>standard3</code>, 10 on the storage-optimized tiers. A <code>standard3</code> service in
+    <code>HighDensity</code> mode holds 1000 of each per partition, up to 3000</li>
+<li>synonym maps: 3 on <code>free</code> and <code>basic</code>, 5, 10 and 20 on <code>standard</code> to <code>standard3</code>, 10 on the
+    storage-optimized tiers</li>
+<li>storage and vector index size are per partition, so they grow with <code>partitionCount</code>: 15 and 5 GB
+    on <code>basic</code>, 160 and 35 GB on <code>standard</code>, 512 and 150 GB on <code>standard2</code>, 1024 and 300 GB on
+    <code>standard3</code>, 2048 and 150 GB on <code>storage_optimized_l1</code>, 4096 and 300 GB on <code>storage_optimized_l2</code>.
+    A <code>free</code> service has 50 MB of storage and no vector quota (<code>null</code>), as the recorded one reported</li>
+<li><code>maxStoragePerIndex</code> is the service's storage, capped at 1.88 TB on <code>standard2</code>, 2.34 TB on
+    <code>standard3</code> and 100 GB in <code>HighDensity</code> mode</li>
+<li>the figures are those of a service created after February 2025 in a region with the higher
+    capacity. Older services and some regions (such as Israel Central and South India) have smaller
+    partitions on Azure. The page writes GB; the recorded <code>free</code> service reports its 50 MB as 52428800
+    bytes, so floci-az counts every size in binary units</li>
+</ul>
+<p>The counters are those of the request's api-version: <code>aliasesCount</code> in the previews from
+  <code>2021-04-30-Preview</code> and the stable versions from <code>2026-04-01</code>, and the two knowledge counters from
+  <code>2026-05-01-preview</code> and in a stable version newer than <code>2026-04-01</code>. A real <code>2025-09-01</code> service
+  answers without them. The <code>@odata.context</code> of <code>search.stats</code> and <code>servicestats</code> names the
+  api-version's model (<code>$metadata#Microsoft.Azure.Search.V2025_09_01.ServiceStatistics</code>); a preview's
+  is written <code>V2025_11_01_Preview</code>, which is not recorded.
+- <strong>Deleting a service deletes its indexes.</strong> A resource-group delete does too when it cascades
+  (<code>resource-group-delete</code>, on from <code>parity: azure</code>). Indexes belong to the cloud the request
+  addressed, so a service of the same name in another cloud keeps its own.
+- <strong>Service names are global.</strong> A name is a DNS label under the search suffix, so a second service of
+  the same name is refused with <code>409 Conflict</code> in any subscription or resource group. Azure's own
+  code for that conflict is not publicly documented.
+- <strong>Validation.</strong> A create without a <code>sku</code>, an unknown SKU name, and a <code>replicaCount</code> or
+  <code>partitionCount</code> outside 1 to 12 are refused with <code>400 InvalidRequestContent</code>. So is a scale the SKU
+  does not reach (see <a href="#sku-limits">SKU limits</a>). A <code>PATCH</code> is judged on the service as it would leave it, so
+  changing only the SKU of a service that is too large for the new one is refused too. Azure's own
+  error code for these is not publicly documented.
+- <strong>Field types.</strong> A field sent with the wrong JSON type, such as <code>disableLocalAuth: "true"</code>,
+  <code>dataExfiltrationProtections: "BlockAll"</code> or <code>networkRuleSet.ipRules: "invalid"</code>, is refused with
+  <code>400 InvalidRequestContent</code> rather than replaced by its default, and so is an identity <code>type</code>
+  outside the spec's four. So is a body that is the JSON literal <code>null</code>. A <code>null</code> property is no value
+  and keeps what is stored.
+- <strong>Enums and firewall rules.</strong> <code>hostingMode</code>, <code>computeType</code>, <code>publicNetworkAccess</code>, <code>semanticSearch</code>,
+  <code>knowledgeRetrieval</code>, <code>networkRuleSet.bypass</code>, <code>encryptionWithCmk.enforcement</code>,
+  <code>authOptions.aadOrApiKey.aadAuthFailureMode</code> and <code>dataExfiltrationProtections</code> must hold a value
+  the spec lists, in any casing, and each firewall rule must be an IPv4 address or CIDR range.
+  Anything else is refused with <code>400 InvalidRequestContent</code>. The allowed values are the union over every api-version, since every api-version is served the same
+  way.
+- <strong>Local authentication.</strong> A request that sends <code>disableLocalAuth: true</code> together with
+  <code>authOptions</code> is refused with <code>400 InvalidRequestContent</code>, as the spec rules out that combination.
+  A service with local authentication disabled answers <code>authOptions: null</code>.
+- <strong>Semantic ranker.</strong> A service created without <code>semanticSearch</code> reports <code>free</code>, the spec's default
+  and what Azure answers. This is reported on every SKU, including <code>free</code>, which Azure may treat
+  differently: no public recording shows a <code>free</code>-SKU service.
+- <strong>Fixed at creation.</strong> A <code>PUT</code> that moves an existing service to another location is refused with
+  ARM's <code>400 InvalidResourceLocation</code>. A <code>PUT</code> or <code>PATCH</code> that sends a different <code>hostingMode</code> is
+  refused with <code>400 InvalidRequestContent</code>, and a <code>PUT</code> that leaves it out keeps the stored one.
+- <strong>Naming rule.</strong> With <code>strict-names</code>, a name must be 2 to 60 lowercase letters, digits and hyphens,
+  start with two letters or digits, not end with a hyphen and have no consecutive hyphens.
+- <strong>Not modelled.</strong> These answer <code>404 ResourceNotFound</code>:
+    - private endpoint connections, shared private link resources and private link resources
+      (<code>az search private-endpoint-connection</code>, <code>shared-private-link-resource</code>, <code>private-link-resource</code>)
+    - network security perimeter configurations
+    - usage and quota (<code>az search usage list</code>, <code>locations/{location}/usages</code>)
+    - regional offerings (<code>az search offering list</code>) and service upgrade (<code>az search service upgrade</code>)
+    - the provider's operation list, <code>GET /providers/Microsoft.Search/operations</code></p>
+<div class="highlight"><pre><span></span><code>The `privateEndpointConnections` and `sharedPrivateLinkResources` properties of a service are
+always empty lists. `autoGeneratedDomainNameLabelScope` (`2026-09-01-preview`) is not modelled
+either: it would change the service's hostname, so it is dropped rather than echoed.
+</code></pre></div>
+<ul>
+<li><strong>Storage.</strong> Services and their keys are kept in the <code>search</code> storage backend, so they follow
+  <code>floci-az.storage.services.search.mode</code> (the global <code>storage.mode</code> by default).</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>
