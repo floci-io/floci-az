@@ -94,9 +94,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     /**
      * Matches {@code <Latest>}, {@code <Committed>}, or {@code <Uncommitted>} elements
      * inside a PutBlockList XML body — e.g. {@code <Latest>BASE64ID</Latest>}.
+     * Group 1 is the element name, group 2 the block ID.
      */
     private static final Pattern BLOCK_LIST_PATTERN =
-            Pattern.compile("<(?:Latest|Committed|Uncommitted)>([^<]+)</(?:Latest|Committed|Uncommitted)>");
+            Pattern.compile("<(Latest|Committed|Uncommitted)>([^<]+)</\\1>");
 
     private final StorageBackend<String, StoredObject> store;
 
@@ -3666,7 +3667,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     /**
      * PUT /{container}/{blob}?comp=blocklist
-     * <p>Commits an ordered list of previously-staged blocks into a blob.
+     * <p>Commits an ordered list of blocks into a blob. Each entry names the list Azure searches:
+     * {@code Uncommitted} the staged blocks, {@code Committed} the blob's current committed block
+     * list, and {@code Latest} the staged blocks first, then the committed list. Resolving
+     * {@code Latest} against the committed list is what lets a client retry a commit whose first
+     * attempt already succeeded, as the Azure SDK does after a timeout.
      * After a successful commit, all staged blocks for this blob are deleted.
      */
     private Response putBlockList(AzureRequest request, String containerName, String blobName) {
@@ -3675,7 +3680,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             if (authFailure != null) {
                 return authFailure;
             }
-            List<String> blockIds = parseBlockList(request.bodyStream().readAllBytes());
+            List<BlockListEntry> entries = parseBlockList(request.bodyStream().readAllBytes());
 
             return leaseService.exclusively(() -> {
                 if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
@@ -3683,27 +3688,45 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                             .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
                 }
 
-                // Resolve every block ID → staged data
-                List<byte[]> chunks = new ArrayList<>(blockIds.size());
-                List<String> committedMeta = new ArrayList<>(blockIds.size()); // "base64id:size"
+                // Resolve every entry → block data, from the staged blocks or the committed list
+                List<byte[]> chunks = new ArrayList<>(entries.size());
+                List<String> committedMeta = new ArrayList<>(entries.size()); // "base64id:size"
                 Optional<StoredObject> existing = store.get(
                         objKey(request.accountName(), containerName, blobName));
+                Map<String, int[]> committedRanges = committedBlockRanges(existing);
+                String existingCustomerProvidedKeySha256 = existing.map(StoredObject::metadata)
+                        .map(metadata -> metadata.get(CUSTOMER_PROVIDED_KEY_SHA256))
+                        .orElse(null);
                 String stagedCustomerProvidedKeySha256 = null;
                 boolean stagedEncryptionStateSet = false;
 
-                for (String blockId : blockIds) {
-                    Optional<StoredObject> staged = store.get(
-                            blockStagingKey(request.accountName(), containerName, blobName, blockId));
-                    if (staged.isEmpty()) {
+                for (BlockListEntry entry : entries) {
+                    String blockId = entry.blockId();
+                    byte[] blockData = null;
+                    String blockCustomerProvidedKeySha256 = null;
+                    if (!"Committed".equals(entry.list())) {
+                        Optional<StoredObject> staged = store.get(
+                                blockStagingKey(request.accountName(), containerName, blobName, blockId));
+                        if (staged.isPresent()) {
+                            blockData = staged.get().data();
+                            blockCustomerProvidedKeySha256 =
+                                    staged.get().metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
+                        }
+                    }
+                    if (blockData == null && !"Uncommitted".equals(entry.list())) {
+                        int[] range = committedRanges.get(blockId);
+                        if (range != null) {
+                            blockData = Arrays.copyOfRange(existing.get().data(), range[0], range[0] + range[1]);
+                            blockCustomerProvidedKeySha256 = existingCustomerProvidedKeySha256;
+                        }
+                    }
+                    if (blockData == null) {
                         return new AzureErrorResponse("InvalidBlockList",
                                 "The specified block list is invalid.")
                                 .toXmlResponse(400);
                     }
-                    byte[] blockData = staged.get().data();
                     chunks.add(blockData);
                     committedMeta.add(blockId + ":" + blockData.length);
-                    String blockCustomerProvidedKeySha256 =
-                            staged.get().metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
                     if (!stagedEncryptionStateSet) {
                         stagedCustomerProvidedKeySha256 = blockCustomerProvidedKeySha256;
                         stagedEncryptionStateSet = true;
@@ -3781,15 +3804,17 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 }
 
                 String etag = etags.next();
-                store.put(objKey(request.accountName(), containerName, blobName),
-                        new StoredObject(blobName, assembled, metadata, Instant.now(), etag));
 
-                // Clean up all staged blocks for this blob
+                // Store the blob and drop all staged blocks for this blob in one write, so a
+                // write-through backend rewrites its file once per commit, not once per block.
                 String stagePrefix = blockStagingPrefix(request.accountName(), containerName, blobName);
-                store.keys().stream()
+                Set<String> stagedKeys = new HashSet<>(store.keys().stream()
                         .filter(k -> k.startsWith(stagePrefix))
-                        .toList()
-                        .forEach(store::delete);
+                        .toList());
+                store.applyBatch(
+                        Map.of(objKey(request.accountName(), containerName, blobName),
+                                new StoredObject(blobName, assembled, metadata, Instant.now(), etag)),
+                        stagedKeys);
 
                 return Response.status(Response.Status.CREATED)
                         .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
@@ -3987,18 +4012,59 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     /**
-     * Parses the block IDs from a PutBlockList XML body.
-     * Matches {@code <Latest>}, {@code <Committed>}, and {@code <Uncommitted>} elements
-     * in document order — Azure treats all three as "use this block".
+     * Parses the entries of a PutBlockList XML body in document order.
+     * Each {@code <Latest>}, {@code <Committed>}, or {@code <Uncommitted>} element becomes one
+     * entry, keeping the element name: it decides which block list the ID is resolved against.
      */
-    private static List<String> parseBlockList(byte[] body) {
+    private static List<BlockListEntry> parseBlockList(byte[] body) {
         String xml = new String(body, StandardCharsets.UTF_8);
-        List<String> ids = new ArrayList<>();
+        List<BlockListEntry> entries = new ArrayList<>();
         Matcher m = BLOCK_LIST_PATTERN.matcher(xml);
         while (m.find()) {
-            ids.add(m.group(1).trim());
+            entries.add(new BlockListEntry(m.group(1), m.group(2).trim()));
         }
-        return ids;
+        return entries;
+    }
+
+    /** One PutBlockList entry: the list it names ({@code Latest}, {@code Committed}, {@code Uncommitted}) and its block ID. */
+    private record BlockListEntry(String list, String blockId) {
+    }
+
+    /**
+     * The blob's committed blocks by block ID, as {@code [offset, length]} ranges into its data, read from the
+     * {@code CommittedBlocks} metadata a commit records. Empty when there is no blob, the blob has no committed
+     * block list (for example one written by Put Blob), or the recorded sizes do not add up to the blob's length.
+     * The first occurrence wins if an ID is listed twice.
+     */
+    private static Map<String, int[]> committedBlockRanges(Optional<StoredObject> existing) {
+        if (existing.isEmpty()) {
+            return Map.of();
+        }
+        String meta = existing.get().metadata().getOrDefault("CommittedBlocks", "");
+        if (meta.isBlank()) {
+            return Map.of();
+        }
+        int length = existing.get().data().length;
+        Map<String, int[]> ranges = new HashMap<>();
+        int offset = 0;
+        for (String item : meta.split("\\|")) {
+            String[] parts = item.split(":", 2);
+            if (parts.length != 2) {
+                return Map.of();
+            }
+            int size;
+            try {
+                size = Integer.parseInt(parts[1]);
+            } catch (NumberFormatException e) {
+                return Map.of();
+            }
+            if (size < 0 || offset + size > length) {
+                return Map.of();
+            }
+            ranges.putIfAbsent(parts[0], new int[] {offset, size});
+            offset += size;
+        }
+        return offset == length ? ranges : Map.of();
     }
 
     /**

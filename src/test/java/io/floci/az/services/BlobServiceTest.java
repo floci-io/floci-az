@@ -3534,6 +3534,90 @@ public class BlobServiceTest {
     }
 
     @Test
+    void retriedPutBlockListResolvesLatestAgainstCommittedBlocks() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String blob = "commit-retry.bin";
+        String first = blockId("retry-1");
+        String second = blockId("retry-2");
+        stageBlock(blob, first, "one-");
+        stageBlock(blob, second, "two");
+        String body = "<BlockList><Latest>" + first + "</Latest><Latest>" + second + "</Latest></BlockList>";
+
+        given()
+            .body(body)
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(201);
+
+        // The commit removed the staged blocks. A client that timed out and retries the same
+        // commit must still succeed, because Latest falls back to the committed block list.
+        given()
+            .body(body)
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(200).body(equalTo("one-two"));
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=blocklist&blocklisttype=uncommitted",
+                    ACCOUNT, CONTAINER, blob)
+            .then().statusCode(200).body(not(containsString("<Name>")));
+    }
+
+    @Test
+    void putBlockListCommittedEntryReusesCommittedBlockAndLatestPrefersStaged() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String blob = "commit-reuse.bin";
+        String a = blockId("reuse-a");
+        String b = blockId("reuse-b");
+        stageBlock(blob, a, "AAA");
+        stageBlock(blob, b, "BBB");
+        given()
+            .body("<BlockList><Latest>" + a + "</Latest><Latest>" + b + "</Latest></BlockList>")
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(201);
+
+        // Re-stage b with new content: Committed keeps a from the committed list, Latest takes the staged b.
+        stageBlock(blob, b, "bbb-new");
+        given()
+            .body("<BlockList><Committed>" + a + "</Committed><Latest>" + b + "</Latest></BlockList>")
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(200).body(equalTo("AAAbbb-new"));
+    }
+
+    @Test
+    void putBlockListRejectsEntriesMissingFromTheNamedList() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String blob = "commit-strict.bin";
+        String a = blockId("strict-a");
+        stageBlock(blob, a, "x");
+        given()
+            .body("<BlockList><Latest>" + a + "</Latest></BlockList>")
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(201);
+
+        // a is committed, not staged: Uncommitted does not fall back to the committed list.
+        given()
+            .body("<BlockList><Uncommitted>" + a + "</Uncommitted></BlockList>")
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(400).header("x-ms-error-code", "InvalidBlockList");
+
+        // An ID that was never committed is not found in the committed list.
+        given()
+            .body("<BlockList><Committed>" + blockId("strict-z") + "</Committed></BlockList>")
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(400).header("x-ms-error-code", "InvalidBlockList");
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, blob)
+            .then().statusCode(200).body(equalTo("x"));
+    }
+
+    @Test
     void committedBlockBlobPersistsBlobHttpHeaders() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         String blockId = Base64.getEncoder()
@@ -4480,6 +4564,13 @@ public class BlobServiceTest {
 
     private static String blockId(String name) {
         return Base64.getEncoder().encodeToString(name.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void stageBlock(String blob, String id, String content) {
+        given()
+            .body(content)
+            .when().put("/{account}/{container}/{blob}?comp=block&blockid={id}", ACCOUNT, CONTAINER, blob, id)
+            .then().statusCode(201);
     }
 
     private static String md5Of(String content) throws Exception {
