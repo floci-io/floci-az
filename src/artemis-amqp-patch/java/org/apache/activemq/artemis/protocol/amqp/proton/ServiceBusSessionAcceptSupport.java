@@ -38,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Accept-next-session long poll. Service Bus holds a session receiver's attach whose session filter
@@ -67,7 +68,21 @@ public final class ServiceBusSessionAcceptSupport {
    /** How often a waiter looks for a session it could lock. */
    static final long POLL_MILLIS = 50L;
 
+   private static final long POLL_NANOS = TimeUnit.MILLISECONDS.toNanos(POLL_MILLIS);
+
+   /** How long a queue's scan record outlives its last scan before it is dropped. */
+   static final long IDLE_SCAN_NANOS = 20 * POLL_NANOS;
+
    private static final Map<Sender, PendingAccept> PENDING = new ConcurrentHashMap<>();
+
+   /**
+    * The latest backlog scan of each queue with waiters. The scan walks the backlog under the queue's
+    * lock, so the waiters on a queue share one scan per poll interval instead of each running its own:
+    * a waiter that finds a scan in progress, or one that found no free session within the interval,
+    * waits for its next poll. A session freed meanwhile is seen at most one interval later. A record
+    * not scanned for {@link #IDLE_SCAN_NANOS} is dropped, so deleted queues leave nothing behind.
+    */
+   private static final Map<SimpleString, SessionScan> SCANS = new ConcurrentHashMap<>();
 
    private ServiceBusSessionAcceptSupport() {
    }
@@ -150,7 +165,7 @@ public final class ServiceBusSessionAcceptSupport {
          return;
       }
       boolean due = System.nanoTime() - pending.deadlineNanos() >= 0;
-      if (!due && !ServiceBusSessionSupport.hasUnlockedSession(pending.queue(), pending.queueName())) {
+      if (!due && !mayLockASession(pending)) {
          schedulePoll(pending);
          return;
       }
@@ -175,6 +190,34 @@ public final class ServiceBusSessionAcceptSupport {
       }
    }
 
+   private static boolean mayLockASession(PendingAccept pending) {
+      SimpleString queueName = pending.queueName();
+      SessionScan scan = SCANS.computeIfAbsent(queueName, name -> new SessionScan());
+      if (!scan.lock.tryLock()) {
+         // Another waiter is scanning this queue right now; its result covers this poll too.
+         return false;
+      }
+      long now = System.nanoTime();
+      boolean free;
+      try {
+         if (scan.foundNoFreeSessionWithin(now)) {
+            return false;
+         }
+         scan.lastScanNanos = now;
+         free = ServiceBusSessionSupport.hasUnlockedSession(pending.queue(), queueName);
+         scan.noFreeSession = !free;
+      } finally {
+         scan.lock.unlock();
+      }
+      evictIdleScans(now);
+      return free;
+   }
+
+   /** Drops the scan records of queues nobody has scanned for {@link #IDLE_SCAN_NANOS}. */
+   static void evictIdleScans(long nowNanos) {
+      SCANS.values().removeIf(scan -> nowNanos - scan.lastScanNanos >= IDLE_SCAN_NANOS);
+   }
+
    private static boolean attaching(Sender sender) {
       Session session = sender.getSession();
       Connection connection = session == null ? null : session.getConnection();
@@ -185,6 +228,17 @@ public final class ServiceBusSessionAcceptSupport {
          && session.getRemoteState() == EndpointState.ACTIVE
          && connection.getLocalState() == EndpointState.ACTIVE
          && connection.getRemoteState() == EndpointState.ACTIVE;
+   }
+
+   /** One queue's latest backlog scan. Written under {@code lock}; read without it only to evict. */
+   private static final class SessionScan {
+      private final ReentrantLock lock = new ReentrantLock();
+      private volatile long lastScanNanos = System.nanoTime();
+      private volatile boolean noFreeSession;
+
+      private boolean foundNoFreeSessionWithin(long nowNanos) {
+         return noFreeSession && nowNanos - lastScanNanos < POLL_NANOS;
+      }
    }
 
    private record PendingAccept(ActiveMQServer server,
