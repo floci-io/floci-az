@@ -31,6 +31,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -56,6 +57,7 @@ class ServiceBusSessionAcceptTest {
     private static final SimpleString QUEUE = SimpleString.of("orders");
 
     private URLClassLoader loader;
+    private Class<?> accept;
     private Method configure;
     private Method isPending;
     private Map<?, ?> pending;
@@ -86,7 +88,7 @@ class ServiceBusSessionAcceptTest {
     void setUp() throws Exception {
         loader = PatchJarLoader.open();
         Class<?> support = Class.forName(SUPPORT, true, loader);
-        Class<?> accept = Class.forName(ACCEPT, true, loader);
+        accept = Class.forName(ACCEPT, true, loader);
         configure = support.getMethod("configure", ActiveMQServer.class, SimpleString.class, Source.class,
                 Map.class, Sender.class, ProtonServerSenderContext.class, String.class);
         isPending = accept.getMethod("isPending", ActiveMQAMQPException.class);
@@ -245,6 +247,68 @@ class ServiceBusSessionAcceptTest {
         assertEquals(3, pending.size(), "every session is locked: all three keep waiting");
         assertEquals(3, polls().size());
         verify(connection, never()).onRemoteOpen(any(Link.class));
+    }
+
+    @Test
+    @DisplayName("a waiter that finds a scan of its queue in progress does not start a second one")
+    void aScanInProgressCoversTheOtherWaiters() throws Exception {
+        Attach first = newAttach("first", 30_000L);
+        Attach second = newAttach("second", 30_000L);
+        attach(first);
+        attach(second);
+        List<Scheduled> due = polls();
+        assertEquals(2, due.size());
+        scheduled.removeAll(due);
+
+        CountDownLatch scanning = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        clearInvocations(queue);
+        when(queue.browserIterator()).thenAnswer(invocation -> {
+            scanning.countDown();
+            release.await();
+            return iterator(new ArrayList<>(messages));
+        });
+        Thread firstPoll = new Thread(() -> due.get(0).task().run());
+        Thread secondPoll = new Thread(() -> due.get(1).task().run());
+        try {
+            firstPoll.start();
+            assertTrue(scanning.await(5, TimeUnit.SECONDS), "the first waiter must be scanning");
+            secondPoll.start();
+            secondPoll.join(2_000L);
+            assertFalse(secondPoll.isAlive(), "the second waiter must not queue behind the first one's scan");
+            verify(queue, times(1)).browserIterator();
+        } finally {
+            release.countDown();
+            firstPoll.join(5_000L);
+            secondPoll.join(5_000L);
+        }
+
+        assertEquals(2, pending.size(), "no session: both accepts keep waiting");
+        assertEquals(2, polls().size());
+    }
+
+    @Test
+    @DisplayName("a queue's scan record is dropped once nobody has scanned that queue for a while")
+    void idleScanRecordsAreDropped() throws Exception {
+        Attach waiter = newAttach("waiter", 30_000L);
+        attach(waiter);
+        runPolls();
+
+        Field scansField = accept.getDeclaredField("SCANS");
+        scansField.setAccessible(true);
+        Map<?, ?> scans = (Map<?, ?>) scansField.get(null);
+        Field idleField = accept.getDeclaredField("IDLE_SCAN_NANOS");
+        idleField.setAccessible(true);
+        long idleNanos = idleField.getLong(null);
+        Method evict = accept.getDeclaredMethod("evictIdleScans", long.class);
+        evict.setAccessible(true);
+        assertEquals(1, scans.size());
+
+        evict.invoke(null, System.nanoTime());
+        assertEquals(1, scans.size(), "a record scanned just now is kept");
+
+        evict.invoke(null, System.nanoTime() + idleNanos);
+        assertTrue(scans.isEmpty(), "a record idle for the whole period is dropped");
     }
 
     private Attach newAttach(String name, long waitMillis) {
