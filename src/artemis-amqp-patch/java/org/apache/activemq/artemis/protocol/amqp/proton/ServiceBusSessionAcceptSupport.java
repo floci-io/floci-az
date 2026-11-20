@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -80,9 +81,13 @@ public final class ServiceBusSessionAcceptSupport {
     * lock, so the waiters on a queue share one scan per poll interval instead of each running its own:
     * a waiter that finds a scan in progress, or one that found no free session within the interval,
     * waits for its next poll. A session freed meanwhile is seen at most one interval later. A record
-    * not scanned for {@link #IDLE_SCAN_NANOS} is dropped, so deleted queues leave nothing behind.
+    * not scanned for {@link #IDLE_SCAN_NANOS} is dropped by a sweep that runs at most once per that period,
+    * so deleted queues leave nothing behind.
     */
    private static final Map<SimpleString, SessionScan> SCANS = new ConcurrentHashMap<>();
+
+   /** When the next sweep for idle scan records is due: at most one sweep per idle period, across all queues. */
+   private static final AtomicLong NEXT_EVICTION_NANOS = new AtomicLong(System.nanoTime() + IDLE_SCAN_NANOS);
 
    private ServiceBusSessionAcceptSupport() {
    }
@@ -209,7 +214,10 @@ public final class ServiceBusSessionAcceptSupport {
       } finally {
          scan.lock.unlock();
       }
-      evictIdleScans(now);
+      long evictionDue = NEXT_EVICTION_NANOS.get();
+      if (now - evictionDue >= 0 && NEXT_EVICTION_NANOS.compareAndSet(evictionDue, now + IDLE_SCAN_NANOS)) {
+         evictIdleScans(now);
+      }
       return free;
    }
 
