@@ -163,6 +163,7 @@ service's data plane at its real Azure hostname, on the standard port:
 | Resource | Calls | Port |
 |---|---|---|
 | `azurerm_key_vault` and its secrets, keys and certificates | `https://<vault>.vault.azure.net/` | 443 (HTTPS) |
+| `azurerm_storage_account` (azurerm 3.x, every read: queue and static website properties) | `http://<account>.queue.core.windows.net/`, `http://<account>.blob.core.windows.net/` | 80 (HTTP) |
 | `azurerm_storage_blob`, and `azurerm_storage_container` / `azurerm_storage_queue` when given `storage_account_name` | `http://<account>.blob.core.windows.net/`, `http://<account>.queue.core.windows.net/` | 80 (HTTP) |
 
 floci-az answers those hostnames on its own port, so two things make them work:
@@ -256,3 +257,22 @@ Docker network alias, and publish or forward port 443. The self-signed certifica
 With `public_network_access_enabled = false` the provider skips the poll and ignores a failed
 contacts read, though that read may still wait for its timeout. floci-az stores this setting but
 does not enforce it, so the vault stays reachable.
+
+**`azurerm_storage_account` hangs for about two minutes, then fails reading queue or static website properties**
+
+→ After creating the account, and on every refresh, azurerm 3.x reads the account's queue properties and static
+website settings from its data plane, at the `primaryEndpoints` the account reports
+(`http://{account}.queue.core.windows.net/` and `http://{account}.blob.core.windows.net/`), on port 80. Those names
+do not reach floci-az by default.
+**Fix:** resolve both names to floci-az and publish port 80, as in [Data-plane hostnames](#data-plane-hostnames).
+If the configuration sets no `queue_properties` or `static_website`, the provider can skip those reads instead:
+
+```hcl
+provider "azurerm" {
+  features {
+    storage {
+      data_plane_available = false
+    }
+  }
+}
+```
