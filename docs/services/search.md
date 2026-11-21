@@ -355,8 +355,8 @@ Lookups and `$count` do not need the engine.
 | `searchMode` | `any` (the default) or `all`. As on Azure, `wifi -luxury` in `any` mode matches what has `wifi` or lacks `luxury` |
 | `searchFields` | Searchable fields to search, `address/city` for a sub-field, also in complex collections |
 | `scoringProfile` | Its text `weights` boost the fields. The index's `defaultScoringProfile` applies when none is named. Functions are not served yet |
-| `highlight`, `highlightPreTag`, `highlightPostTag` | `@search.highlights` per field, `<em>` and `</em>` by default; custom tags are set together |
-| `$top`, `$skip`, `$count`, `$select` | 50 results by default and 1000 at most, `$skip` up to 100000. Past 1000, or under a `$top` larger than a page, the response carries `@search.nextPageParameters` (POST) or `@odata.nextLink` (GET), which the SDKs follow |
+| `highlight`, `highlightPreTag`, `highlightPostTag` | `@search.highlights` per field, `<em>` and `</em>` by default; custom tags are set together; a highlighted field must be searchable and retrievable |
+| `$top`, `$skip`, `$count`, `$select` | 50 results by default and 1000 at most, `$skip` up to 100000. Past 1000, or under a `$top` larger than a page, the response carries `@search.nextPageParameters` (POST) or `@odata.nextLink` (GET), which the SDKs follow, up to the `$skip` limit |
 | `minimumCoverage` | From 0 to 100; answered with `@search.coverage: 100` |
 | `sessionId`, `scoringStatistics` | Accepted |
 
@@ -389,9 +389,9 @@ search.
 - **Started on demand.** Nothing is pulled or started until a search service exists: its ARM create,
   a data-plane write to an undeclared service, or a restart that finds stored services or indexes
   starts the container in the background. A search sent while it starts waits up to `start-timeout-seconds`
-- **Removed when not needed.** Deleting the last search service while no undeclared service has an
-  index, or `POST /_admin/reset`, removes the container 30 seconds later, unless a new service wants it
-  meanwhile. The image stays in Docker's cache
+- **Removed when not needed.** Once no search service and no index is left (the last service or the
+  last index of an undeclared service deleted, or `POST /_admin/reset`), the container is removed 30
+  seconds later, unless a new service wants it meanwhile. The image stays in Docker's cache
 - **One container** serves every service and index, as `floci-az-search-default` (with the
   [resource namespace](../configuration/advanced/application-yml.md) when one is set), on the
   emulator's Docker network when `FLOCI_AZ_SERVICES_DOCKER_NETWORK` is set
