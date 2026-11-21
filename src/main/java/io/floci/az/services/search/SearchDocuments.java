@@ -16,6 +16,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -23,6 +24,7 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -97,6 +99,11 @@ public class SearchDocuments {
     private static final String COMPLEX = "Edm.ComplexType";
     private static final Map<String, Integer> VECTOR_ELEMENT_BYTES = Map.of(
             "Edm.Single", 4, "Edm.Half", 2, "Edm.Int16", 2, "Edm.SByte", 1, "Edm.Byte", 1);
+    /** Lucene's limit on the UTF-8 length of one indexed term. */
+    static final int MAX_TERM_BYTES = 32766;
+    private static final Pattern WHOLE = Pattern.compile("(?s).+");
+    private static final Pattern NON_WHITESPACE = Pattern.compile("\\S+");
+    private static final Pattern WORD = Pattern.compile("\\w+");
     private static final List<String> NOT_A_NUMBER = List.of("NaN", "INF", "-INF");
     private static final Map<String, Object> WGS84 = Map.of("type", "name",
             "properties", Map.of("name", "EPSG:4326"));
@@ -112,8 +119,8 @@ public class SearchDocuments {
             + " the vector field. Read the following documentation for more details:"
             + " https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-configure-compression-storage.";
 
-    /** A refused request, thrown while a batch is read and carrying the answer. */
-    private static final class Refused extends RuntimeException {
+    /** A refused request, thrown while a request is read and carrying the answer. */
+    static final class Refused extends RuntimeException {
         private final transient Response response;
 
         Refused(Response response) {
@@ -148,11 +155,13 @@ public class SearchDocuments {
 
     private final StorageBackend<String, StoredObject> storage;
     private final SearchIndexes indexes;
+    private final SearchChanges changes;
 
     @Inject
-    public SearchDocuments(StorageFactory storageFactory, SearchIndexes indexes) {
+    public SearchDocuments(StorageFactory storageFactory, SearchIndexes indexes, SearchChanges changes) {
         this.storage = storageFactory.create(STORE);
         this.indexes = indexes;
+        this.changes = changes;
     }
 
     /** Whether a path segment after the index addresses its documents: {@code docs} or {@code docs('key')}. */
@@ -246,6 +255,7 @@ public class SearchDocuments {
             if (!puts.isEmpty() || !deletes.isEmpty()) {
                 storage.applyBatch(puts, deletes);
             }
+            changes.documentsChanged(SearchChanges.indexId(cloud, service, index), staged.keySet());
             LOG.debugv("Search: indexed {0} action(s) in index {1} of service {2}", actions.size(), index, service);
             boolean allSucceeded = outcomes.stream().allMatch(Outcome::status);
             Map<String, Object> body = new LinkedHashMap<>();
@@ -265,6 +275,10 @@ public class SearchDocuments {
         String kind = MERGE_OR_UPLOAD.equals(action.kind()) ? (current.isPresent() ? MERGE : UPLOAD) : action.kind();
         return switch (kind) {
             case UPLOAD -> {
+                Optional<String> tooLarge = oversizedTerm(action.document(), fields, "");
+                if (tooLarge.isPresent()) {
+                    yield new Outcome(action.key(), false, termTooLarge(tooLarge.get()), 400);
+                }
                 staged.put(action.key(), Optional.of(action.document()));
                 yield new Outcome(action.key(), true, null, current.isPresent() ? 200 : 201);
             }
@@ -272,7 +286,12 @@ public class SearchDocuments {
                 if (current.isEmpty()) {
                     yield new Outcome(action.key(), false, DOCUMENT_NOT_FOUND, 404);
                 }
-                staged.put(action.key(), Optional.of(merge(current.get(), action.document(), fields)));
+                Map<String, Object> merged = merge(current.get(), action.document(), fields);
+                Optional<String> tooLarge = oversizedTerm(merged, fields, "");
+                if (tooLarge.isPresent()) {
+                    yield new Outcome(action.key(), false, termTooLarge(tooLarge.get()), 400);
+                }
+                staged.put(action.key(), Optional.of(merged));
                 yield new Outcome(action.key(), true, null, 200);
             }
             default -> {
@@ -281,6 +300,89 @@ public class SearchDocuments {
                 yield new Outcome(action.key(), true, null, 200);
             }
         };
+    }
+
+    /**
+     * The path of the first string field whose value would be indexed as a term longer than Lucene allows, as Azure
+     * refuses it: the whole value of a filterable, sortable or facetable field is one term, and so is what the
+     * {@code keyword}, {@code whitespace} and {@code pattern} analyzers leave unsplit. The other analyzers cut long
+     * tokens.
+     */
+    static Optional<String> oversizedTerm(Map<String, Object> document, List<Map<String, Object>> fields,
+                                          String prefix) {
+        for (Map<String, Object> field : fields) {
+            Object value = document.get((String) field.get("name"));
+            if (value == null) {
+                continue;
+            }
+            String type = String.valueOf(field.get("type"));
+            String path = prefix + field.get("name");
+            List<?> values = value instanceof List<?> list ? list : List.of(value);
+            if (type.endsWith("Edm.ComplexType)") || "Edm.ComplexType".equals(type)) {
+                for (Object child : values) {
+                    if (child instanceof Map<?, ?> map) {
+                        Optional<String> found = oversizedTerm(cast(map), fields(field), path + "/");
+                        if (found.isPresent()) {
+                            return found;
+                        }
+                    }
+                }
+                continue;
+            }
+            if (!"Edm.String".equals(type) && !"Collection(Edm.String)".equals(type)) {
+                continue;
+            }
+            boolean wholeValue = Boolean.TRUE.equals(field.get("filterable"))
+                    || Boolean.TRUE.equals(field.get("sortable")) || Boolean.TRUE.equals(field.get("facetable"));
+            Optional<Pattern> splitter = Boolean.TRUE.equals(field.get("searchable"))
+                    ? unsplit(indexAnalyzer(field)) : Optional.empty();
+            for (Object element : values) {
+                if (element instanceof String text && (wholeValue && utf8Length(text) > MAX_TERM_BYTES
+                        || splitter.isPresent() && longestRun(text, splitter.get()) > MAX_TERM_BYTES)) {
+                    return Optional.of(path);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** What an analyzer keeps as one token, when it does not cut long tokens. */
+    private static Optional<Pattern> unsplit(String analyzer) {
+        return switch (analyzer.toLowerCase(Locale.ROOT)) {
+            case "keyword" -> Optional.of(WHOLE);
+            case "whitespace" -> Optional.of(NON_WHITESPACE);
+            case "pattern" -> Optional.of(WORD);
+            default -> Optional.empty();
+        };
+    }
+
+    private static String indexAnalyzer(Map<String, Object> field) {
+        if (field.get("analyzer") instanceof String name) {
+            return name;
+        }
+        return field.get("indexAnalyzer") instanceof String name ? name : "standard.lucene";
+    }
+
+    private static int longestRun(String text, Pattern token) {
+        int longest = 0;
+        Matcher run = token.matcher(text);
+        while (run.find()) {
+            longest = Math.max(longest, utf8Length(run.group()));
+        }
+        return longest;
+    }
+
+    private static int utf8Length(String text) {
+        // A cheap bound first: no string of fewer chars than a third of the limit can exceed it.
+        return text.length() * 3 <= MAX_TERM_BYTES ? text.length() : text.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    // Azure's text (verify).
+    private static String termTooLarge(String path) {
+        return "Field '" + path + "' contains a term that is too large to process. The max length for UTF-8 encoded"
+                + " terms is " + MAX_TERM_BYTES + " bytes. The most likely cause of this error is that a filter, sort,"
+                + " and/or facet operation is enabled on this field, which causes the entire field value to be indexed"
+                + " as a single term. Please avoid the use of filter, sort, and/or facet on large fields.";
     }
 
     /**
@@ -339,6 +441,26 @@ public class SearchDocuments {
             vectorBytes += Long.parseLong(stored.metadata().getOrDefault(VECTOR_BYTES, "0"));
         }
         return new Usage(documents, bytes, vectorBytes);
+    }
+
+    /** Every stored document of an index, by its key. */
+    Map<String, Map<String, Object>> stored(String cloud, String service, String index) {
+        String prefix = indexPrefix(cloud, service, index);
+        Map<String, Map<String, Object>> found = new LinkedHashMap<>();
+        for (StoredObject stored : storage.scan(key -> key.startsWith(prefix))) {
+            found.put(stored.key().substring(prefix.length()), decode(stored));
+        }
+        return found;
+    }
+
+    /** The stored documents of an index with these keys; a key with no document is left out. */
+    Map<String, Map<String, Object>> stored(String cloud, String service, String index, Collection<String> keys) {
+        String prefix = indexPrefix(cloud, service, index);
+        Map<String, Map<String, Object>> found = new LinkedHashMap<>();
+        for (String key : keys) {
+            storage.get(prefix + key).ifPresent(stored -> found.put(key, decode(stored)));
+        }
+        return found;
     }
 
     /** What every document of {@code service} takes up. */
@@ -648,7 +770,7 @@ public class SearchDocuments {
      * A document as a lookup answers it: the retrievable fields in the order of the index, a field it does not have
      * as {@code null}, or {@code []} for a collection.
      */
-    private static Map<String, Object> project(Map<String, Object> document, List<Map<String, Object>> fields,
+    static Map<String, Object> project(Map<String, Object> document, List<Map<String, Object>> fields,
                                                Optional<Map<String, Object>> selection) {
         Map<String, Object> projected = new LinkedHashMap<>();
         for (Map<String, Object> field : fields) {
@@ -683,7 +805,7 @@ public class SearchDocuments {
      * The fields {@code $select} names, as a tree: a top-level name maps to an empty map for the whole field, and
      * {@code address/city} maps {@code address} to {@code {city}}. Empty for every field.
      */
-    private static Optional<Map<String, Object>> selection(String select, List<Map<String, Object>> fields) {
+    static Optional<Map<String, Object>> selection(String select, List<Map<String, Object>> fields) {
         if (select == null || select.isBlank()) {
             return Optional.empty();
         }
@@ -765,7 +887,7 @@ public class SearchDocuments {
 
     // ── Small helpers ────────────────────────────────────────────────────────
 
-    private static byte[] body(AzureRequest req) {
+    static byte[] body(AzureRequest req) {
         InputStream body = req.bodyStream();
         try {
             // One byte past the limit is enough to refuse a batch as too large, without holding all of it.
@@ -775,7 +897,7 @@ public class SearchDocuments {
         }
     }
 
-    private static Object parse(byte[] bytes) {
+    static Object parse(byte[] bytes) {
         if (bytes.length == 0) {
             return Map.of();
         }
@@ -811,7 +933,7 @@ public class SearchDocuments {
     }
 
     @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> fields(Map<String, Object> holder) {
+    static List<Map<String, Object>> fields(Map<String, Object> holder) {
         return holder.get("fields") instanceof List<?> fields ? (List<Map<String, Object>>) fields : List.of();
     }
 

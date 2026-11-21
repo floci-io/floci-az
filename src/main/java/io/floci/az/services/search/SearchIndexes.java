@@ -155,13 +155,15 @@ public class SearchIndexes {
     }
 
     private final StorageBackend<String, StoredObject> storage;
+    private final SearchChanges changes;
     /** Guards a read of an index followed by its write, so the ETag conditions and the write are one step. */
     private final Object writeLock = new Object();
     private final AtomicLong etagSequence = new AtomicLong();
 
     @Inject
-    public SearchIndexes(StorageFactory storageFactory) {
+    public SearchIndexes(StorageFactory storageFactory, SearchChanges changes) {
         this.storage = storageFactory.create(STORE);
+        this.changes = changes;
     }
 
     /**
@@ -289,6 +291,7 @@ public class SearchIndexes {
             doomed.add(key(service, name));
             // The index and its documents go in one step, so a new index of the same name starts empty.
             storage.applyBatch(Map.of(), doomed);
+            changes.indexesDropped(List.of(SearchChanges.indexId(service.cloud(), service.name(), name)));
         }
         LOG.infov("Search: deleted index {0} of service {1}", name, service.name());
         return Response.noContent().build();
@@ -350,6 +353,11 @@ public class SearchIndexes {
         return (int) storage.keys().stream().filter(key -> key.startsWith(prefix)).count();
     }
 
+    /** Whether any service, declared through ARM or not, has an index. */
+    public boolean any() {
+        return storage.keys().stream().anyMatch(key -> key.startsWith(KEY_PREFIX));
+    }
+
     /** Forgets the indexes and documents of {@code service} in {@code cloud}: its ARM resource was deleted. */
     public void deleteAll(String cloud, String service) {
         deleteKeysStartingWith(prefix(new Service(cloud, service)), SearchDocuments.servicePrefix(cloud, service));
@@ -377,6 +385,8 @@ public class SearchIndexes {
             if (!doomed.isEmpty()) {
                 storage.applyBatch(Map.of(), doomed);
             }
+            changes.indexesDropped(doomed.stream().filter(key -> key.startsWith(KEY_PREFIX))
+                    .map(key -> key.substring(KEY_PREFIX.length())).toList());
         }
     }
 

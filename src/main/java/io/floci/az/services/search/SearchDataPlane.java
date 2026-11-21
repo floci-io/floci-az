@@ -19,8 +19,8 @@ import java.util.regex.Pattern;
 
 /**
  * The data plane of a search service, as {@code https://{service}.search.windows.net} serves it: index management,
- * documents (upload, merge, delete, lookup, count) and the service statistics so far. Queries, synonym maps and
- * indexers are not served yet and answer {@code 404}.
+ * documents (upload, merge, delete, lookup, count), searches and the service statistics so far. Suggestions, synonym
+ * maps and indexers are not served yet and answer {@code 404}.
  */
 @ApplicationScoped
 public class SearchDataPlane {
@@ -78,15 +78,19 @@ public class SearchDataPlane {
     private final SearchAuth auth;
     private final SearchIndexes indexes;
     private final SearchDocuments documents;
+    private final SearchQueries queries;
+    private final SearchSolrManager engine;
 
     @Inject
     public SearchDataPlane(EmulatorConfig config, SearchArmService arm, SearchAuth auth, SearchIndexes indexes,
-                           SearchDocuments documents) {
+                           SearchDocuments documents, SearchQueries queries, SearchSolrManager engine) {
         this.config = config;
         this.arm = arm;
         this.auth = auth;
         this.indexes = indexes;
         this.documents = documents;
+        this.queries = queries;
+        this.engine = engine;
     }
 
     /** Serves one request addressed to a search service. */
@@ -134,13 +138,22 @@ public class SearchDataPlane {
             return "GET".equalsIgnoreCase(req.method())
                     ? serviceStatistics(req, cloud, service, declared) : SearchErrors.methodNotAllowed();
         }
-        if (onDocuments) {
-            return documents.handle(req, cloud, service, name.get(), rest, serviceUrl(req, service));
+        Response response;
+        if (onDocuments && SearchQueries.addresses(rest)) {
+            // A search starts Solr itself when it needs it.
+            return queries.handle(req, cloud, service, name.get(), rest, serviceUrl(req, service));
+        } else if (onDocuments) {
+            response = documents.handle(req, cloud, service, name.get(), rest, serviceUrl(req, service));
+        } else if (INDEXES.equals(operation)) {
+            response = indexes.handle(req, cloud, service, name, rest, serviceUrl(req, service));
+        } else {
+            return SearchErrors.notFound("This Azure AI Search operation is not served yet: " + collection);
         }
-        return switch (operation) {
-            case INDEXES -> indexes.handle(req, cloud, service, name, rest, serviceUrl(req, service));
-            default -> SearchErrors.notFound("This Azure AI Search operation is not served yet: " + collection);
-        };
+        if (!"GET".equalsIgnoreCase(req.method()) && response.getStatus() / 100 == 2) {
+            // A write that succeeded means the service is in use, declared on ARM or not: its queries will need Solr.
+            engine.prepare();
+        }
+        return response;
     }
 
     /**

@@ -4,15 +4,17 @@ Compatible with the `Microsoft.Search` ARM management plane as the `azurerm_sear
 resource, the `azure-mgmt-search` SDKs and the `az search service`, `az search admin-key` and
 `az search query-key` commands use it, and with index management and documents on the data plane as
 `SearchIndexClient` and `SearchClient` of the `azure-search-documents` SDKs use them. Floci AZ serves
-search services with their admin and query API keys, the index definitions of each service, and the
-documents of each index. The other `az search` command groups are not served yet: see
-[Notes & limitations](#notes-limitations).
+search services with their admin and query API keys, the index definitions of each service, the
+documents of each index, and full-text search over them. The other `az search` command groups are not
+served yet: see [Notes & limitations](#notes-limitations).
 
-> **No queries yet.** Documents can be uploaded, merged, deleted, looked up by key and counted, but not
-> searched: queries, suggestions, autocomplete, synonym maps, indexers and skillsets are not served yet.
-> Those data-plane requests answer `404`.
+> **Full-text search, not yet filters.** A search runs the simple or full Lucene syntax with Azure's
+> analyzers, BM25 scores, highlights, scoring-profile weights and paging. `$filter`, `$orderby`,
+> facets, suggestions, autocomplete, vector and semantic queries are not served yet.
 
-> **HTTP-only: no Docker.** Search services are in-process ARM state. There is no sidecar.
+> **Queries run in a Solr sidecar.** The first search service pulls and starts one shared
+> `solr:10.1.0-slim` container, `floci-az-search-default`, and deleting the last one removes it.
+> Without Docker, a search answers `503` and everything else works. See [Queries](#queries).
 
 ---
 
@@ -75,6 +77,9 @@ GET    /{name}-search/servicestats
 POST   /{name}-search/indexes('{index}')/docs/search.index   # allowUnsafeKeys
 GET    /{name}-search/indexes('{index}')/docs('{key}')       # $select
 GET    /{name}-search/indexes('{index}')/docs/$count
+
+POST   /{name}-search/indexes('{index}')/docs/search.post.search
+GET    /{name}-search/indexes('{index}')/docs        # search, $top, $skip, ... as query parameters
 ```
 
 `indexes/{index}` is accepted for `indexes('{index}')`, and `docs/{key}` for `docs('{key}')`. Every request needs an `api-version`, and every
@@ -297,6 +302,10 @@ deleted. It answers `200` when every action succeeds and `207` when one fails.
 - `mergeOrUpload` merges into a document that exists, and uploads one that does not
 - `delete` answers `200` whether or not the document exists
 - two actions on one key run in order, and the last one wins
+- a string that would be one indexed term over Lucene's 32766 UTF-8 bytes fails that action alone,
+  with `400` and `Field 'title' contains a term that is too large to process. ...`: the whole value
+  of a filterable, sortable or facetable field is one term, and so is what the `keyword`,
+  `whitespace` and `pattern` analyzers do not split. This message is not yet checked against Azure
 
 Everything else that is wrong refuses the whole batch with `400`, and nothing in it is written:
 
@@ -333,6 +342,66 @@ Deleting an index deletes its documents, and so does deleting its service or res
 
 ---
 
+## Queries
+
+`POST docs/search.post.search` takes the request body of the spec, and `GET docs` the same request as
+query parameters (`search`, `$top`, `$skip`, `$count`, `$select`, `searchFields`, `highlight`, ...).
+Lookups and `$count` do not need the engine.
+
+| Request | Served |
+|---|---|
+| `search` | The simple syntax (`queryType: simple`, the default): `+`, `\|`, `-`, `"phrase"`, `prefix*`, `( )` and `\` escapes. `*` or no text matches every document |
+| `queryType: full` | The full Lucene syntax: `field:term`, `address/city:term`, `AND`/`OR`/`NOT`, fuzzy `term~1`, proximity `"a b"~3`, boosts `^2`, wildcards and `/regex/`. A field must be searchable |
+| `searchMode` | `any` (the default) or `all`. As on Azure, `wifi -luxury` in `any` mode matches what has `wifi` or lacks `luxury` |
+| `searchFields` | Searchable fields to search, `address/city` for a sub-field, also in complex collections |
+| `scoringProfile` | Its text `weights` boost the fields. The index's `defaultScoringProfile` applies when none is named. Functions are not served yet |
+| `highlight`, `highlightPreTag`, `highlightPostTag` | `@search.highlights` per field, `<em>` and `</em>` by default; custom tags are set together |
+| `$top`, `$skip`, `$count`, `$select` | 50 results by default and 1000 at most, `$skip` up to 100000. Past 1000, or under a `$top` larger than a page, the response carries `@search.nextPageParameters` (POST) or `@odata.nextLink` (GET), which the SDKs follow |
+| `minimumCoverage` | From 0 to 100; answered with `@search.coverage: 100` |
+| `sessionId`, `scoringStatistics` | Accepted |
+
+A hit carries `@search.score` and the document's retrievable fields, read from the emulator's own
+store, so values come back exactly as a lookup answers them.
+
+Text is analyzed as on Azure. `standard.lucene` (the default), `standardasciifolding.lucene`,
+`simple`, `stop`, `whitespace`, `keyword`, `pattern` and the `xx.lucene` language analyzers run their
+Lucene counterparts, and `analyzer` or `indexAnalyzer`/`searchAnalyzer` apply as the index says.
+Scores are Lucene's BM25 with the index's `k1` and `b`, or the classic similarity.
+
+Refused with `400`:
+
+- `$filter`, `$orderby`, `facets`, `vectorQueries`, `queryType: semantic`, `semanticConfiguration`,
+  and `answers`, `captions` or `debug` other than `none`: `FeatureNotSupportedInService`, until a
+  later release serves them
+- a field in `searchFields` or `highlight` that does not exist or is not searchable, a `$select`
+  field that is not retrievable, an unknown scoring profile, a value of the wrong type or out of range,
+  and a query the full syntax cannot parse
+
+A document is searchable as soon as its batch answers: there is no indexing delay.
+
+### The Solr sidecar
+
+Searches run in [Apache Solr](https://solr.apache.org/), Lucene's search server. floci-az keeps the
+documents; Solr holds an index derived from them, which floci-az builds and updates before each search.
+The container has no volume: a new one starts empty and is filled again from the store on the first
+search.
+
+- **Started on demand.** Nothing is pulled or started until a search service exists: its ARM create,
+  a data-plane write to an undeclared service, or a restart that finds stored services or indexes
+  starts the container in the background. A search sent while it starts waits up to `start-timeout-seconds`
+- **Removed when not needed.** Deleting the last search service while no undeclared service has an
+  index, or `POST /_admin/reset`, removes the container 30 seconds later, unless a new service wants it
+  meanwhile. The image stays in Docker's cache
+- **One container** serves every service and index, as `floci-az-search-default` (with the
+  [resource namespace](../configuration/advanced/application-yml.md) when one is set), on the
+  emulator's Docker network when `FLOCI_AZ_SERVICES_DOCKER_NETWORK` is set
+- **Unavailable engine.** Without Docker, with the engine disabled, or when the container fails to
+  start or stops answering, a search answers `503` `ServiceUnavailable` with a message that names the
+  cause. A failed start is tried again after 30 seconds; a container that stops answering is
+  started again by the next search
+
+---
+
 ## SKU limits
 
 | SKU | Replicas | Partitions |
@@ -363,18 +432,28 @@ floci-az:
   services:
     search:
       enabled: true
+      engine:
+        enabled: true                # false: never pull or start Solr; searches answer 503
+        image: solr:10.1.0-slim
+        heap: 256m
+        start-timeout-seconds: 120
 ```
 
 | Env var | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_SEARCH_ENABLED` | `true` | Enable/disable the service |
+| `FLOCI_AZ_SERVICES_SEARCH_ENGINE_ENABLED` | `true` | Run searches in the Solr sidecar. `false` never pulls or starts it, and searches answer `503` |
+| `FLOCI_AZ_SERVICES_SEARCH_ENGINE_IMAGE` | `solr:10.1.0-slim` | Solr image of the sidecar |
+| `FLOCI_AZ_SERVICES_SEARCH_ENGINE_HEAP` | `256m` | Solr's JVM heap (`SOLR_HEAP`) |
+| `FLOCI_AZ_SERVICES_SEARCH_ENGINE_START_TIMEOUT_SECONDS` | `120` | How long a search waits for the sidecar to start, the image pull included |
 | `FLOCI_AZ_STORAGE_SERVICES_SEARCH_MODE` | global `FLOCI_AZ_STORAGE_MODE` (`memory`) | Storage mode of the Search store |
 
 ### Persistence
 
 Services, their keys, indexes and documents share one `search` store, which follows the
 [storage mode](../configuration/storage.md) (`memory` by default). With `persistent`, `hybrid` or `wal`
-they survive a restart: lookups, `$count`, ETags and the statistics come back as they were. Resource
+they survive a restart: lookups, `$count`, ETags and the statistics come back as they were, and the
+Solr sidecar is started again and filled from the store. Resource
 groups are kept apart, in memory, unless `resource-group-semantics` or `strict-resource-groups` is on
 (see [ARM](arm.md#resource-groups)). Without either, a restarted emulator still serves the service and
 its data, but its resource group answers `404`.
@@ -383,10 +462,20 @@ its data, but its resource group answers `404`.
 
 ## Notes & limitations
 
-- **No queries yet.** Documents are stored, but there are no queries (`docs`, `search.post.search`),
-  suggestions, autocomplete, synonym maps, indexers, data sources or skillsets yet, and `search.analyze`
-  is not served. Index aliases, a stable operation from api-version `2026-04-01`, are not served
+- **Not served yet:** `$filter`, `$orderby`, facets and scoring functions in a search; suggestions,
+  autocomplete, synonym maps, indexers, data sources, skillsets, vector and semantic queries; and
+  `search.analyze`. Index aliases, a stable operation from api-version `2026-04-01`, are not served
   either.
+- **Searches need Docker.** They run in the Solr sidecar and answer `503` without it. The `503` and its
+  message are floci-az's: Azure has no equivalent.
+- **Scores are close to Azure's, not equal.** Both are Lucene BM25, but how Azure combines the
+  scores of several fields was not recorded. floci-az adds them up, so the numbers may differ, and so
+  may the order of near ties.
+- **Analyzers.** `xx.microsoft` analyzers run the Lucene analyzer of their language. Languages Lucene
+  has no analyzer for (`pl.lucene`, among others), and custom analyzers, run the standard analyzer.
+  Chinese runs Lucene's CJK bigram analyzer.
+- **Highlights** are up to five fragments per field from Lucene's unified highlighter. Azure's
+  fragment boundaries may differ.
 - **Document statistics are counted at once and sized roughly.** Azure counts new documents a little
   later; floci-az counts them as the batch answers. `storageSize` is the size of the documents' JSON
   alone. Azure's also counts its index structures, so it is far larger (two small documents took 6222

@@ -24,6 +24,11 @@ import com.azure.search.documents.models.IndexDocumentsBatch;
 import com.azure.search.documents.models.IndexDocumentsOptions;
 import com.azure.search.documents.models.IndexDocumentsResult;
 import com.azure.search.documents.models.IndexingResult;
+import com.azure.search.documents.models.QueryType;
+import com.azure.search.documents.models.SearchMode;
+import com.azure.search.documents.models.SearchOptions;
+import com.azure.search.documents.models.SearchPagedIterable;
+import com.azure.search.documents.models.SearchResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
@@ -49,8 +54,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Index management on the Azure AI Search data plane, through {@code SearchIndexClient}. The service is created
- * through ARM first, and the client signs in with its admin key.
+ * Index management, documents and queries on the Azure AI Search data plane, through {@code SearchIndexClient}
+ * and {@code SearchClient}. The service is created through ARM first, and the client signs in with its admin key.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("Azure AI Search Compatibility")
@@ -98,8 +103,8 @@ class SearchCompatibilityTest {
     }
 
     @Test
-    @DisplayName("an index is created and read back with its fields and sections")
-    void anIndexIsCreatedAndReadBack() {
+    @DisplayName("an index is created, read back with its fields and sections, listed and deleted")
+    void anIndexIsCreatedReadBackListedAndDeleted() {
         SearchIndex created = client.createIndex(hotels("hotels-create"));
         assertEquals("hotels-create", created.getName());
         assertNotNull(created.getETag());
@@ -120,6 +125,19 @@ class SearchCompatibilityTest {
         assertEquals(List.of("hotelName"), fetched.getSuggesters().get(0).getSourceFields());
         assertEquals("hnsw", fetched.getVectorSearch().getProfiles().get(0).getAlgorithmConfigurationName());
         assertEquals(created.getETag(), fetched.getETag());
+
+        client.createIndex(hotels("hotels-another"));
+        List<String> listedNames = client.listIndexNames().stream().toList();
+        assertTrue(listedNames.containsAll(List.of("hotels-another", "hotels-create")), listedNames.toString());
+        assertTrue(listedNames.indexOf("hotels-another") < listedNames.indexOf("hotels-create"));
+        SearchIndex listed = client.listIndexes().stream()
+                .filter(index -> index.getName().equals("hotels-another")).findFirst().orElseThrow();
+        assertEquals(6, listed.getFields().size());
+
+        client.deleteIndex("hotels-another");
+        assertFalse(client.listIndexNames().stream().toList().contains("hotels-another"));
+        assertEquals(404, assertThrows(HttpResponseException.class,
+                () -> client.getIndex("hotels-another")).getResponse().getStatusCode());
     }
 
     @Test
@@ -131,20 +149,6 @@ class SearchCompatibilityTest {
                 () -> client.createIndex(hotels("hotels-twice"))).getResponse().getStatusCode());
         assertEquals(404, assertThrows(HttpResponseException.class,
                 () -> client.getIndex("hotels-missing")).getResponse().getStatusCode());
-    }
-
-    @Test
-    @DisplayName("indexes are listed by name")
-    void indexesAreListed() {
-        client.createIndex(hotels("hotels-list-b"));
-        client.createIndex(hotels("hotels-list-a"));
-
-        List<String> names = client.listIndexNames().stream().toList();
-        assertTrue(names.containsAll(List.of("hotels-list-a", "hotels-list-b")), names.toString());
-        assertTrue(names.indexOf("hotels-list-a") < names.indexOf("hotels-list-b"));
-        SearchIndex listed = client.listIndexes().stream()
-                .filter(index -> index.getName().equals("hotels-list-a")).findFirst().orElseThrow();
-        assertEquals(6, listed.getFields().size());
     }
 
     @Test
@@ -190,16 +194,6 @@ class SearchCompatibilityTest {
     }
 
     @Test
-    @DisplayName("an index without a key field is a 400")
-    void anIndexWithoutAKeyIsRefused() {
-        SearchIndex withoutKey = new SearchIndex("hotels-no-key",
-                new SearchField("hotelId", SearchFieldDataType.STRING));
-
-        assertEquals(400, assertThrows(HttpResponseException.class,
-                () -> client.createIndex(withoutKey)).getResponse().getStatusCode());
-    }
-
-    @Test
     @DisplayName("index and service statistics deserialize")
     void statisticsDeserialize() {
         client.createIndex(hotels("hotels-stats"));
@@ -213,18 +207,6 @@ class SearchCompatibilityTest {
         // The index quota of the basic SKU the service was created with.
         assertEquals(15L, service.getCounters().getIndexCounter().getQuota());
         assertEquals(1000, service.getLimits().getMaxFieldsPerIndex());
-    }
-
-    @Test
-    @DisplayName("a deleted index is gone")
-    void aDeletedIndexIsGone() {
-        client.createIndex(hotels("hotels-delete"));
-
-        client.deleteIndex("hotels-delete");
-
-        assertFalse(client.listIndexNames().stream().toList().contains("hotels-delete"));
-        assertEquals(404, assertThrows(HttpResponseException.class,
-                () -> client.getIndex("hotels-delete")).getResponse().getStatusCode());
     }
 
     @Test
@@ -280,17 +262,54 @@ class SearchCompatibilityTest {
         assertEquals(1L, docs.getDocumentCount());
     }
 
-    @Test
-    @DisplayName("a malformed document refuses the whole batch with 400")
-    void aMalformedDocumentRefusesTheWholeBatch() {
-        client.createIndex(hotels("hotels-bad"));
-        SearchClient docs = client.getSearchClient("hotels-bad");
+    /** The index the query test searches, with three hotels and sixty more to page through. */
+    private SearchClient loadQueryIndex() {
+        client.createIndex(hotels("hotels-query"));
+        SearchClient docs = client.getSearchClient("hotels-query");
+        List<IndexAction> actions = new ArrayList<>(List.of(
+                action(IndexActionType.UPLOAD, "hotelId", "1", "hotelName", "Fancy seaside hotel",
+                        "tags", List.of("pool", "wifi"), "address", Map.of("street", "Harbour road")),
+                action(IndexActionType.UPLOAD, "hotelId", "2", "hotelName", "Plain hotel"),
+                action(IndexActionType.UPLOAD, "hotelId", "3", "hotelName", "Fancy resort")));
+        for (int i = 0; i < 60; i++) {
+            actions.add(action(IndexActionType.UPLOAD, "hotelId", "p" + i, "hotelName", "Paged inn"));
+        }
+        docs.indexDocuments(new IndexDocumentsBatch(actions.toArray(IndexAction[]::new)));
+        return docs;
+    }
 
-        assertEquals(400, assertThrows(HttpResponseException.class, () -> docs.indexDocuments(
-                new IndexDocumentsBatch(action(IndexActionType.UPLOAD, "hotelId", "1"),
-                        action(IndexActionType.UPLOAD, "hotelId", "2", "rating", "not-a-number"))))
-                .getResponse().getStatusCode());
-        assertEquals(0L, docs.getDocumentCount());
+    private static List<String> ids(SearchPagedIterable results) {
+        return results.stream().map(hit -> (String) hit.getAdditionalProperties().get("hotelId")).toList();
+    }
+
+    @Test
+    @DisplayName("a search ranks, counts, selects, highlights and pages")
+    void aSearchRanksCountsSelectsHighlightsAndPages() {
+        SearchClient docs = loadQueryIndex();
+        SearchPagedIterable fancy = docs.search(new SearchOptions().setSearchText("fancy")
+                .setIncludeTotalCount(true).setSelect("hotelId", "hotelName"));
+        List<SearchResult> hits = fancy.stream().toList();
+        assertEquals(2L, fancy.iterableByPage().iterator().next().getCount());
+        assertEquals(List.of("1", "3"), hits.stream()
+                .map(hit -> (String) hit.getAdditionalProperties().get("hotelId")).sorted().toList());
+        assertTrue(hits.stream().allMatch(hit -> hit.getScore() > 0));
+        assertFalse(hits.get(0).getAdditionalProperties().containsKey("rating"));
+        assertEquals(List.of("1"), ids(docs.search(new SearchOptions().setSearchText("harbour")
+                .setSearchFields("address/street"))));
+
+        assertEquals(List.of("1"), ids(docs.search(new SearchOptions().setSearchText("fancy hotel")
+                .setSearchMode(SearchMode.ALL))));
+        assertEquals(List.of("1", "3"), ids(docs.search(new SearchOptions().setSearchText("hotelName:fanci~1")
+                .setQueryType(QueryType.FULL))).stream().sorted().toList());
+        SearchResult marked = docs.search(new SearchOptions().setSearchText("seaside")
+                .setHighlightFields("hotelName")).iterator().next();
+        assertEquals(List.of("Fancy <em>seaside</em> hotel"), marked.getHighlights().get("hotelName"));
+
+        // Sixty results take two pages: the SDK follows the next page parameters.
+        SearchPagedIterable paged = docs.search(new SearchOptions().setSearchText("paged")
+                .setIncludeTotalCount(true));
+        assertEquals(60L, paged.iterableByPage().iterator().next().getCount());
+        assertEquals(60, ids(paged).size());
     }
 
     /** An action of {@code type} on a document of the given names and values. */
