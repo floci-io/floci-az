@@ -12,7 +12,9 @@ import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudSuffix;
+import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
@@ -45,14 +47,23 @@ public class SearchHandler implements AzureServiceHandler, Resettable, StoreInde
     private final SearchArmService arm;
     private final SearchDataPlane dataPlane;
     private final SearchIndexes indexes;
+    private final SearchSolrManager engine;
 
     @Inject
     public SearchHandler(EmulatorConfig config, SearchArmService arm, SearchDataPlane dataPlane,
-                         SearchIndexes indexes) {
+                         SearchIndexes indexes, SearchSolrManager engine) {
         this.config = config;
         this.arm = arm;
         this.dataPlane = dataPlane;
         this.indexes = indexes;
+        this.engine = engine;
+    }
+
+    /** A restart that finds search services or indexes in storage starts the Solr sidecar for their queries. */
+    void onStart(@Observes StartupEvent event) {
+        if (config.services().search().enabled() && (arm.hasServices() || indexes.any())) {
+            engine.prepare();
+        }
     }
 
     @Override

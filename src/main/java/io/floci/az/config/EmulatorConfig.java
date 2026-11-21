@@ -357,10 +357,34 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
-    /** Azure AI Search: Microsoft.Search/searchServices on ARM. */
+    /** Azure AI Search: Microsoft.Search/searchServices on ARM, and its data plane. */
     interface SearchServiceConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /** The Solr sidecar that runs the queries. */
+        SearchEngineConfig engine();
+    }
+
+    /**
+     * The Solr container behind Azure AI Search queries. It is pulled and started only once a search service exists,
+     * and removed when the last one is deleted.
+     */
+    interface SearchEngineConfig {
+        /** {@code false}: Solr is never pulled or started, and the query endpoints answer 503. */
+        @WithDefault("true")
+        boolean enabled();
+
+        @WithDefault("solr:10.1.0-slim")
+        String image();
+
+        /** Solr's JVM heap, as {@code SOLR_HEAP} takes it. */
+        @WithDefault("256m")
+        String heap();
+
+        /** How long a query waits for the container to be pulled and started before it answers 503. */
+        @WithDefault("120")
+        int startTimeoutSeconds();
     }
 
     interface ServicesConfig {
