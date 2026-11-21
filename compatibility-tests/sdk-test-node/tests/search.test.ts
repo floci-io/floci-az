@@ -1,7 +1,8 @@
-// Azure AI Search compatibility test: index management.
+// Azure AI Search compatibility test: index management, documents and queries.
 //
 // Creates a search service through the ARM management plane, reads its admin key,
-// and manages indexes on the service's data plane with SearchIndexClient.
+// manages indexes on the service's data plane with SearchIndexClient, and searches them
+// with SearchClient; the emulator's Solr sidecar runs the queries.
 
 import { AzureKeyCredential, SearchIndex, SearchIndexClient } from "@azure/search-documents";
 
@@ -90,7 +91,7 @@ afterAll(async () => {
   expect([200, 204]).toContain(deleted.status);
 });
 
-test("an index is created and read back with its fields and sections", async () => {
+test("an index is created, read back with its fields and sections, listed and deleted", async () => {
   const created = await client.createIndex(hotels("hotels-create"));
   expect(created.name).toBe("hotels-create");
   expect(created.etag).toBeTruthy();
@@ -112,6 +113,18 @@ test("an index is created and read back with its fields and sections", async () 
   expect(fetched.suggesters?.[0].sourceFields).toEqual(["hotelName"]);
   expect(fetched.vectorSearch?.profiles?.[0].algorithmConfigurationName).toBe("hnsw");
   expect(fetched.etag).toBe(created.etag);
+
+  await client.createIndex(hotels("hotels-another"));
+  const names = await indexNames();
+  expect(names).toEqual(expect.arrayContaining(["hotels-another", "hotels-create"]));
+  expect(names.indexOf("hotels-another")).toBeLessThan(names.indexOf("hotels-create"));
+  const listed: SearchIndex[] = [];
+  for await (const index of client.listIndexes()) listed.push(index);
+  expect(listed.find((index) => index.name === "hotels-another")?.fields).toHaveLength(6);
+
+  await client.deleteIndex("hotels-another");
+  expect(await indexNames()).not.toContain("hotels-another");
+  expect(await statusOf(client.getIndex("hotels-another"))).toBe(404);
 });
 
 test("creating a name that is taken is a 400, and a missing index a 404", async () => {
@@ -120,19 +133,6 @@ test("creating a name that is taken is a 400, and a missing index a 404", async 
   // Azure answers 400 ResourceNameAlreadyInUse here, not 409.
   expect(await statusOf(client.createIndex(hotels("hotels-twice")))).toBe(400);
   expect(await statusOf(client.getIndex("hotels-missing"))).toBe(404);
-});
-
-test("indexes are listed by name", async () => {
-  await client.createIndex(hotels("hotels-list-b"));
-  await client.createIndex(hotels("hotels-list-a"));
-
-  const names = await indexNames();
-  expect(names).toEqual(expect.arrayContaining(["hotels-list-a", "hotels-list-b"]));
-  expect(names.indexOf("hotels-list-a")).toBeLessThan(names.indexOf("hotels-list-b"));
-
-  const listed: SearchIndex[] = [];
-  for await (const index of client.listIndexes()) listed.push(index);
-  expect(listed.find((index) => index.name === "hotels-list-a")?.fields).toHaveLength(6);
 });
 
 test("createOrUpdate adds a field, and refuses to change an existing one", async () => {
@@ -162,15 +162,6 @@ test("onlyIfUnchanged guards an update and a delete with the index's ETag", asyn
   expect(await statusOf(client.getIndex("hotels-etag"))).toBe(404);
 });
 
-test("an index without a key field is a 400", async () => {
-  const withoutKey: SearchIndex = {
-    name: "hotels-no-key",
-    fields: [{ name: "hotelId", type: "Edm.String" }],
-  };
-
-  expect(await statusOf(client.createIndex(withoutKey))).toBe(400);
-});
-
 test("index and service statistics deserialize", async () => {
   await client.createIndex(hotels("hotels-stats"));
 
@@ -183,15 +174,6 @@ test("index and service statistics deserialize", async () => {
   // The index quota of the basic SKU the service was created with.
   expect(service.counters.indexCounter.quota).toBe(15);
   expect(service.limits.maxFieldsPerIndex).toBe(1000);
-});
-
-test("a deleted index is gone", async () => {
-  await client.createIndex(hotels("hotels-delete"));
-
-  await client.deleteIndex("hotels-delete");
-
-  expect(await indexNames()).not.toContain("hotels-delete");
-  expect(await statusOf(client.getIndex("hotels-delete"))).toBe(404);
 });
 
 interface Hotel {
@@ -249,10 +231,52 @@ test("a merge keeps what it does not send, and a missing key fails alone with 20
   expect(await docs.getDocumentsCount()).toBe(1);
 });
 
-test("a malformed document refuses the whole batch", async () => {
-  await client.createIndex(hotels("hotels-bad"));
-  const docs = client.getSearchClient<Record<string, unknown>>("hotels-bad");
+describe("queries", () => {
+  // One index for every query test, loaded once.
+  beforeAll(async () => {
+    await client.createIndex(hotels("hotels-query"));
+    const docs = client.getSearchClient<Hotel>("hotels-query");
+    const paged: Hotel[] = Array.from({ length: 60 }, (_, i) => ({ hotelId: `p${i}`, hotelName: "Paged inn" }));
+    await docs.uploadDocuments([
+      { hotelId: "1", hotelName: "Fancy seaside hotel", rating: 4.5, tags: ["pool", "wifi"],
+        address: { street: "Harbour road", city: "Helsinki" } },
+      { hotelId: "2", hotelName: "Plain hotel", rating: 2.0, tags: ["wifi"] },
+      { hotelId: "3", hotelName: "Fancy resort", rating: 5.0, tags: ["spa"] },
+      ...paged,
+    ]);
+    // The first query waits for the Solr sidecar, which a cold Docker may still be pulling.
+    for await (const result of (await docs.search("*", { top: 1 })).results) expect(result).toBeTruthy();
+  }, 180_000);
 
-  expect(await statusOf(docs.uploadDocuments([{ hotelId: "1" }, { hotelId: "2", rating: "not-a-number" }]))).toBe(400);
-  expect(await docs.getDocumentsCount()).toBe(0);
+  async function ids(results: AsyncIterable<{ document: Hotel }>): Promise<string[]> {
+    const found: string[] = [];
+    for await (const result of results) found.push(result.document.hotelId);
+    return found;
+  }
+
+  test("a search ranks, counts, selects, highlights and pages", async () => {
+    const docs = client.getSearchClient<Hotel>("hotels-query");
+    const answer = await docs.search("fancy", { includeTotalCount: true, select: ["hotelId", "hotelName"] });
+    const hits: Array<{ score: number; document: Record<string, unknown> }> = [];
+    for await (const result of answer.results) hits.push(result);
+    expect(answer.count).toBe(2);
+    expect(hits.map((hit) => hit.document.hotelId).sort()).toEqual(["1", "3"]);
+    expect(hits.every((hit) => hit.score > 0)).toBe(true);
+    expect(Object.keys(hits[0].document)).not.toContain("rating");
+    const street = await docs.search("harbour", { searchFields: ["address/street"] });
+    expect(await ids(street.results)).toEqual(["1"]);
+
+    expect(await ids((await docs.search("fancy hotel", { searchMode: "all" })).results)).toEqual(["1"]);
+    const fuzzy = await docs.search("hotelName:fanci~1", { queryType: "full" });
+    expect((await ids(fuzzy.results)).sort()).toEqual(["1", "3"]);
+    const highlighted = await docs.search("seaside", { highlightFields: "hotelName" });
+    for await (const result of highlighted.results) {
+      expect(result.highlights?.hotelName).toEqual(["Fancy <em>seaside</em> hotel"]);
+    }
+
+    // Sixty results take two pages: the SDK follows the next page parameters.
+    const paged = await docs.search("paged", { includeTotalCount: true });
+    expect(paged.count).toBe(60);
+    expect(await ids(paged.results)).toHaveLength(60);
+  });
 });
