@@ -150,8 +150,16 @@ public class SearchDataPlane {
             return SearchErrors.notFound("This Azure AI Search operation is not served yet: " + collection);
         }
         if (!"GET".equalsIgnoreCase(req.method()) && response.getStatus() / 100 == 2) {
-            // A write that succeeded means the service is in use, declared on ARM or not: its queries will need Solr.
-            engine.prepare();
+            if (!onDocuments && "DELETE".equalsIgnoreCase(req.method())) {
+                // The last index of an undeclared service may be gone, and with it the last use of Solr.
+                if (!arm.hasServices() && !indexes.any()) {
+                    engine.stop();
+                }
+            } else {
+                // A write that succeeded means the service is in use, declared on ARM or not: its queries will
+                // need Solr.
+                engine.prepare();
+            }
         }
         return response;
     }

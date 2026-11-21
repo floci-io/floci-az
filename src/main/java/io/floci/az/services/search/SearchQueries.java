@@ -177,7 +177,8 @@ public class SearchQueries {
         int wanted = plan.top() == null ? Integer.MAX_VALUE : plan.top();
         int available = (int) Math.max(0, hits.total() - plan.skip());
         int shown = hits.keys().size();
-        boolean more = Math.min(available, wanted) > shown;
+        // No next page past the skip limit: a request for it would be refused.
+        boolean more = Math.min(available, wanted) > shown && plan.skip() + shown <= MAX_SKIP;
 
         String indexUrl = serviceUrl + "/indexes('" + definition.get("name") + "')";
         Map<String, Object> body = new LinkedHashMap<>();
@@ -571,6 +572,12 @@ public class SearchQueries {
                 throw new Refused(SearchErrors.error(400, SearchErrors.NO_CODE, "Invalid expression: '" + path
                         + "' is not a searchable field. Only searchable string fields can be used in " + parameter
                         + ".\r\nParameter name: " + parameter));
+            }
+            if ("highlight".equals(parameter) && Boolean.FALSE.equals(fieldAt(fields, path).get("retrievable"))) {
+                // A fragment shows the field's text, which a non-retrievable field never answers (verify wording).
+                throw new Refused(SearchErrors.error(400, SearchErrors.NO_CODE, "Invalid expression: '" + path
+                        + "' is not a retrievable field. Only retrievable fields can be used in highlight."
+                        + "\r\nParameter name: highlight"));
             }
             if (!chosen.contains(text.get())) {
                 chosen.add(text.get());

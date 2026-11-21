@@ -14,7 +14,7 @@ import static org.mockito.Mockito.verify;
 /**
  * What asks for the Solr sidecar and what lets it go, with the sidecar mocked: the first search service starts it,
  * a write to a service's data plane asks for it too, and the delete of the last service removes it unless an
- * undeclared service still has an index.
+ * undeclared service still has an index, whose delete then removes it.
  */
 @QuarkusTest
 @DisplayName("Azure AI Search: what starts and stops the Solr sidecar")
@@ -65,7 +65,7 @@ class SearchEngineTriggersTest {
     }
 
     @Test
-    void aSuccessfulDataPlaneWriteAsksForTheSidecarAReadOrRefusedOneDoesNotAndItsIndexKeepsIt() {
+    void aSuccessfulDataPlaneWriteAsksForTheSidecarAReadOrRefusedOneDoesNotAndItsIndexKeepsItUntilDeleted() {
         given().when().get("/undeclared-search/indexes" + API).then().statusCode(200);
         given().contentType("application/json").body("{\"name\": \"idx\", \"fields\": []}")
             .when().post("/undeclared-search/indexes" + API).then().statusCode(400);
@@ -81,5 +81,9 @@ class SearchEngineTriggersTest {
             .then().statusCode(201);
         given().when().delete(service("trigger-c") + ARM_API).then().statusCode(200);
         verify(engine, never()).stop();
+
+        // Until that index goes too.
+        given().when().delete("/undeclared-search/indexes('idx')" + API).then().statusCode(204);
+        verify(engine).stop();
     }
 }

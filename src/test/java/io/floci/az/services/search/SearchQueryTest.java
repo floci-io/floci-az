@@ -69,7 +69,7 @@ class SearchQueryTest {
     }
 
     @Test
-    void searchFieldsAndHighlightNameSearchableFieldsOnly() {
+    void searchFieldsNameSearchableFieldsAndHighlightRetrievableOnesToo() {
         search("{\"search\": \"x\", \"searchFields\": \"nope\"}").then().statusCode(400)
             .body("error.message", containsString("Could not find a property named 'nope'"));
         search("{\"search\": \"x\", \"searchFields\": \"code\"}").then().statusCode(400)
@@ -77,6 +77,8 @@ class SearchQueryTest {
         search("{\"search\": \"x\", \"searchFields\": \"rating\"}").then().statusCode(400);
         search("{\"search\": \"x\", \"highlight\": \"code\"}").then().statusCode(400)
             .body("error.message", containsString("Parameter name: highlight"));
+        search("{\"search\": \"x\", \"highlight\": \"secret\"}").then().statusCode(400)
+            .body("error.message", containsString("'secret' is not a retrievable field"));
     }
 
     @Test
