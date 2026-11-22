@@ -123,6 +123,7 @@ floci-az:
   #   strict-names: true             # default: on from strict
   #   strict-tokens: true            # default: on from strict or entra.validate-tokens
   #   strict-search-keys: true       # default: on from strict
+  #   strict-diagnostic-settings: true # default: on from strict
   cloud:
     default: AzureCloud
   services:
@@ -147,6 +148,7 @@ floci-az:
 | `parity-overrides.strict-resource-groups` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | on from `strict` | `true`: a request for a resource under a group that does not exist is `404 ResourceGroupNotFound`, and groups are kept in the directory store |
 | `parity-overrides.strict-tokens` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_TOKENS` | on from `strict` or `entra.validate-tokens` | An ARM request with a missing or invalid Bearer token is `401`; see [Token verification](#token-verification) |
 | `parity-overrides.strict-search-keys` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_SEARCH_KEYS` | on from `strict` | The Azure AI Search data plane serves declared services only, and an `api-key` must be one of the service's admin keys; see [Azure AI Search](search.md#authentication) |
+| `parity-overrides.strict-diagnostic-settings` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_DIAGNOSTIC_SETTINGS` | on from `strict` | A diagnostic setting is refused as Azure refuses it: a category the scope does not offer, retention, or a data sink reused for the same category; see [Diagnostic settings](monitor.md#diagnostic-settings) |
 | `cloud.default` | `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | The cloud of the default tenant and of a tenant that names none: `AzureCloud`, `AzureUSGovernment` or `AzureChinaCloud`. An unknown name fails startup. Today it changes which cloud tenants and request scopes resolve to and the default location of a new group; endpoints, token issuers, DNS suffixes and TLS names stay the public cloud's, and a startup warning says so |
 | `cloud.<name>.default-location` | `FLOCI_AZ_CLOUD_<NAME>_DEFAULT_LOCATION` | the cloud's first catalog location | The location a resource or group of that cloud gets when its request names none; see [Resource locations](#resource-locations) |
 | `tenants[n].*` | `FLOCI_AZ_TENANTS_<n>__ID`, `..._DISPLAY_NAME`, `..._DEFAULT_DOMAIN`, `..._CLOUD` | none | Extra tenants; see below |
@@ -251,7 +253,7 @@ can also be set alone to opt in piecemeal:
 |---|---|
 | `compat` (default) | Nothing a client could rely on: unknown subscriptions are registered internally on first use but not listed, ids are echoed as sent, and resource groups answer as they always have (every PUT `201`, `DELETE` `200` without cascade) |
 | `azure` | Azure's answers for the requests Azure accepts. Every parity override on: `subscription-listing`, `resource-group-semantics`, `resource-group-delete`, `location-normalize`, `tenant-scoping` |
-| `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups`, `strict-providers`, `strict-locations`, `strict-names`, `strict-tokens`, `strict-search-keys` |
+| `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups`, `strict-providers`, `strict-locations`, `strict-names`, `strict-tokens`, `strict-search-keys`, `strict-diagnostic-settings` |
 
 `auth.mode` plays no part in any of this. The startup banner prints `parity: <level>` followed by every
 override set to a value its level would not give it. At the default level the line also names the
