@@ -153,12 +153,25 @@ class PortClaimReleaseTest {
 
     @Test
     @DisplayName("stopServer releases the claim even when the container teardown throws")
-    void stopServerReleasesClaimWhenTeardownFails() {
-        var endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", pgPort());
-        when(containerManager.createAndStart(any(ContainerSpec.class)))
-            .thenReturn(new ContainerLifecycleManager.ContainerInfo("pg-running", Map.of(5432, endpoint)));
+    void stopServerReleasesClaimWhenTeardownFails() throws IOException {
+        ContainerLifecycleManager.EndpointInfo endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", pgPort());
+        // The readiness probe connects to the claimed port, so something has to listen there while the
+        // server starts. It opens once the manager has claimed the port (the claim needs it free) and
+        // closes before the teardown, whose assertions reclaim the port.
+        ServerSocket[] engine = new ServerSocket[1];
+        when(containerManager.createAndStart(any(ContainerSpec.class))).thenAnswer(invocation -> {
+            engine[0] = new ServerSocket(pgPort());
+            return new ContainerLifecycleManager.ContainerInfo("pg-running", Map.of(5432, endpoint));
+        });
 
-        PostgresState.ServerEntry started = postgresManager.startServer(postgresEntry());
+        PostgresState.ServerEntry started;
+        try {
+            started = postgresManager.startServer(postgresEntry());
+        } finally {
+            if (engine[0] != null) {
+                engine[0].close();
+            }
+        }
         assertEquals(0, portAllocator.claimOrZero(pgPort()), "the running server should still hold its port");
 
         // A daemon hiccup on teardown. Every caller of stopServer swallows this, and the delete
