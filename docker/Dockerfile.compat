@@ -1,7 +1,7 @@
 ARG VERSION=latest
-# BASE_IMAGE is the image produced by Dockerfile.native-package. Release and nightly
-# tags use VERSION; reusable builds override BASE_IMAGE with the digest-qualified
-# native image they just published.
+# BASE_IMAGE is the image produced by Dockerfile.native-package. release.yml and
+# nightly.yml pass the digest-qualified native image they just pushed, so the compat
+# image is built from exactly that image; a local build falls back to the VERSION tag.
 #
 # That image is ubi9-micro and has no package manager, so this image cannot extend it.
 ARG BASE_IMAGE=floci/floci-az:${VERSION}
