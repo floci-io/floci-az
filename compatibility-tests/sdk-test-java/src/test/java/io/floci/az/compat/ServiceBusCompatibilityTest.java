@@ -1,5 +1,6 @@
 package io.floci.az.compat;
 
+import com.azure.core.exception.ResourceNotFoundException;
 import com.azure.messaging.servicebus.ServiceBusMessage;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 import com.azure.messaging.servicebus.ServiceBusReceiverClient;
@@ -566,6 +567,19 @@ class ServiceBusCompatibilityTest {
             assertTrue(lockSeconds > 40, "lock should follow the updated 50s duration, was " + lockSeconds + "s");
             receiver.complete(message);
         }
+    }
+
+    @Test
+    @DisplayName("administration client updateQueue on a deleted queue answers not found")
+    void administrationClientUpdateQueueOnADeletedQueueIsNotFound() {
+        String queue = uniqueName("update-gone");
+        ServiceBusAdministrationClient admin = EmulatorConfig.serviceBusAdministrationClient();
+        admin.createQueue(queue);
+        QueueProperties properties = admin.getQueue(queue).setMaxDeliveryCount(7);
+        admin.deleteQueue(queue);
+
+        assertThrows(ResourceNotFoundException.class, () -> admin.updateQueue(properties));
+        assertFalse(admin.getQueueExists(queue), "An update must not recreate a deleted queue");
     }
 
     @Test

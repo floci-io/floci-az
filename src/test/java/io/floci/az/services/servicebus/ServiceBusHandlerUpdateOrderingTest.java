@@ -188,19 +188,15 @@ class ServiceBusHandlerUpdateOrderingTest {
     }
 
     @Test
-    void updatingAMissingSubscriptionStillCreatesItWithTheRequestedSettings() throws Exception {
+    void updatingAMissingSubscriptionAnswersNotFoundWithoutCreatingIt() throws Exception {
         put("sb/account/demo/topics/orders", ServiceBusModels.TopicEntity.defaults("orders", NO_DUPLICATES, LIFETIME));
 
         Response response = update("topics/orders/subscriptions/audit",
                 "<RequiresSession>true</RequiresSession><LockDuration>PT50S</LockDuration>");
 
-        assertEquals(201, response.getStatus());
-        String key = "sb/account/demo/topics/orders/subscriptions/audit";
-        ServiceBusModels.SubscriptionEntity subscription = MAPPER.readValue(
-                stored.get(key).data(), ServiceBusModels.SubscriptionEntity.class);
-        assertTrue(subscription.requiresSession());
-        assertEquals(50, subscription.lockDurationSeconds());
-        assertTrue(stored.containsKey(key + "/rules/$Default"));
+        assertEquals(404, response.getStatus());
+        assertFalse(stored.containsKey("sb/account/demo/topics/orders/subscriptions/audit"));
+        assertFalse(stored.containsKey("sb/account/demo/topics/orders/subscriptions/audit/rules/$Default"));
     }
 
     private void runOverlappingUpdates(String firstPath, String firstBody, String secondPath, String secondBody,

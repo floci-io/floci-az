@@ -130,6 +130,33 @@ final class ServiceBusEntityXml {
     record DeliverySettings(Integer maxDeliveryCount, Long lockDurationSeconds) {}
 
     /**
+     * Parses the settings Azure fixes at creation (RequiresSession, RequiresDuplicateDetection).
+     * A null component means the element was absent from the payload, which an update may do
+     * without changing the stored value.
+     */
+    static FixedSettings parseFixedSettings(String xml) {
+        return new FixedSettings(
+                optionalBoolean(xml, "RequiresSession"),
+                optionalBoolean(xml, "RequiresDuplicateDetection"));
+    }
+
+    private static Boolean optionalBoolean(String xml, String element) {
+        String raw = XmlParser.extractFirst(xml, element, null);
+        return raw == null ? null : Boolean.valueOf(raw.trim());
+    }
+
+    record FixedSettings(Boolean requiresSession, Boolean requiresDuplicateDetection) {
+
+        boolean changesRequiresSession(boolean stored) {
+            return requiresSession != null && requiresSession != stored;
+        }
+
+        boolean changesRequiresDuplicateDetection(boolean stored) {
+            return requiresDuplicateDetection != null && requiresDuplicateDetection != stored;
+        }
+    }
+
+    /**
      * Parses the descriptive settings Azure stores and echoes back but the broker does not act on:
      * MaxSizeInMegabytes, AutoDeleteOnIdle, EnableBatchedOperations, UserMetadata and (topics only)
      * SupportOrdering. Absent elements take the Azure defaults.

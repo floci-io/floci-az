@@ -303,13 +303,14 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
         if (isTopic) {
             return isUpdate(req)
-                    ? handleUpdateTopic(account, ns, entityName, duplicateDetection, lifetime, metadata)
+                    ? handleUpdateTopic(account, ns, entityName, duplicateDetection, lifetime, metadata,
+                            ServiceBusEntityXml.parseFixedSettings(body))
                     : handleCreateTopic(account, ns, entityName, duplicateDetection, lifetime, metadata);
         }
         // Default to queue (empty body, QueueDescription, or ambiguous)
         if (isUpdate(req)) {
             return handleUpdateQueue(account, ns, entityName, requiresSession, duplicateDetection,
-                    lifetime, delivery, metadata);
+                    lifetime, delivery, metadata, ServiceBusEntityXml.parseFixedSettings(body));
         }
         return handleCreateQueue(
                 account, ns, entityName, requiresSession, duplicateDetection, lifetime, delivery, metadata);
@@ -520,7 +521,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                     ServiceBusEntityXml.EntityMetadata metadata = ServiceBusEntityXml.parseMetadata(body);
                     yield isUpdate(req)
                             ? handleUpdateQueue(account, namespace, queueName, requiresSession,
-                                    duplicateDetection, lifetime, delivery, metadata)
+                                    duplicateDetection, lifetime, delivery, metadata,
+                                    ServiceBusEntityXml.parseFixedSettings(body))
                             : handleCreateQueue(account, namespace, queueName, requiresSession,
                                     duplicateDetection, lifetime, delivery, metadata);
                 } catch (IllegalArgumentException e) {
@@ -583,23 +585,29 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     /**
-     * Applies a PUT with {@code If-Match} (the SDKs' update call) to an existing queue. A queue
-     * that does not exist yet is created instead.
+     * Applies a PUT with {@code If-Match} (the SDKs' update call) to an existing queue. As in Azure,
+     * a missing queue answers 404 and a change to RequiresSession or RequiresDuplicateDetection 400.
      */
     private synchronized Response handleUpdateQueue(String account, String namespace, String queueName,
                                        boolean requiresSession,
                                        ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
                                        ServiceBusEntityXml.MessageLifetimeSettings lifetime,
                                        ServiceBusEntityXml.DeliverySettings delivery,
-                                       ServiceBusEntityXml.EntityMetadata metadata) {
+                                       ServiceBusEntityXml.EntityMetadata metadata,
+                                       ServiceBusEntityXml.FixedSettings fixed) {
         String key = queueKey(account, namespace, queueName);
         Optional<StoredObject> stored = store.get(key);
         if (stored.isEmpty()) {
-            return handleCreateQueue(account, namespace, queueName, requiresSession,
-                    duplicateDetection, lifetime, delivery, metadata);
+            return notFoundAtom("Queue not found: " + queueName);
         }
         ServiceBusModels.QueueEntity existing =
                 fromBytes(stored.get().data(), ServiceBusModels.QueueEntity.class);
+        if (fixed.changesRequiresSession(existing.requiresSession())) {
+            return fixedSettingChanged("RequiresSession", "Queue");
+        }
+        if (fixed.changesRequiresDuplicateDetection(existing.requiresDuplicateDetection())) {
+            return fixedSettingChanged("RequiresDuplicateDetection", "Queue");
+        }
         ServiceBusModels.QueueEntity queue = newQueue(
                 queueName, requiresSession, duplicateDetection, lifetime, delivery, metadata)
                 .updating(existing);
@@ -671,7 +679,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                     ServiceBusEntityXml.EntityMetadata metadata = ServiceBusEntityXml.parseMetadata(body);
                     yield isUpdate(req)
                             ? handleUpdateTopic(account, namespace, topicName, duplicateDetection,
-                                    lifetime, metadata)
+                                    lifetime, metadata, ServiceBusEntityXml.parseFixedSettings(body))
                             : handleCreateTopic(account, namespace, topicName, duplicateDetection,
                                     lifetime, metadata);
                 } catch (IllegalArgumentException e) {
@@ -737,14 +745,18 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             String account, String namespace, String topicName,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime,
-            ServiceBusEntityXml.EntityMetadata metadata) {
+            ServiceBusEntityXml.EntityMetadata metadata,
+            ServiceBusEntityXml.FixedSettings fixed) {
         String key = topicKey(account, namespace, topicName);
         Optional<StoredObject> stored = store.get(key);
         if (stored.isEmpty()) {
-            return handleCreateTopic(account, namespace, topicName, duplicateDetection, lifetime, metadata);
+            return notFoundAtom("Topic not found: " + topicName);
         }
         ServiceBusModels.TopicEntity existing =
                 fromBytes(stored.get().data(), ServiceBusModels.TopicEntity.class);
+        if (fixed.changesRequiresDuplicateDetection(existing.requiresDuplicateDetection())) {
+            return fixedSettingChanged("RequiresDuplicateDetection", "Topic");
+        }
         ServiceBusModels.TopicEntity topic = ServiceBusModels.TopicEntity
                 .defaults(topicName, duplicateDetection, lifetime, metadata)
                 .updating(existing);
@@ -817,7 +829,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                     ServiceBusEntityXml.DeliverySettings delivery = ServiceBusEntityXml.parseDelivery(body);
                     if (isUpdate(req)) {
                         yield handleUpdateSubscription(account, namespace, topicName, subName,
-                                requiresSession, body, lifetime, delivery, ServiceBusEntityXml.parseMetadata(body));
+                                lifetime, delivery, ServiceBusEntityXml.parseMetadata(body),
+                                ServiceBusEntityXml.parseFixedSettings(body));
                     }
                     yield handleCreateSubscription(account, namespace, topicName, subName,
                             requiresSession, body, lifetime, delivery);
@@ -921,13 +934,16 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return atomEntry(201, subscriptionEntryXml(namespace, sub));
     }
 
-    /** Applies an update to an existing subscription; its rules are left as they are. */
+    /**
+     * Applies an update to an existing subscription; its rules are left as they are. A missing
+     * subscription answers 404 and a change to RequiresSession 400, as in Azure.
+     */
     private synchronized Response handleUpdateSubscription(String account, String namespace,
                                               String topicName, String subName,
-                                              boolean requiresSession, String body,
                                               ServiceBusEntityXml.MessageLifetimeSettings lifetime,
                                               ServiceBusEntityXml.DeliverySettings delivery,
-                                              ServiceBusEntityXml.EntityMetadata metadata) {
+                                              ServiceBusEntityXml.EntityMetadata metadata,
+                                              ServiceBusEntityXml.FixedSettings fixed) {
         Optional<StoredObject> storedTopic = store.get(topicKey(account, namespace, topicName));
         if (storedTopic.isEmpty()) {
             return notFoundAtom("Topic not found: " + topicName);
@@ -937,11 +953,13 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         String key = subKey(account, namespace, topicName, subName);
         Optional<StoredObject> stored = store.get(key);
         if (stored.isEmpty()) {
-            return handleCreateSubscription(account, namespace, topicName, subName,
-                    requiresSession, body, lifetime, delivery);
+            return notFoundAtom("Subscription not found: " + subName);
         }
         ServiceBusModels.SubscriptionEntity existing =
                 fromBytes(stored.get().data(), ServiceBusModels.SubscriptionEntity.class);
+        if (fixed.changesRequiresSession(existing.requiresSession())) {
+            return fixedSettingChanged("RequiresSession", "Subscription");
+        }
         ServiceBusModels.SubscriptionEntity sub = newSubscription(
                 topicName, subName, existing.requiresSession(), lifetime, delivery, metadata)
                 .updating(existing);
@@ -1723,6 +1741,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     private static Response badRequestAtom(String message) {
         return errorAtom(400, message);
+    }
+
+    private static Response fixedSettingChanged(String property, String entityKind) {
+        return badRequestAtom("The value for the " + property + " property of an existing "
+                + entityKind + " cannot be changed.");
     }
 
     private static Response notFoundAtom(String message) {
