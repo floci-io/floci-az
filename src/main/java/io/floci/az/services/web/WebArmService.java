@@ -130,17 +130,17 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         Optional<String> rg = ArmPaths.resourceGroup(path);
         return rg.isPresent()
             ? handleResourceGroupPath(req, path, method, sub, rg.get())
-            : handleSubscriptionPath(req, path, sub);
+            : handleSubscriptionPath(req, path, method, sub);
     }
 
     // ── Subscription level ──────────────────────────────────────────────────
 
-    private Response handleSubscriptionPath(AzureRequest req, String path, String sub) {
+    private Response handleSubscriptionPath(AzureRequest req, String path, String method, String sub) {
         if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.Web)/sites([?].*)?")) {
             return list(new ArmScope(sub, null));
         }
         if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.Web/serverFarms)([?].*)?")) {
-            return listServerFarms(new ArmScope(sub, null));
+            return listServerFarms(method, new ArmScope(sub, null));
         }
         // ARM paths are case-insensitive; azurerm sends checknameavailability in lower case.
         if (path.toLowerCase(Locale.ROOT)
@@ -181,7 +181,7 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
             return list(new ArmScope(sub, rg));
         }
         if (path.matches(".*/providers/(?i:Microsoft\\.Web/serverFarms)([?].*)?")) {
-            return listServerFarms(new ArmScope(sub, rg));
+            return listServerFarms(method, new ArmScope(sub, rg));
         }
         Matcher serverFarm = SERVER_FARM_PATH.matcher(path);
         if (serverFarm.matches()) {
@@ -379,7 +379,11 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
             + "/" + planName).orElseThrow();
     }
 
-    private Response listServerFarms(ArmScope scope) {
+    /** A collection path only lists: a write to it answers 405 rather than a list that looks like success. */
+    private Response listServerFarms(String method, ArmScope scope) {
+        if (!"GET".equals(method)) {
+            return Response.status(405).build();
+        }
         return Response.ok(Map.of("value", serverFarmDocuments(scope))).build();
     }
 

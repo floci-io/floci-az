@@ -89,6 +89,20 @@ class WebServerFarmTest {
     }
 
     @Test
+    void aWriteToAPlanCollectionAnswers405AndLeavesThePlans() {
+        putPlan(plan("sub-coll", "rg", "kept"), PLAN_BODY);
+        String rgCollection = "/subscriptions/sub-coll/resourceGroups/rg/providers/Microsoft.Web/serverFarms";
+        String subCollection = "/subscriptions/sub-coll/providers/Microsoft.Web/serverFarms";
+
+        given().when().delete(rgCollection + API).then().statusCode(405);
+        given().contentType("application/json").body(PLAN_BODY).when().put(rgCollection + API).then().statusCode(405);
+        given().when().delete(subCollection + API).then().statusCode(405);
+        given().contentType("application/json").body("{}").when().post(subCollection + API).then().statusCode(405);
+
+        given().when().get(plan("sub-coll", "rg", "kept") + API).then().statusCode(200);
+    }
+
+    @Test
     void aDeletedPlanAnswers404() {
         given().contentType("application/json").body(PLAN_BODY)
             .when().put(plan("sub-del", "rg", "gone") + API).then().statusCode(200);
