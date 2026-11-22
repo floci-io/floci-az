@@ -55,6 +55,13 @@ class ArmJsonTest {
     }
 
     @Test
+    void lenientRejectsTheJsonLiteralNull() {
+        ArmJson.InvalidBodyException e = assertThrows(ArmJson.InvalidBodyException.class,
+                () -> ArmJson.parseBodyLenient(request("null")));
+        assertEquals(ArmJson.NULL_BODY, e.getCause().getMessage());
+    }
+
+    @Test
     void castAndStringHelpers() {
         assertEquals(Map.of(), ArmJson.cast("not a map"));
         assertEquals(Map.of(), ArmJson.cast(null));

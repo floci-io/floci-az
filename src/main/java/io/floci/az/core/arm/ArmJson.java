@@ -26,19 +26,26 @@ public final class ArmJson {
 
     /**
      * Parses the body, degrading to an immutable empty map when the body is missing or
-     * malformed — the historical tolerant behavior of the ARM-plane handlers.
+     * malformed, the historical tolerant behavior of the ARM-plane handlers. The JSON literal
+     * {@code null} is the one exception: it parses to no map at all, so it throws
+     * {@link InvalidBodyException} as {@link #parseBodyStrict} does, rather than reach a caller as null.
      */
     @SuppressWarnings("unchecked")
     public static Map<String, Object> parseBodyLenient(AzureRequest req) {
         InputStream body = req.bodyStream();
+        Map<String, Object> parsed;
         try {
             if (body == null || body.available() == 0) {
                 return Map.of();
             }
-            return MAPPER.readValue(body, Map.class);
+            parsed = MAPPER.readValue(body, Map.class);
         } catch (IOException e) {
             return Map.of();
         }
+        if (parsed == null) {
+            throw new InvalidBodyException(new IOException(NULL_BODY));
+        }
+        return parsed;
     }
 
     /**
