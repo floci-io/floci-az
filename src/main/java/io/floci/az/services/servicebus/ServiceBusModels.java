@@ -65,6 +65,18 @@ public final class ServiceBusModels {
                     lifetime.deadLetterOnExpiration(), now, now, metadata.autoDeleteOnIdle(),
                     metadata.enableBatchedOperations(), metadata.userMetadata());
         }
+
+        /**
+         * This description as an update of {@code existing}: keeps its creation time and the
+         * settings Azure does not allow to change after creation.
+         */
+        QueueEntity updating(QueueEntity existing) {
+            return new QueueEntity(name, maxDeliveryCount, lockDurationSeconds, maxSizeInMegabytes,
+                    existing.requiresSession(), existing.requiresDuplicateDetection(),
+                    duplicateDetectionHistorySeconds, defaultMessageTtlMillis,
+                    deadLetteringOnMessageExpiration, existing.createdAt(), Instant.now(),
+                    autoDeleteOnIdle, enableBatchedOperations, userMetadata);
+        }
     }
 
     @RegisterForReflection
@@ -111,6 +123,14 @@ public final class ServiceBusModels {
                     duplicateDetection.historySeconds(), lifetime.ttlMillis(), now, now,
                     metadata.autoDeleteOnIdle(), metadata.enableBatchedOperations(),
                     metadata.userMetadata(), metadata.supportOrdering());
+        }
+
+        /** As {@link QueueEntity#updating}: keeps the creation time and immutable settings. */
+        TopicEntity updating(TopicEntity existing) {
+            return new TopicEntity(name, maxSizeInMegabytes, existing.requiresDuplicateDetection(),
+                    duplicateDetectionHistorySeconds, defaultMessageTtlMillis, existing.createdAt(),
+                    Instant.now(), autoDeleteOnIdle, enableBatchedOperations, userMetadata,
+                    supportOrdering);
         }
     }
 
@@ -195,6 +215,14 @@ public final class ServiceBusModels {
                     requiresSession, lifetime.ttlMillis(),
                     lifetime.deadLetterOnExpiration(), now, now, metadata.autoDeleteOnIdle(),
                     metadata.enableBatchedOperations(), metadata.userMetadata());
+        }
+
+        /** As {@link QueueEntity#updating}: keeps the creation time and immutable settings. */
+        SubscriptionEntity updating(SubscriptionEntity existing) {
+            return new SubscriptionEntity(topicName, name, maxDeliveryCount, lockDurationSeconds,
+                    existing.requiresSession(), defaultMessageTtlMillis,
+                    deadLetteringOnMessageExpiration, existing.createdAt(), Instant.now(),
+                    autoDeleteOnIdle, enableBatchedOperations, userMetadata);
         }
     }
 }

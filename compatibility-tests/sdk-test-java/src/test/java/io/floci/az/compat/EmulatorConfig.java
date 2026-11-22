@@ -12,6 +12,8 @@ import com.azure.data.appconfiguration.ConfigurationClient;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
 import com.azure.messaging.eventhubs.EventHubClientBuilder;
 import com.azure.messaging.servicebus.ServiceBusClientBuilder;
+import com.azure.messaging.servicebus.administration.ServiceBusAdministrationClient;
+import com.azure.messaging.servicebus.administration.ServiceBusAdministrationClientBuilder;
 import com.azure.security.keyvault.keys.KeyClient;
 import com.azure.security.keyvault.keys.KeyClientBuilder;
 import com.azure.security.keyvault.keys.cryptography.CryptographyClient;
@@ -725,6 +727,22 @@ public final class EmulatorConfig {
                 .transportType(AmqpTransportType.AMQP);
         setAnonymousPeer(builder);
         return builder;
+    }
+
+    /**
+     * Returns a ServiceBusAdministrationClient whose requests are redirected from
+     * {@code https://{SERVICEBUS_HOST}/{entity}} to the emulator's
+     * {@code /{account}-servicebus/{entity}} management path.
+     */
+    static ServiceBusAdministrationClient serviceBusAdministrationClient() {
+        String connStr = String.format(
+                "Endpoint=sb://%s;SharedAccessKeyName=RootManageSharedAccessKey;"
+                + "SharedAccessKey=devkey;",
+                SERVICEBUS_HOST);
+        return new ServiceBusAdministrationClientBuilder()
+                .connectionString(connStr)
+                .addPolicy(new KeyVaultDataPlanePolicy(ACCOUNT + "-servicebus"))
+                .buildClient();
     }
 
     // ── Emulator reachability ─────────────────────────────────────────────────
