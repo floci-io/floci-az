@@ -240,9 +240,12 @@ compatibility-tests/
   sdk-test-python/      : Azure SDK for Python (pytest): blob/queue/table, cosmos, vm, redis, acr,
                           managed identity, search (indexes), plus appconfig/ and keyvault/ sub-suites
   sdk-test-java/        : Azure SDK for Java (BOM; the primary compat target): blob/queue/table,
-                          cosmos + all engines, functions, keyvault, appconfig, eventhub,
-                          servicebus, eventgrid, apim, sql, postgres, vm, datalake,
-                          managed identity, search (indexes)
+                          cosmos + all engines, functions, keyvault, appconfig, eventhub
+                          (+ namespace management), servicebus (+ ARM), eventgrid, apim, sql,
+                          postgres, mysql, mariadb, vm, datalake (+ Hadoop ABFS), managed
+                          identity, search (indexes, documents), aks, container apps,
+                          container instances, container registry, entra, monitor, policy,
+                          email, private link
   sdk-test-node/        : Azure SDK for JS (jest): blob, queue, table, cosmos, appconfig,
                           keyvault, eventhub, servicebus, managed identity, search (indexes)
   sdk-test-dotnet/      : Azure SDK for .NET (TUnit): blob service SAS, cosmos (+ bracket properties,
