@@ -391,6 +391,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, StoreIndexSo
                         current.setSkuName(sku.path("name").asText("Basic"));
                         current.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
                         current.setRoleAssignmentMode(props.path("roleAssignmentMode").asText(null));
+                        current.setPublicNetworkAccess(props.path("publicNetworkAccess").asText(null));
                         current.setTags(parseStringMap(body.path("tags")));
                         current.setLoginServer(loginServer(registryName));
                         if (mocked) {
@@ -460,6 +461,9 @@ public class AcrHandler implements AzureServiceHandler, Resettable, StoreIndexSo
             }
             if (props.hasNonNull("roleAssignmentMode")) {
                 registry.setRoleAssignmentMode(props.path("roleAssignmentMode").asText());
+            }
+            if (props.hasNonNull("publicNetworkAccess")) {
+                registry.setPublicNetworkAccess(props.path("publicNetworkAccess").asText());
             }
             store.put(registry);
             return Response.ok(toArmResponse(registry)).type("application/json").build();
@@ -644,7 +648,9 @@ public class AcrHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         // Writable, with the spec default LegacyRegistryPermissions (2025-11-01); azurerm reads it back.
         props.put("roleAssignmentMode", registry.getRoleAssignmentMode() != null
                 ? registry.getRoleAssignmentMode() : "LegacyRegistryPermissions");
-        props.put("publicNetworkAccess", "Enabled");
+        // Writable (2025-11-01, the version azurerm pins); azurerm sends it on create and update and reads it back.
+        props.put("publicNetworkAccess", registry.getPublicNetworkAccess() != null
+                ? registry.getPublicNetworkAccess() : "Enabled");
         props.put("anonymousPullEnabled", false);
         // The azurerm provider dereferences these without nil checks (e.g. *props.ZoneRedundancy),
         // so they must always be present in the response or the provider plugin panics.

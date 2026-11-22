@@ -84,6 +84,34 @@ public class AcrHandlerTest {
     }
 
     @Test
+    void publicNetworkAccessReadsBackWhatWasSetAndDefaultsToEnabled() {
+        createRegistry("acrpnaopen");
+        given().when().get(registry("acrpnaopen") + API)
+                .then().statusCode(200)
+                .body("properties.publicNetworkAccess", is("Enabled"));
+
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"sku\":{\"name\":\"Premium\"},"
+                        + "\"properties\":{\"publicNetworkAccess\":\"Disabled\"}}")
+                .when().put(registry("acrpnaclosed") + API)
+                .then().statusCode(201)
+                .body("properties.publicNetworkAccess", is("Disabled"));
+        given().when().get(registry("acrpnaclosed") + API)
+                .then().statusCode(200)
+                .body("properties.publicNetworkAccess", is("Disabled"));
+
+        given().contentType("application/json").body("{\"tags\":{\"env\":\"dev\"}}")
+                .when().patch(registry("acrpnaclosed") + API)
+                .then().statusCode(200)
+                .body("properties.publicNetworkAccess", is("Disabled"));
+        given().contentType("application/json")
+                .body("{\"properties\":{\"publicNetworkAccess\":\"Enabled\"}}")
+                .when().patch(registry("acrpnaclosed") + API)
+                .then().statusCode(200)
+                .body("properties.publicNetworkAccess", is("Enabled"));
+    }
+
+    @Test
     void roleAssignmentModeReadsBackWhatWasSetAndDefaultsToLegacy() {
         createRegistry("acrlegacy");
         given().when().get(registry("acrlegacy") + API)
