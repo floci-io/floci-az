@@ -677,6 +677,23 @@ public class TableServiceTest {
             .then().statusCode(200).body("value", hasSize(0));
     }
 
+    @Test
+    void deletingATableThatDoesNotExistIsResourceNotFound() {
+        given()
+            .when().delete("/{account}/Tables('NeverMade')", ACCOUNT)
+            .then().statusCode(404)
+            .header("x-ms-error-code", "ResourceNotFound")
+            .body("'odata.error'.code", equalTo("ResourceNotFound"));
+
+        createTable("DeletedTwice");
+        given()
+            .when().delete("/{account}/Tables('DeletedTwice')", ACCOUNT)
+            .then().statusCode(204);
+        given()
+            .when().delete("/{account}/Tables('deletedtwice')", ACCOUNT)
+            .then().statusCode(404).header("x-ms-error-code", "ResourceNotFound");
+    }
+
     private static void createTable(String name) {
         given()
             .contentType("application/json")
