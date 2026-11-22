@@ -55,3 +55,17 @@ setup() {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/floci-test-sb4-rg/providers/Microsoft.ServiceBus/namespaces/floci-test-sb4prem/AuthorizationRules/floci-test-sb4-rule?api-version=2024-01-01"
     assert_success
 }
+
+@test "azurerm 4.x: the Linux consumption plan reads back as reserved with its sku" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/floci-test-web4-rg/providers/Microsoft.Web/serverFarms/floci-test-plan-y1?api-version=2023-12-01"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.reserved')" "true"
+    assert_equal "$(echo "$output" | jq -r '.sku.name')" "Y1"
+}
+
+@test "azurerm 4.x: the elastic premium plan keeps its maximum elastic worker count" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/floci-test-web4-rg/providers/Microsoft.Web/serverFarms/floci-test-plan-ep1?api-version=2023-12-01"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.sku.name')" "EP1"
+    assert_equal "$(echo "$output" | jq -r '.properties.maximumElasticWorkerCount')" "3"
+}

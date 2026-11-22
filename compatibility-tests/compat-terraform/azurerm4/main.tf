@@ -1,6 +1,9 @@
 # Service Bus under azurerm 4.x, which pins Microsoft.ServiceBus 2024-01-01 and makes several fields
 # Optional with defaults it sends and compares, where 3.x (the provider the rest of this suite runs)
 # has them Optional+Computed. Kept apart from ../main.tf so the main suite stays on 3.x.
+#
+# App Service plans (Microsoft.Web/serverFarms) also run here, so the plan-after-apply check covers
+# azurerm_service_plan under the provider version most new configurations use.
 
 terraform {
   required_providers {
@@ -86,4 +89,26 @@ resource "azurerm_servicebus_namespace_authorization_rule" "sb4_premium" {
   namespace_id = azurerm_servicebus_namespace.sb4_premium.id
   listen       = true
   send         = true
+}
+
+resource "azurerm_resource_group" "web4" {
+  name     = "floci-test-web4-rg"
+  location = "eastus"
+}
+
+resource "azurerm_service_plan" "consumption" {
+  name                = "floci-test-plan-y1"
+  resource_group_name = azurerm_resource_group.web4.name
+  location            = azurerm_resource_group.web4.location
+  os_type             = "Linux"
+  sku_name            = "Y1"
+}
+
+resource "azurerm_service_plan" "elastic" {
+  name                         = "floci-test-plan-ep1"
+  resource_group_name          = azurerm_resource_group.web4.name
+  location                     = azurerm_resource_group.web4.location
+  os_type                      = "Linux"
+  sku_name                     = "EP1"
+  maximum_elastic_worker_count = 3
 }

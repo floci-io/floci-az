@@ -39,6 +39,8 @@ Managed Identity, and the other `Microsoft.*` providers).
   under the global storage mode
 - **Sites**: an ARM shell for `Microsoft.Web/sites` and its `config/web` that provisions a
   [Functions](functions.md) app from `linuxFxVersion`, kept in the `arm-web` store under the global storage mode
+- **App Service plans**: `Microsoft.Web/serverFarms` documents with no runtime behind them, kept in the same
+  `arm-web` store, so `azurerm_service_plan` applies and the sites that reference it can follow
 - **Resource listing**: `GET /subscriptions/{sub}/resources` and
   `POST .../{namespace}/checkNameAvailability`
 - **Resource providers**: every namespace floci-az serves, with its resource types and Azure's

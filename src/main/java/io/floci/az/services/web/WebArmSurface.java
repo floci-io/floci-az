@@ -48,7 +48,9 @@ public class WebArmSurface implements ArmSurfaceProvider {
             ArmResourceType.resourceGroup(NAMESPACE, "sites", LocationPolicy.REQUIRED)
                 .withName(SITE_NAME)
                 .withGlobalName(SITE_DNS_NAME),
-            ArmResourceType.child(NAMESPACE, "sites/config"))));
+            ArmResourceType.child(NAMESPACE, "sites/config"),
+            // An App Service plan's name is unique within its resource group only, so it claims no global name.
+            ArmResourceType.resourceGroup(NAMESPACE, "serverFarms", LocationPolicy.REQUIRED))));
 
     @Override
     public List<ArmSurface> armSurfaces() {

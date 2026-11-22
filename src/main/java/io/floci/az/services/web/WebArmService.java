@@ -25,6 +25,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -36,7 +37,8 @@ import java.util.regex.Pattern;
 
 /**
  * Microsoft.Web's management plane: sites and their {@code config/web}, ARM shells that provision a Function App in
- * {@link FunctionsServiceHandler} when the site carries a {@code linuxFxVersion}. Reached through {@code ArmHandler}'s
+ * {@link FunctionsServiceHandler} when the site carries a {@code linuxFxVersion}, and App Service plans
+ * ({@code serverFarms}), stored ARM documents with no runtime behind them. Reached through {@code ArmHandler}'s
  * provider lane, inside the ARM request gate, which owns each site name ({@link WebArmSurface}) before a PUT gets here.
  *
  * <p>Sites are one {@link ArmResourceStore} of the ARM documents responses return, over the {@value #STORE} backend,
@@ -55,6 +57,7 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     private static final String NAMESPACE = "Microsoft.Web";
     static final String SITE_TYPE = NAMESPACE + "/sites";
     private static final String CONFIG_TYPE = NAMESPACE + "/sites/config";
+    static final String SERVER_FARM_TYPE = NAMESPACE + "/serverFarms";
 
     /** The Functions data-plane account a site's Function App is provisioned under. */
     private static final String DEFAULT_FUNCTIONS_ACCOUNT = "devstoreaccount1";
@@ -69,7 +72,15 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     private static final Pattern SITE_PATH = Pattern.compile(
         ".*/providers/Microsoft\\.Web/sites/([^/?]+)(/config/web)?/?([?].*)?", Pattern.CASE_INSENSITIVE);
 
+    /**
+     * An App Service plan's own path, namespace and type in any case: group 1 the plan name. Any path under a plan
+     * ({@code .../serverFarms/{name}/virtualNetworkConnections} and the like) does not match, so it answers ARM 404.
+     */
+    private static final Pattern SERVER_FARM_PATH = Pattern.compile(
+        ".*/providers/Microsoft\\.Web/serverFarms/([^/?]+)/?([?].*)?", Pattern.CASE_INSENSITIVE);
+
     private final ArmResourceStore<Map<String, Object>> sites;
+    private final ArmResourceStore<Map<String, Object>> serverFarms;
     /**
      * Held across a site write and its Function App sync, so concurrent PUTs to one site cannot leave the site's
      * {@code linuxFxVersion} and its Function App's runtime from different requests. The store locks each call on its
@@ -89,6 +100,8 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         this.defaults = defaults;
         this.sites = ArmResourceStore.create(storageFactory, STORE, SITE_TYPE, documentType(), WebArmService::idOf,
             key -> false);
+        this.serverFarms = ArmResourceStore.create(storageFactory, STORE, SERVER_FARM_TYPE, documentType(),
+            WebArmService::idOf, key -> false);
         this.names = names;
         this.functionsHandler = functionsHandler;
     }
@@ -125,6 +138,9 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     private Response handleSubscriptionPath(AzureRequest req, String path, String sub) {
         if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.Web)/sites([?].*)?")) {
             return list(new ArmScope(sub, null));
+        }
+        if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.Web/serverFarms)([?].*)?")) {
+            return listServerFarms(new ArmScope(sub, null));
         }
         // ARM paths are case-insensitive; azurerm sends checknameavailability in lower case.
         if (path.toLowerCase(Locale.ROOT)
@@ -163,6 +179,13 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     private Response handleResourceGroupPath(AzureRequest req, String path, String method, String sub, String rg) {
         if (path.matches(".*/providers/(?i:Microsoft\\.Web)/sites([?].*)?")) {
             return list(new ArmScope(sub, rg));
+        }
+        if (path.matches(".*/providers/(?i:Microsoft\\.Web/serverFarms)([?].*)?")) {
+            return listServerFarms(new ArmScope(sub, rg));
+        }
+        Matcher serverFarm = SERVER_FARM_PATH.matcher(path);
+        if (serverFarm.matches()) {
+            return handleServerFarm(req, method, serverFarmId(sub, rg, serverFarm.group(1)));
         }
         Matcher site = SITE_PATH.matcher(path);
         if (!site.matches()) {
@@ -334,12 +357,126 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         return document.get("tags") instanceof Map<?, ?> tags ? ArmJson.cast(tags) : null;
     }
 
+    // ── App Service plans (serverFarms) ─────────────────────────────────────
+
+    private Response handleServerFarm(AzureRequest req, String method, ArmResourceId id) {
+        return switch (method) {
+            case "PUT"    -> createOrUpdateServerFarm(req, id);
+            case "PATCH"  -> patchServerFarm(req, id);
+            case "GET"    -> serverFarms.get(id)
+                .map(stored -> Response.ok(stored.value()).build())
+                .orElseGet(() -> armNotFound("serverFarms/" + id.name()));
+            case "DELETE" -> {
+                serverFarms.delete(id);
+                yield Response.ok().build();
+            }
+            default       -> Response.status(405).build();
+        };
+    }
+
+    private static ArmResourceId serverFarmId(String sub, String rg, String planName) {
+        return ArmResourceId.parse("/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/" + SERVER_FARM_TYPE
+            + "/" + planName).orElseThrow();
+    }
+
+    private Response listServerFarms(ArmScope scope) {
+        return Response.ok(Map.of("value", serverFarmDocuments(scope))).build();
+    }
+
+    private List<Map<String, Object>> serverFarmDocuments(ArmScope scope) {
+        return serverFarms.list(scope).stream().map(Stored::value).toList();
+    }
+
+    /**
+     * A PUT replaces the plan whole, as in Azure; a re-PUT keeps the id and name the plan was created with. The
+     * request's {@code sku} and {@code properties} are echoed, so a client reads back the tier, worker count and
+     * {@code reserved} (Linux) flag it sent.
+     */
+    private Response createOrUpdateServerFarm(AzureRequest req, ArmResourceId id) {
+        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        String location = ArmJson.string(body, "location", defaults.defaultLocation(req.scope()));
+        Map<String, Object> written = serverFarms.createOrUpdate(id, existing -> serverFarmDocument(
+            existing.map(WebArmService::idOf).orElse(id.id()),
+            existing.map(WebArmService::nameOf).orElse(id.name()), location, body)).stored().value();
+        LOG.infov("ARM: created App Service plan {0}", written.get("name"));
+        return Response.ok(written).build();
+    }
+
+    /**
+     * A PATCH changes only what it sends, as Azure's {@code App Service Plans - Update} does: {@code sku},
+     * {@code kind} and {@code tags} are replaced when present, {@code properties} are merged key by key. A PATCH of a
+     * plan that does not exist answers ARM 404 rather than creating it.
+     */
+    private Response patchServerFarm(AzureRequest req, ArmResourceId id) {
+        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        return serverFarms.update(id, existing -> patchedServerFarm(existing, body))
+            .map(stored -> Response.ok(stored.value()).build())
+            .orElseGet(() -> armNotFound("serverFarms/" + id.name()));
+    }
+
+    private static Map<String, Object> patchedServerFarm(Map<String, Object> existing, Map<String, Object> body) {
+        Map<String, Object> resource = new LinkedHashMap<>(existing);
+        for (String key : List.of("sku", "tags")) {
+            if (body.get(key) instanceof Map<?, ?> value) {
+                resource.put(key, ArmJson.cast(value));
+            }
+        }
+        if (body.get("kind") instanceof String kind) {
+            resource.put("kind", kind);
+        }
+        Map<String, Object> properties = new LinkedHashMap<>();
+        if (existing.get("properties") instanceof Map<?, ?> current) {
+            properties.putAll(ArmJson.cast(current));
+        }
+        if (body.get("properties") instanceof Map<?, ?> requested) {
+            properties.putAll(ArmJson.cast(requested));
+        }
+        properties.put("provisioningState", "Succeeded");
+        properties.put("status", "Ready");
+        resource.put("properties", properties);
+        return resource;
+    }
+
+    private static Map<String, Object> serverFarmDocument(String id, String planName, String location,
+                                                          Map<String, Object> body) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        if (body.get("properties") instanceof Map<?, ?> requested) {
+            properties.putAll(ArmJson.cast(requested));
+        }
+        properties.put("provisioningState", "Succeeded");
+        properties.put("status", "Ready");
+        properties.putIfAbsent("reserved", false);
+        properties.putIfAbsent("perSiteScaling", false);
+        properties.putIfAbsent("zoneRedundant", false);
+        properties.putIfAbsent("maximumElasticWorkerCount", 1);
+        // Not tracked: a plan does not count the sites whose serverFarmId points at it.
+        properties.putIfAbsent("numberOfSites", 0);
+
+        Map<String, Object> resource = new LinkedHashMap<>();
+        resource.put("id", id);
+        resource.put("name", planName);
+        resource.put("type", SERVER_FARM_TYPE);
+        resource.put("location", location);
+        resource.put("kind", ArmJson.string(body, "kind",
+            Boolean.TRUE.equals(properties.get("reserved")) ? "linux" : "app"));
+        if (body.get("sku") instanceof Map<?, ?> sku) {
+            resource.put("sku", ArmJson.cast(sku));
+        }
+        if (body.get("tags") instanceof Map<?, ?> tags) {
+            resource.put("tags", ArmJson.cast(tags));
+        }
+        resource.put("properties", properties);
+        return resource;
+    }
+
     // ── StoreIndexSource ────────────────────────────────────────────
 
     /** The full documents, as ArmHandler listed its own sites before. */
     @Override
     public List<Map<String, Object>> indexEntries(ArmScope scope) {
-        return documents(scope);
+        List<Map<String, Object>> entries = new ArrayList<>(documents(scope));
+        entries.addAll(serverFarmDocuments(scope));
+        return entries;
     }
 
     // ── GlobalNameSource ────────────────────────────────────────────────────
@@ -360,6 +497,7 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     @Override
     public void clear() {
         sites.clear();
+        serverFarms.clear();
     }
 
     /** The cloud the request's subscription belongs to, as the routing filter resolved it; public without a scope. */
