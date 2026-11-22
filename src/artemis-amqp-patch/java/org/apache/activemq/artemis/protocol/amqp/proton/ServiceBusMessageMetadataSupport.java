@@ -46,10 +46,10 @@ public final class ServiceBusMessageMetadataSupport {
          return original;
       }
       Map<Symbol, Object> annotations = original == null ? new HashMap<>() : new HashMap<>(original.getValue());
-      // Match what a peek reports (ServiceBusManagementPlugin): entity-local identity and original
-      // broker ingress time.
+      // Match what a peek reports (ServiceBusManagementPlugin): entity-local identity and the time the
+      // message became active (broker ingress, or its scheduled enqueue time when that is later).
       annotations.put(SEQUENCE_NUMBER, reference.getMessageID());
-      annotations.put(ENQUEUED_TIME, new Date(enqueuedTime(message)));
+      annotations.put(ENQUEUED_TIME, new Date(activationTime(message, enqueuedTime(message))));
       return ServiceBusMessageLockSupport.annotationsForDelivery(new MessageAnnotations(annotations), reference);
    }
 
@@ -61,6 +61,15 @@ public final class ServiceBusMessageMetadataSupport {
       Header header = original == null ? new Header() : new Header(original);
       header.setDeliveryCount(UnsignedInteger.valueOf(Math.max(0, reference.getDeliveryCount() - 1)));
       return header;
+   }
+
+   /**
+    * Azure reports a scheduled message as enqueued when it becomes active, not when it was sent. The
+    * broker holds it until its scheduled delivery time, so the later of the two is the activation time.
+    */
+   static long activationTime(AMQPMessage message, long enqueuedTime) {
+      Long scheduledTime = message.getScheduledDeliveryTime();
+      return scheduledTime == null ? enqueuedTime : Math.max(enqueuedTime, scheduledTime);
    }
 
    private static long enqueuedTime(AMQPMessage message) {

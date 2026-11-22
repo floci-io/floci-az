@@ -518,7 +518,8 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
          : new HashMap<>(sourceAnnotations.getValue());
       annotations.put(SEQUENCE_NUMBER, reference.getMessageID());
       Long ingress = source.getIngressTimestamp();
-      annotations.put(ENQUEUED_TIME, new Date(ingress != null ? ingress : source.getTimestamp()));
+      annotations.put(ENQUEUED_TIME, new Date(ServiceBusMessageMetadataSupport.activationTime(
+         source, ingress != null ? ingress : source.getTimestamp())));
       if (until > 0) {
          annotations.put(LOCKED_UNTIL, new Date(until));
       }

@@ -687,11 +687,12 @@ class ServiceBusCompatibilityTest {
     void scheduledMessageDeliveredAfterDelay() throws Exception {
         String queue = uniqueQueue();
         String payload = "sched-delivery-" + UUID.randomUUID();
+        OffsetDateTime requested = OffsetDateTime.now().plusSeconds(4);
 
         try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
                 .sender().queueName(queue).buildClient()) {
             ServiceBusMessage msg = new ServiceBusMessage(payload);
-            msg.setScheduledEnqueueTime(OffsetDateTime.now().plusSeconds(4));
+            msg.setScheduledEnqueueTime(requested);
             sender.sendMessage(msg);
         }
 
@@ -703,6 +704,9 @@ class ServiceBusCompatibilityTest {
                     .stream().findFirst().orElse(null);
             assertNotNull(msg, "Scheduled message should be available after its scheduled time");
             assertEquals(payload, msg.getBody().toString());
+            // Azure reports the time the message became active, not the send time; the wire carries ms.
+            assertFalse(msg.getEnqueuedTime().isBefore(requested.minus(Duration.ofMillis(1))),
+                    "EnqueuedTime " + msg.getEnqueuedTime() + " is before the scheduled time " + requested);
             receiver.complete(msg);
         }
     }

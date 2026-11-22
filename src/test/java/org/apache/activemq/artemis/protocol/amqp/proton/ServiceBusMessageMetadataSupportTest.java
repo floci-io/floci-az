@@ -155,6 +155,27 @@ class ServiceBusMessageMetadataSupportTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"peeklock", "session"})
+    void aScheduledMessageReportsItsActivationTimeAsTheEnqueuedTime(String kind) throws Exception {
+        try (Fixture fixture = new Fixture(kind)) {
+            when(fixture.message.getScheduledDeliveryTime()).thenReturn(ENQUEUED_TIME + 5_000);
+            assertEquals(new Date(ENQUEUED_TIME + 5_000), fixture.annotations(null).getValue().get(ENQUEUED));
+        }
+    }
+
+    @Test
+    void aScheduleAlreadyDueAtIngressKeepsTheIngressTime() throws Exception {
+        try (Fixture fixture = new Fixture("peeklock")) {
+            when(fixture.message.getScheduledDeliveryTime()).thenReturn(ENQUEUED_TIME - 5_000);
+            assertEquals(new Date(ENQUEUED_TIME), fixture.annotations(null).getValue().get(ENQUEUED));
+            when(fixture.message.getScheduledDeliveryTime()).thenReturn(0L);
+            assertEquals(new Date(ENQUEUED_TIME), fixture.annotations(null).getValue().get(ENQUEUED));
+            when(fixture.message.getScheduledDeliveryTime()).thenReturn(null);
+            assertEquals(new Date(ENQUEUED_TIME), fixture.annotations(null).getValue().get(ENQUEUED));
+        }
+    }
+
     @Test
     void nonServiceBusDeliveriesRemainUnchanged() throws Exception {
         try (Fixture fixture = new Fixture("session")) {
