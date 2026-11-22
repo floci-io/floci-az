@@ -395,7 +395,12 @@ public class ManagementGroupHandler implements AzureServiceHandler {
     }
 
     private Response checkNameAvailability(String tenant, AzureRequest req) {
-        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        Map<String, Object> body;
+        try {
+            body = ArmJson.parseBodyLenient(req);
+        } catch (ArmJson.InvalidBodyException e) {
+            return ArmErrors.error(400, "InvalidRequestContent", "The request content was invalid and could not be deserialized.");
+        }
         String name = ArmJson.string(body, "name", "");
         Map<String, Object> result = new LinkedHashMap<>();
         if (!NAME.matcher(name).matches() || RESERVED_NAMES.contains(name.toLowerCase(Locale.ROOT))) {

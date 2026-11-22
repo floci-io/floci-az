@@ -361,7 +361,12 @@ public class EmailHandler implements AzureServiceHandler, Resettable, StoreIndex
      * available.
      */
     private Response checkNameAvailability(AzureRequest req) {
-        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        Map<String, Object> body;
+        try {
+            body = ArmJson.parseBodyLenient(req);
+        } catch (ArmJson.InvalidBodyException e) {
+            return ArmErrors.error(400, "InvalidRequestContent", "The request content was invalid and could not be deserialized.");
+        }
         String name = ArmJson.string(body, "name", "");
         String type = ArmJson.string(body, "type", COMMUNICATION_SERVICES);
         boolean global = type.equalsIgnoreCase(COMMUNICATION_SERVICES) || type.equalsIgnoreCase("communicationServices");
