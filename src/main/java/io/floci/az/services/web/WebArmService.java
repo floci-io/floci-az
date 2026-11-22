@@ -216,8 +216,9 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         Map<String, Object> siteConfig = ArmJson.cast(properties.get("siteConfig"));
         String linuxFxVersion = ArmJson.string(siteConfig, "linuxFxVersion", null);
         String location = ArmJson.string(body, "location", defaults.defaultLocation(req.scope()));
+        Map<String, Object> tags = body.get("tags") instanceof Map<?, ?> map ? ArmJson.cast(map) : null;
         synchronized (siteWrites) {
-            return writeSite(req, id, location, linuxFxVersion);
+            return writeSite(req, id, location, linuxFxVersion, tags);
         }
     }
 
@@ -227,7 +228,8 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
      * hold it now: that PUT is then the one that owns the name and this one answers the gate's conflict, writing
      * nothing. A reservation made here is freed again when the sync refuses the {@code linuxFxVersion}.
      */
-    private Response writeSite(AzureRequest req, ArmResourceId id, String location, String linuxFxVersion) {
+    private Response writeSite(AzureRequest req, ArmResourceId id, String location, String linuxFxVersion,
+                               Map<String, Object> tags) {
         String siteName = sites.get(id).map(stored -> nameOf(stored.value())).orElse(id.name());
         GlobalNameRegistry.Reservation reservation = names.reserve(cloud(req), CloudSuffix.WEB, siteName, id);
         if (reservation.outcome() == GlobalNameRegistry.Outcome.TAKEN) {
@@ -241,7 +243,7 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         }
         Map<String, Object> written = sites.createOrUpdate(id, existing -> siteDocument(
             existing.map(WebArmService::idOf).orElse(id.id()),
-            existing.map(WebArmService::nameOf).orElse(id.name()), location, linuxFxVersion)).stored().value();
+            existing.map(WebArmService::nameOf).orElse(id.name()), location, linuxFxVersion, tags)).stored().value();
         LOG.infov("ARM: created site {0}", written.get("name"));
         return Response.ok(written).build();
     }
@@ -275,7 +277,7 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
             return invalidLinuxFxVersion(e);
         }
         Optional<Stored<Map<String, Object>>> updated = sites.update(id, existing -> siteDocument(idOf(existing),
-            nameOf(existing), String.valueOf(existing.get("location")), linuxFxVersion));
+            nameOf(existing), String.valueOf(existing.get("location")), linuxFxVersion, tagsOf(existing)));
         return updated
             .map(stored -> configResponse(path, stored.value()))
             .orElseGet(() -> armNotFound("sites/" + id.name()));
@@ -300,8 +302,9 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         functionsHandler.upsertApp(DEFAULT_FUNCTIONS_ACCOUNT, siteName, runtime, linuxFxVersion, null);
     }
 
+    /** A PUT replaces the site's tags whole; a site PUT without {@code tags} has none, as in Azure. */
     private static Map<String, Object> siteDocument(String id, String siteName, String location,
-                                                    String linuxFxVersion) {
+                                                    String linuxFxVersion, Map<String, Object> tags) {
         Map<String, Object> siteConfig = new LinkedHashMap<>();
         if (linuxFxVersion != null) {
             siteConfig.put("linuxFxVersion", linuxFxVersion);
@@ -316,12 +319,19 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         resource.put("type", SITE_TYPE);
         resource.put("location", location);
         resource.put("kind", "functionapp,linux");
+        if (tags != null) {
+            resource.put("tags", tags);
+        }
         resource.put("properties", properties);
         return resource;
     }
 
     private static String nameOf(Map<String, Object> document) {
         return String.valueOf(document.get("name"));
+    }
+
+    private static Map<String, Object> tagsOf(Map<String, Object> document) {
+        return document.get("tags") instanceof Map<?, ?> tags ? ArmJson.cast(tags) : null;
     }
 
     // ── StoreIndexSource ────────────────────────────────────────────

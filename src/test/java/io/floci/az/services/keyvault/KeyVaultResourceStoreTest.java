@@ -18,6 +18,8 @@ import java.util.Locale;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -393,5 +395,21 @@ class KeyVaultResourceStoreTest {
             .when().put("/secrets/fallback-secret?api-version=7.4")
             .then().statusCode(200)
             .body("id", startsWith("https://onlyvault.vault.azure.net/secrets/fallback-secret/"));
+    }
+
+    @Test
+    void anHsmKeepsTheTagsItsPutCarriesAndARePutReplacesThem() {
+        String withTags = "{\"location\":\"eastus\",\"tags\":{\"env\":\"dev\",\"team\":\"core\"},"
+            + "\"sku\":{\"family\":\"B\",\"name\":\"Standard_B1\"},\"properties\":{\"initialAdminObjectIds\":[\"o\"]}}";
+        given().contentType("application/json").body(withTags)
+            .when().put(hsm("sub-hsmtags", "rg", "taggedhsm") + API)
+            .then().statusCode(200).body("tags.env", equalTo("dev")).body("tags.team", equalTo("core"));
+        given().when().get(hsm("sub-hsmtags", "rg", "taggedhsm") + API)
+            .then().statusCode(200).body("tags.env", equalTo("dev")).body("tags.team", equalTo("core"));
+
+        String retagged = withTags.replace("{\"env\":\"dev\",\"team\":\"core\"}", "{\"env\":\"prod\"}");
+        put(hsm("sub-hsmtags", "rg", "taggedhsm"), retagged, 200);
+        given().when().get(hsm("sub-hsmtags", "rg", "taggedhsm") + API)
+            .then().statusCode(200).body("tags.env", equalTo("prod")).body("tags", not(hasKey("team")));
     }
 }

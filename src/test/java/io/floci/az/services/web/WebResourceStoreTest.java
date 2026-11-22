@@ -19,6 +19,8 @@ import java.util.Locale;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -203,5 +205,24 @@ class WebResourceStoreTest {
         put(site("sub-norg", "rg", "norgsite"), SITE_BODY, 200);
         given().when().get("/subscriptions/sub-norg/providers/Microsoft.Web/sites/norgsite" + API)
             .then().statusCode(404).body("error.code", equalTo("ResourceNotFound"));
+    }
+
+    @Test
+    void aSiteKeepsTheTagsItsPutCarriesAcrossAConfigWrite() {
+        String withTags = SITE_BODY.replace("\"kind\"", "\"tags\":{\"env\":\"dev\"},\"kind\"");
+        given().contentType("application/json").body(withTags)
+            .when().put(site("sub-sitetags", "rg", "taggedsite") + API)
+            .then().statusCode(200).body("tags.env", equalTo("dev"));
+
+        given().contentType("application/json").body("{\"properties\":{\"linuxFxVersion\":\"Python|3.11\"}}")
+            .when().put(site("sub-sitetags", "rg", "taggedsite") + "/config/web" + API)
+            .then().statusCode(200);
+        given().when().get(site("sub-sitetags", "rg", "taggedsite") + API)
+            .then().statusCode(200).body("tags.env", equalTo("dev"))
+            .body("properties.siteConfig.linuxFxVersion", equalTo("Python|3.11"));
+
+        put(site("sub-sitetags", "rg", "taggedsite"), SITE_BODY, 200);
+        given().when().get(site("sub-sitetags", "rg", "taggedsite") + API)
+            .then().statusCode(200).body("$", not(hasKey("tags")));
     }
 }
