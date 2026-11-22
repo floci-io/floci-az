@@ -578,6 +578,9 @@ public class KeyVaultArmService implements ArmProviderService, StoreIndexSource,
         resource.put("type", HSM_TYPE);
         resource.put("location", location);
         resource.put("sku", skuOut);
+        if (body.get("tags") instanceof Map<?, ?> tags) {
+            resource.put("tags", ArmJson.cast(tags));
+        }
         resource.put("properties", properties);
         return resource;
     }
