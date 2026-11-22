@@ -152,11 +152,17 @@ public class PostgresServerManager {
                         : new ContainerLifecycleManager.EndpointInfo(reachableHost, reachablePort);
                 waitForReady(probe.host(), probe.port(), pgConfig.startupTimeoutSeconds());
             } catch (RuntimeException startupFailure) {
-                // The container itself is left for the pre-existing cleanup gap to deal with;
-                // the port claim is this method's to give back.
+                // The caller rolls back state that never learned this containerId, so a failed
+                // start must dispose of its own container or it leaks as a running orphan.
                 managedContainers.remove(containerId);
                 claimedPorts.remove(containerId);
                 claimTransferred = false;
+                try {
+                    containerManager.stopAndRemove(containerId, null);
+                } catch (Exception cleanup) {
+                    LOG.warnf(cleanup, "Failed to clean up PostgreSQL container %s after start failure",
+                        containerName);
+                }
                 throw startupFailure;
             }
             LOG.infof("PostgreSQL server ready: server=%s endpoint=%s:%d",
@@ -328,19 +334,27 @@ public class PostgresServerManager {
      * <p>The {@code postgres} image briefly opens and then closes the port during its
      * first-boot init phase; a short post-TCP sleep covers that window without requiring
      * a JDBC/libpq driver on the main runtime classpath. Clients use their own retry logic.
+     *
+     * <p>Throws when the port never opens before the deadline, so the caller fails the create
+     * (state rollback, 500) instead of reporting a server nothing could reach as Ready.
      */
-    private void waitForReady(String host, int port, int timeoutSeconds) {
+    static void waitForReady(String host, int port, int timeoutSeconds) {
         LOG.infof("Waiting for PostgreSQL to be ready on %s:%d (timeout=%ds)…", host, port, timeoutSeconds);
         long deadline = System.currentTimeMillis() + (long) timeoutSeconds * 1000;
 
         // Phase 1 — wait for the port to accept TCP connections
-        while (System.currentTimeMillis() < deadline) {
+        boolean connected = false;
+        while (!connected && System.currentTimeMillis() < deadline) {
             try (Socket s = new Socket(host, port)) {
                 LOG.infof("PostgreSQL TCP %s:%d is open — waiting for engine init…", host, port);
-                break;
+                connected = true;
             } catch (Exception e) {
                 sleep(1000);
             }
+        }
+        if (!connected) {
+            throw new RuntimeException(String.format(
+                "PostgreSQL on %s:%d did not accept a connection within %ds", host, port, timeoutSeconds));
         }
 
         // Phase 2 — give the engine a moment to finish startup after the port opens.
