@@ -30,6 +30,13 @@ with their shared access policies and keys. Devices, telemetry and message routi
 - **Name availability**: `checkNameAvailability` reports a taken name as `AlreadyExists` and a malformed
   one as `Invalid`. Hub names are global, so a second hub with a taken name is refused with
   `409 Conflict` in any subscription
+- **Consumer groups**: the consumer groups of the built-in `events` endpoint, as `az iot hub consumer-group`
+  and `azurerm_iothub_consumer_group` manage them: create, show, list and delete. Every hub has `$Default`
+  from its creation. The groups are names only for now: the `events` endpoint itself is not served, so
+  nothing reads through them
+- **Read-only views**: a hub's valid SKUs (`skus`), its quota metrics (`quotaMetrics`) and its registry
+  statistics (`IotHubStats`), as `az iot hub list-skus`, `show-quota-metrics` and `show-stats` read them,
+  and the provider's operations (`/providers/Microsoft.Devices/operations`)
 - **Managed identity**: `SystemAssigned`, `UserAssigned` and `SystemAssigned, UserAssigned`, answered as
   [Azure AI Search](search.md) answers them. A hub without one answers `"identity": {"type": "None"}`
 
@@ -45,6 +52,14 @@ POST   /subscriptions/{sub}/providers/Microsoft.Devices/checkNameAvailability
 
 POST   .../IotHubs/{name}/listkeys
 POST   .../IotHubs/{name}/IotHubKeys/{keyName}/listkeys
+
+GET    .../IotHubs/{name}/eventHubEndpoints/events/ConsumerGroups
+PUT/GET/DELETE .../IotHubs/{name}/eventHubEndpoints/events/ConsumerGroups/{group}
+
+GET    .../IotHubs/{name}/skus
+GET    .../IotHubs/{name}/quotaMetrics
+GET    .../IotHubs/{name}/IotHubStats
+GET    /providers/Microsoft.Devices/operations
 ```
 
 Every api-version Azure lists for `Microsoft.Devices/IotHubs` is accepted and served the same way.
@@ -63,6 +78,9 @@ az iot hub policy list --hub-name my-hub -g my-rg
 az iot hub policy create --hub-name my-hub -g my-rg -n backend --permissions RegistryRead ServiceConnect
 az iot hub policy renew-key --hub-name my-hub -g my-rg -n backend --renew-key Primary
 az iot hub update -n my-hub -g my-rg --retention-day 3
+az iot hub consumer-group create --hub-name my-hub -g my-rg -n analytics
+az iot hub consumer-group list --hub-name my-hub -g my-rg
+az iot hub show-quota-metrics -n my-hub -g my-rg
 az iot hub delete -n my-hub -g my-rg
 ```
 
@@ -78,6 +96,13 @@ resource "azurerm_iothub" "hub" {
     name     = "S1"
     capacity = 1
   }
+}
+
+resource "azurerm_iothub_consumer_group" "analytics" {
+  name                   = "analytics"
+  iothub_name            = azurerm_iothub.hub.name
+  eventhub_endpoint_name = "events"
+  resource_group_name    = azurerm_resource_group.rg.name
 }
 
 output "owner_key" {
@@ -114,6 +139,14 @@ test recordings:
   which is what `az iot hub update` relies on when it writes back the hub it read. A routing endpoint is
   matched by its `name`, so a masked secret sent under a new name, or with nothing stored, is refused with
   `400 InvalidRequestContent` rather than stored as `****`
+- A consumer group answers as Azure answered the az CLI: `properties.created` in RFC 1123
+  (`Mon, 22 Sep 2025 10:49:41 GMT`), `etag: null`, and the name URL-encoded in its `id`
+  (`.../ConsumerGroups/%24Default`). A `PUT` takes the body the spec requires,
+  `{"properties": {"name": "<name>"}}`, with the path's name in any casing, and refuses any other body with
+  `400 InvalidRequestContent`. Only a `PUT` echoes the body's name, under `properties.properties.name`.
+  The spec's examples show a string `etag`; the recorded answers have `null`. A `PUT` answers `200`, and a `PUT` of a group that exists answers it
+  unchanged, with its creation time. Writing a group does not change the hub's `etag`, and a hub `PUT`
+  keeps the hub's groups
 - The `etag` is in the body only, with no `ETag` header, as in Azure's recorded answers. It changes on
   every write, and a hub created again under a deleted hub's id never answers the deleted hub's `etag`
 
@@ -144,19 +177,22 @@ Errors the hub itself reports use the IoT Hub `ErrorDetails` shape with Azure's 
 
 | Request | Answer |
 |---|---|
-| `F1` with a partition count other than 2, or any SKU outside 2 to 128 | `400 {"code": 400016, "httpStatusCode": 400, "message": "Invalid PartitionCount 4 - value must be between 2 and 2."}` |
+| `F1` with a partition count other than 2, or a Basic or Standard SKU outside 2 to 32 (Learn's maximum; azurerm's own check allows 128). A hub saved by an earlier floci-az with more keeps its count, so an update that sends it back passes | `400 {"code": 400016, "httpStatusCode": 400, "message": "Invalid PartitionCount 4 - value must be between 2 and 2."}` |
 | `minTlsVersion` other than `1.0` or `1.2` | `400 {"code": 400089, ...}` |
 
 The following are refused with ARM's `{"error": {...}}` envelope:
 
 - a missing or unknown SKU, or more units than the SKU allows (1 on `F1`, 10 on `S3` and `B3`, 200 on the
   others)
+- a SKU change Azure does not allow: a hub changes SKU within its tier, or from Basic to Standard, as
+  its `skus` list says
 - a `retentionTimeInDays` outside 1 to 7 days (1 day on `F1`)
 - a partition count other than the one the hub was created with (a `PUT` that leaves it out keeps it)
 - an `identity` type outside the spec's `ResourceIdentityType` values
 - rights outside the spec's `AccessRights` values, or a repeated policy name
-- a change of location Under
-`parity-overrides.strict-names`, a hub name outside the spec's pattern (3 to 50 letters, digits and
+- a change of location
+
+Under `parity-overrides.strict-names`, a hub name outside the spec's pattern (3 to 50 letters, digits and
 hyphens, not all digits, no leading or trailing hyphen) is refused with `400 InvalidResourceName`.
 
 ---
@@ -188,16 +224,34 @@ floci-az:
   connection strings cannot be used by a device yet.
 - **Routing is stored, not run.** `properties.routing` endpoints, routes and enrichments are kept and
   answered as they were sent, but nothing is routed and their references are not checked.
-- **Not served:** consumer groups (`eventHubEndpoints/events/ConsumerGroups`), certificates, private
-  endpoint connections, `skus`, `quotaMetrics`, `IotHubStats`, failover, import and export of devices,
-  and the Device Provisioning Service (`Microsoft.Devices/provisioningServices`).
-- **Unchecked rules.** A SKU change between tiers is accepted; Azure refuses it.
+- **Consumer groups are management plane only.** Nothing reads messages through them: the built-in
+  `events` endpoint (AMQP, as `EventHubConsumerClient`, the Functions IoT Hub trigger and
+  `az iot hub monitor-events` use it) is not served. Only the `events` endpoint has groups: any other
+  endpoint name answers `404`. A hub has at most 20, `$Default` included, as Learn states for every
+  tier. `$Default` cannot be deleted. Group names are 1 to 50 letters, digits, hyphens, periods and
+  underscores, and match ignoring case: the characters are azurerm's rule and the 50 is Event Hubs'
+  AMQP limit, as IoT Hub's documentation states neither.
+- **The read-only views count nothing yet.** `IotHubStats` answers zero devices and both `quotaMetrics`
+  have a `currentValue` of 0, since there are no devices or messages to count. Their maximums follow the
+  hub's SKU and units: `TotalMessages` is the SKU's daily message quota per unit (8,000 on `F1`, 400,000
+  on `S1` and `B1`, 6,000,000 on `S2` and `B2`, 300,000,000 on `S3` and `B3`) times the units, and
+  `TotalDeviceCount` is 1,000,000 (500 on `F1`). `skus` lists the SKUs the hub can move to, each with
+  the units it allows: those of its own tier, as Azure answered for an `S1` hub (`S1`, `S2`, `S3`), and
+  for a Basic hub the Standard ones after them. The Basic and `F1` answers (`F1` alone, with a
+  `scaleType` of `None`) are unrecorded. `operations` lists the IoT Hub entries of the spec's example,
+  without the Device Provisioning Service's.
+- **Not served:** certificates, private endpoint connections, endpoint health, route testing, failover,
+  import and export of devices, and the Device Provisioning Service
+  (`Microsoft.Devices/provisioningServices`).
 - **Terraform waits about two minutes per hub write.** After every create and update, `azurerm_iothub`
   3.x waits a fixed minute before its first `GET` and then polls once a minute, working around a `404` Azure
   can answer for a while after an update (azure-rest-api-specs#27183). That wait is in the provider, so it
   is the same against floci-az as against Azure.
 - **Unverified answers.** No public source gives Azure's answer to a duplicate hub name on `PUT` or to a
-  stale `If-Match`, so ARM's generic `409 Conflict` and `412 PreconditionFailed` stand in. The codes for
-  too many units, a retention period out of range, a partition count change and an unknown policy on
+  stale `If-Match`, so ARM's generic `409 Conflict` and `412 PreconditionFailed` stand in. The answers
+  to an unknown endpoint, a missing or badly named consumer group, a 21st group and a `$Default` delete
+  are unrecorded as well, so ARM's `NotFound` and `InvalidRequestContent` stand in. The codes for
+  too many units, a SKU change Azure does not allow (any but within a tier or from Basic to Standard),
+  a retention period out of range, a partition count change and an unknown policy on
   `IotHubKeys/{keyName}/listkeys` are unrecorded too, so ARM's `InvalidRequestContent` and `NotFound`
   stand in. Whether Azure masks Cosmos DB keys as `****` or leaves them out is also unrecorded.
