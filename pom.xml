@@ -22,6 +22,8 @@
         <proton-j.version>0.34.1</proton-j.version>
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.6.1</surefire-plugin.version>
+        <!-- What checkstyle:check reads; tools/checkstyle/test-rules.sh points it at the rule fixtures. -->
+        <checkstyle.sourceDirectory>${project.basedir}/src/main/java</checkstyle.sourceDirectory>
     </properties>
 
     <dependencyManagement>
@@ -616,6 +618,28 @@
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
                     </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>3.6.0</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.puppycrawl.tools</groupId>
+                        <artifactId>checkstyle</artifactId>
+                        <version>14.3.0</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <configLocation>tools/checkstyle/checkstyle.xml</configLocation>
+                    <propertyExpansion>config_loc=${project.basedir}/tools/checkstyle</propertyExpansion>
+                    <!-- src/main only: AGENTS.md scopes these rules to the emulator's own code. -->
+                    <sourceDirectories>
+                        <sourceDirectory>${checkstyle.sourceDirectory}</sourceDirectory>
+                    </sourceDirectories>
+                    <includeTestSourceDirectory>false</includeTestSourceDirectory>
+                    <consoleOutput>true</consoleOutput>
                 </configuration>
             </plugin>
         </plugins>

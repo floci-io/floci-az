@@ -469,8 +469,12 @@ When adding a sidecar-based service, additionally:
 
 - No wildcard imports in `src/main`, including static ones. Static wildcards stay fine in tests, where
   `Assertions.*`, `Matchers.*` and `RestAssured.*` are the established idiom
-- Import order: non-`java`/`javax` imports alphabetically, then `java.*` and `javax.*` last. This is the
-  IntelliJ default layout and what most of the tree already uses
+- Import order: non-`java`/`javax` imports alphabetically, then `javax.*`, then `java.*`, then static imports.
+  This is the IntelliJ default layout
+- CI enforces the `var`, wildcard-import, inline-qualified-name and import-order rules on `src/main/java` with
+  Checkstyle (`.github/workflows/checkstyle.yml`, config in `tools/checkstyle/`). Run `./mvnw -B checkstyle:check`
+  before pushing. When you change a rule, add a fixture under `tools/checkstyle/fixtures/` and run
+  `tools/checkstyle/test-rules.sh`, which CI also runs
 
 ### Conventions the codebase already follows
 
