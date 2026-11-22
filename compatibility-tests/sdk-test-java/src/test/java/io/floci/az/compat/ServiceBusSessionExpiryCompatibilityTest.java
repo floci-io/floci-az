@@ -72,22 +72,24 @@ class ServiceBusSessionExpiryCompatibilityTest {
     void gracefulClosePreservesDeliveryCountAndFifoAndRenewalStillSettles() throws Exception {
         String queue = queue();
         send(queue, "first", "second");
-        try (var sessions = sessions(queue)) {
-            try (var receiver = sessions.acceptSession("session")) {
-                var messages = receiver.receiveMessages(2, RECEIVE_TIMEOUT).stream().toList();
-                assertEquals(2, messages.size());
-                assertEquals(0, messages.getFirst().getDeliveryCount());
+        // Each accept gets its own client. The SDK names a session link after the session id and caches
+        // open links by name per connection, and close() returns before the closed link leaves that
+        // cache, so a second acceptSession("session") on the same client can be handed the closed link
+        // and fail its first receive with "upstream-completion". That race is in the client, not the broker.
+        try (var sessions = sessions(queue); var receiver = sessions.acceptSession("session")) {
+            var messages = receiver.receiveMessages(2, RECEIVE_TIMEOUT).stream().toList();
+            assertEquals(2, messages.size());
+            assertEquals(0, messages.getFirst().getDeliveryCount());
+        }
+        try (var sessions = sessions(queue); var receiver = sessions.acceptSession("session")) {
+            var messages = receiver.receiveMessages(2, RECEIVE_TIMEOUT).stream().toList();
+            assertEquals(List.of("first", "second"),
+                    messages.stream().map(message -> message.getBody().toString()).toList());
+            for (ServiceBusReceivedMessage message : messages) {
+                assertEquals(0, message.getDeliveryCount());
             }
-            try (var receiver = sessions.acceptSession("session")) {
-                var messages = receiver.receiveMessages(2, RECEIVE_TIMEOUT).stream().toList();
-                assertEquals(List.of("first", "second"),
-                        messages.stream().map(message -> message.getBody().toString()).toList());
-                for (ServiceBusReceivedMessage message : messages) {
-                    assertEquals(0, message.getDeliveryCount());
-                }
-                assertTrue(receiver.renewSessionLock().isAfter(java.time.OffsetDateTime.now()));
-                messages.forEach(receiver::complete);
-            }
+            assertTrue(receiver.renewSessionLock().isAfter(java.time.OffsetDateTime.now()));
+            messages.forEach(receiver::complete);
         }
     }
 
