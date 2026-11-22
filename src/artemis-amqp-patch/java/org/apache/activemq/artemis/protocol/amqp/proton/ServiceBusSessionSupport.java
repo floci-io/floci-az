@@ -186,12 +186,24 @@ public final class ServiceBusSessionSupport {
     * reduces every scheme-and-host spelling ({@link AmqpEntityAddress#toServiceBusEntityPath});
     * any other broker keeps the event-hub-only reduction ({@link AmqpEntityAddress#toEntityPath}),
     * which must leave namespace-carrying URIs such as {@code amqp://host/ns/Subscriptions/$Default}
-    * whole. Both then get the Service Bus case normalization, as before.
+    * whole. Both then get the Service Bus case normalization, as before, and a Service Bus broker
+    * resolves the result onto the spelling the entity was created with
+    * ({@link ServiceBusEntityNames#canonicalEntityPath}).
     */
    public static String sourceEntityPath(ActiveMQServer server, String address) {
-      return normalizeEntityPath(isServiceBusBroker(server)
-                                    ? AmqpEntityAddress.toServiceBusEntityPath(address)
-                                    : AmqpEntityAddress.toEntityPath(address));
+      return ServiceBusEntityNames.canonicalEntityPath(server,
+         normalizeEntityPath(isServiceBusBroker(server)
+                                ? AmqpEntityAddress.toServiceBusEntityPath(address)
+                                : AmqpEntityAddress.toEntityPath(address)));
+   }
+
+   /**
+    * The entity path a sender's target address names on this broker: the event-hub reduction
+    * ({@link AmqpEntityAddress#toEntityPath}), resolved on a Service Bus broker onto the spelling
+    * the entity was created with ({@link ServiceBusEntityNames#canonicalEntityPath}).
+    */
+   public static String targetEntityPath(ActiveMQServer server, String address) {
+      return ServiceBusEntityNames.canonicalEntityPath(server, AmqpEntityAddress.toEntityPath(address));
    }
 
    public static String normalizeEntityPath(String entityPath) {
