@@ -259,6 +259,17 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         return config.services().monitor().enabled();
     }
 
+    @Override
+    public boolean armEnabled() {
+        return config.services().monitor().enabled();
+    }
+
+    /** ARM's {@code 404 ResourceNotFound} for a missing workspace, endpoint or rule, with Azure's message. */
+    private static Response resourceNotFound(ArmResourceId id, String type) {
+        return ArmErrors.notFound("The Resource '" + type + "/" + id.name() + "' under resource group '"
+            + id.resourceGroup() + "' was not found. For more details please go to https://aka.ms/ARMResourceNotFoundFix");
+    }
+
     /** Joined the index with the resource-group cascade; listed only under {@code resource-group-delete}. */
     @Override
     public boolean inDefaultListing() {
@@ -357,7 +368,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         } else if ("GET".equals(method)) {
             Optional<ArmResourceStore.Stored<MonitorResource>> workspace = workspaces.get(id);
             if (workspace.isEmpty()) {
-                return Response.status(404).entity("Workspace not found").build();
+                return resourceNotFound(id, WORKSPACE_TYPE);
             }
             return Response.ok(workspace.get().value()).type(MediaType.APPLICATION_JSON).build();
         } else if ("DELETE".equals(method)) {
@@ -426,9 +437,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     private Response sharedKeys(ArmResourceId id) {
         Optional<ArmResourceStore.Stored<MonitorResource>> workspace = workspaces.get(id);
         if (workspace.isEmpty()) {
-            return Response.status(404)
-                .entity(Map.of("error", Map.of("code", "ResourceNotFound", "message", "Workspace not found")))
-                .type(MediaType.APPLICATION_JSON).build();
+            return resourceNotFound(id, WORKSPACE_TYPE);
         }
         String customerId = workspace.get().value().property("customerId");
         Map<String, Object> keys = new LinkedHashMap<>();
@@ -474,7 +483,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         } else if ("GET".equals(method)) {
             Optional<ArmResourceStore.Stored<MonitorResource>> dce = endpoints.get(id);
             if (dce.isEmpty()) {
-                return Response.status(404).entity("DCE not found").build();
+                return resourceNotFound(id, DCE_TYPE);
             }
             return Response.ok(dce.get().value()).type(MediaType.APPLICATION_JSON).build();
         } else if ("DELETE".equals(method)) {
@@ -520,7 +529,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         } else if ("GET".equals(method)) {
             Optional<ArmResourceStore.Stored<MonitorResource>> dcr = rules.get(id);
             if (dcr.isEmpty()) {
-                return Response.status(404).entity("DCR not found").build();
+                return resourceNotFound(id, DCR_TYPE);
             }
             return Response.ok(dcr.get().value()).type(MediaType.APPLICATION_JSON).build();
         } else if ("DELETE".equals(method)) {
