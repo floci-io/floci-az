@@ -24,6 +24,8 @@ public class AcrModels {
         private boolean adminUserEnabled;
         /** {@code AbacRepositoryPermissions} or {@code LegacyRegistryPermissions}; null on a registry stored before. */
         private String roleAssignmentMode;
+        /** {@code Enabled} or {@code Disabled}; null on a registry stored before, which reads back as Enabled. */
+        private String publicNetworkAccess;
 
         // Admin credentials are returned by the management plane but, because the shared backing
         // registry runs anonymous, are not enforced at the data plane.
@@ -63,6 +65,9 @@ public class AcrModels {
 
         public String getRoleAssignmentMode() { return roleAssignmentMode; }
         public void setRoleAssignmentMode(String roleAssignmentMode) { this.roleAssignmentMode = roleAssignmentMode; }
+
+        public String getPublicNetworkAccess() { return publicNetworkAccess; }
+        public void setPublicNetworkAccess(String publicNetworkAccess) { this.publicNetworkAccess = publicNetworkAccess; }
 
         public String getUsername() { return username; }
         public void setUsername(String username) { this.username = username; }
