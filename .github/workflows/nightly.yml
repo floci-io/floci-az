@@ -10,6 +10,9 @@ name: Nightly
 #   Native:  floci/floci-az:nightly          floci/floci-az:nightly-mmddyyyy
 #   Compat:  floci/floci-az:nightly-compat   floci/floci-az:nightly-mmddyyyy-compat
 #
+# Every pushed image carries a provenance attestation (mode=max) and an SBOM, and is signed
+# keylessly with cosign by the sign-images job.
+#
 # Required secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
 
 on:
@@ -145,6 +148,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # Consumed by sign-images. Each is the digest of the pushed manifest index, which is what
+    # cosign signs; the tags are mutable, the digests are not.
+    outputs:
+      native-digest: ${{ steps.native.outputs.digest }}
+      compat-digest: ${{ steps.compat.outputs.digest }}
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -182,6 +191,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push native nightly image
+        id: native
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         env:
           SOURCE_DATE_EPOCH: ${{ steps.source_date.outputs.epoch }}
@@ -190,6 +200,8 @@ jobs:
           file: docker/Dockerfile.native-package
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: |
             floci/floci-az:nightly
             floci/floci-az:nightly-${{ needs.prepare.outputs.version }}
@@ -206,6 +218,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push compat nightly image
+        id: compat
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         env:
           SOURCE_DATE_EPOCH: ${{ steps.source_date.outputs.epoch }}
@@ -214,11 +227,14 @@ jobs:
           file: docker/Dockerfile.compat
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: |
             floci/floci-az:nightly-compat
             floci/floci-az:nightly-${{ needs.prepare.outputs.version }}-compat
           build-args: |
             VERSION=nightly-${{ needs.prepare.outputs.version }}
+            BASE_IMAGE=floci/floci-az@${{ steps.native.outputs.digest }}
           labels: |
             org.opencontainers.image.version=nightly-${{ needs.prepare.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -228,3 +244,48 @@ jobs:
             vcs-ref=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ── Sign the pushed images ──────────────────────────────────────────────
+  # Kept out of push-native on purpose: a Fulcio or Rekor outage mid-push would otherwise
+  # leave one tag updated and the other unpublished. Signing only reads digests that are
+  # already in the registry, so this job can be rerun on its own.
+  # Verify a pulled image with:
+  #   cosign verify floci/floci-az@<digest> \
+  #     --certificate-identity-regexp '^https://github.com/floci-io/floci-az/.github/workflows/nightly.yml@' \
+  #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  sign-images:
+    name: Sign published images
+    needs: push-native
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Install Cosign
+        # Keyless signing: the job's GitHub Actions OIDC token exchanges for a short-lived
+        # Fulcio certificate and the signature is recorded in Rekor's transparency log. No
+        # signing key to generate, store, or rotate.
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.3'
+
+      # cosign writes each signature back to the registry beside the image it signs.
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Sign images and their provenance and SBOM attestations
+        # --recursive signs the pushed index and every manifest it references, which includes
+        # the provenance and SBOM attestation manifests BuildKit attaches.
+        env:
+          DIGESTS: >-
+            ${{ needs.push-native.outputs.native-digest }}
+            ${{ needs.push-native.outputs.compat-digest }}
+        run: |
+          for digest in $DIGESTS; do
+            cosign sign --yes --recursive "floci/floci-az@${digest}"
+          done
