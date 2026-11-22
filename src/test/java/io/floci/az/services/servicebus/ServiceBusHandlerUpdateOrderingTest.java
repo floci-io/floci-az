@@ -25,10 +25,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,13 +51,14 @@ class ServiceBusHandlerUpdateOrderingTest {
     private static final ServiceBusEntityXml.MessageLifetimeSettings LIFETIME =
             new ServiceBusEntityXml.MessageLifetimeSettings(300_000, false);
     private final Map<String, StoredObject> stored = new ConcurrentHashMap<>();
+    private StorageBackend<String, StoredObject> store;
     private ServiceBusNamespaceManager namespaceManager;
     private ServiceBusHandler handler;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void createHandler() {
-        StorageBackend<String, StoredObject> store = mock(StorageBackend.class);
+        store = mock(StorageBackend.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
         namespaceManager = mock(ServiceBusNamespaceManager.class);
         when(namespaceManager.getMessageCounts(anyString(), anyString()))
@@ -73,6 +76,10 @@ class ServiceBusHandlerUpdateOrderingTest {
             stored.put(call.getArgument(0), call.getArgument(1));
             return null;
         }).when(store).put(anyString(), any());
+        doAnswer(call -> {
+            stored.remove(call.getArgument(0));
+            return null;
+        }).when(store).delete(anyString());
         when(store.scan(any())).thenAnswer(call -> {
             Predicate<String> filter = call.getArgument(0);
             return stored.values().stream().filter(object -> filter.test(object.key())).toList();
@@ -136,6 +143,64 @@ class ServiceBusHandlerUpdateOrderingTest {
         assertEquals(50, subscription.lockDurationSeconds());
         assertEquals(subscription.lockDurationSeconds(), brokerLockSeconds.get());
         assertEquals(2_000, brokerTtlMillis.get());
+    }
+
+    @Test
+    void deletingASubscriptionWaitsForItsUpdateExistenceCheck() throws Exception {
+        put("sb/account/demo/topics/orders", ServiceBusModels.TopicEntity.defaults("orders", NO_DUPLICATES, LIFETIME));
+        String key = "sb/account/demo/topics/orders/subscriptions/audit";
+        put(key, ServiceBusModels.SubscriptionEntity.defaults("orders", "audit", 10, 60, false, LIFETIME));
+        CountDownLatch readingSubscription = new CountDownLatch(1);
+        CountDownLatch releaseRead = new CountDownLatch(1);
+        AtomicBoolean firstRead = new AtomicBoolean(true);
+        when(store.get(anyString())).thenAnswer(call -> {
+            String requestedKey = call.getArgument(0);
+            Optional<StoredObject> snapshot = Optional.ofNullable(stored.get(requestedKey));
+            if (key.equals(requestedKey) && firstRead.compareAndSet(true, false)) {
+                readingSubscription.countDown();
+                assertTrue(releaseRead.await(5, TimeUnit.SECONDS));
+            }
+            return snapshot;
+        });
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Response> update = executor.submit(() ->
+                    update("topics/orders/subscriptions/audit", "<LockDuration>PT50S</LockDuration>"));
+            try {
+                assertTrue(readingSubscription.await(5, TimeUnit.SECONDS));
+                CountDownLatch deleteStarted = new CountDownLatch(1);
+                Future<Response> delete = executor.submit(() -> {
+                    deleteStarted.countDown();
+                    return handler.handle(new AzureRequest("DELETE", "account", "servicebus",
+                            "demo/topics/orders/subscriptions/audit", null, null, Map.of(), null, false));
+                });
+                assertTrue(deleteStarted.await(5, TimeUnit.SECONDS));
+                assertThrows(TimeoutException.class, () -> delete.get(200, TimeUnit.MILLISECONDS),
+                        "Deletion must wait for the update's subscription lookup and broker change");
+                releaseRead.countDown();
+                assertEquals(200, update.get(5, TimeUnit.SECONDS).getStatus());
+                assertEquals(200, delete.get(5, TimeUnit.SECONDS).getStatus());
+                assertFalse(stored.containsKey(key));
+            } finally {
+                releaseRead.countDown();
+            }
+        }
+    }
+
+    @Test
+    void updatingAMissingSubscriptionStillCreatesItWithTheRequestedSettings() throws Exception {
+        put("sb/account/demo/topics/orders", ServiceBusModels.TopicEntity.defaults("orders", NO_DUPLICATES, LIFETIME));
+
+        Response response = update("topics/orders/subscriptions/audit",
+                "<RequiresSession>true</RequiresSession><LockDuration>PT50S</LockDuration>");
+
+        assertEquals(201, response.getStatus());
+        String key = "sb/account/demo/topics/orders/subscriptions/audit";
+        ServiceBusModels.SubscriptionEntity subscription = MAPPER.readValue(
+                stored.get(key).data(), ServiceBusModels.SubscriptionEntity.class);
+        assertTrue(subscription.requiresSession());
+        assertEquals(50, subscription.lockDurationSeconds());
+        assertTrue(stored.containsKey(key + "/rules/$Default"));
     }
 
     private void runOverlappingUpdates(String firstPath, String firstBody, String secondPath, String secondBody,
