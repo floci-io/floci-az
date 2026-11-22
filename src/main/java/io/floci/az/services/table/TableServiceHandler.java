@@ -297,7 +297,15 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 .build();
     }
 
+    /**
+     * Deleting a table that does not exist answers 404 ResourceNotFound, as Azure and Azurite do; the Java and Python
+     * Tables SDKs rely on that 404 and swallow it in their delete-table calls.
+     */
     private Response deleteTable(AzureRequest request, String tableName) {
+        if (!tableExists(request.accountName(), tableName)) {
+            return new AzureErrorResponse("ResourceNotFound", "The specified resource does not exist.")
+                    .toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
         store.delete(nsKey(request.accountName(), tableName));
         String keyPrefix = objKey(request.accountName(), tableName, "");
         store.keys().stream()
