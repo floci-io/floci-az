@@ -250,7 +250,17 @@ public final class ServiceBusManagementPlugin implements ActiveMQServerPlugin {
         return header;
     }
 
+    /**
+     * The time the message became active: Azure reports a scheduled message as enqueued at its
+     * scheduled enqueue time rather than when it was sent, matching ServiceBusMessageMetadataSupport.
+     */
     private static long enqueuedTime(AMQPMessage source) {
+        Long scheduledTime = source.getScheduledDeliveryTime();
+        long sentTime = sentTime(source);
+        return scheduledTime == null ? sentTime : Math.max(sentTime, scheduledTime);
+    }
+
+    private static long sentTime(AMQPMessage source) {
         Long ingressTimestamp = source.getIngressTimestamp();
         if (ingressTimestamp != null) {
             return ingressTimestamp;

@@ -143,6 +143,48 @@ public sealed class ServiceBusMetadataCompatibilityTests
         }
     }
 
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    [Timeout(60_000)]
+    public async Task ScheduledMessageReportsItsActivationTimeAsEnqueuedTime(bool large, CancellationToken cancellationToken)
+    {
+        var admin = new ServiceBusAdministrationClient(ConnectionString(administration: true));
+        await using var client = new ServiceBusClient(ConnectionString());
+        string queue = $"metadata-scheduled-{Guid.NewGuid():N}";
+        await admin.CreateQueueAsync(queue, cancellationToken);
+        try
+        {
+            await using ServiceBusSender sender = client.CreateSender(queue);
+            await using ServiceBusReceiver receiver = client.CreateReceiver(queue);
+            string body = large ? new string('x', 200_000) : "scheduled";
+            DateTimeOffset requested = DateTimeOffset.UtcNow.AddSeconds(5);
+            await sender.SendMessageAsync(new ServiceBusMessage(body) { ScheduledEnqueueTime = requested }, cancellationToken);
+
+            ServiceBusReceivedMessage received = await receiver.ReceiveMessageAsync(TimeSpan.FromSeconds(20), cancellationToken)
+                ?? throw new InvalidOperationException("Expected the scheduled message");
+            DateTimeOffset receivedAt = DateTimeOffset.UtcNow;
+            await Assert.That(received.Body.ToString()).IsEqualTo(body);
+            // The wire carries milliseconds, so allow for truncation of the requested time.
+            await Assert.That(received.EnqueuedTime >= requested.AddMilliseconds(-1)).IsTrue();
+            await Assert.That(received.EnqueuedTime <= receivedAt.AddSeconds(1)).IsTrue();
+
+            // A peek of the active message reports the same enqueue time as the delivery.
+            await receiver.AbandonMessageAsync(received, cancellationToken: cancellationToken);
+            ServiceBusReceivedMessage peeked = await receiver.PeekMessageAsync(cancellationToken: cancellationToken)
+                ?? throw new InvalidOperationException("Expected the abandoned message to be peekable");
+            await Assert.That(peeked.EnqueuedTime).IsEqualTo(received.EnqueuedTime);
+            ServiceBusReceivedMessage redelivered = await receiver.ReceiveMessageAsync(TimeSpan.FromSeconds(5), cancellationToken)
+                ?? throw new InvalidOperationException("Expected the abandoned message to be redelivered");
+            await Assert.That(redelivered.EnqueuedTime).IsEqualTo(received.EnqueuedTime);
+            await receiver.CompleteMessageAsync(redelivered, cancellationToken);
+        }
+        finally
+        {
+            await admin.DeleteQueueAsync(queue, cancellationToken);
+        }
+    }
+
     private static async Task CheckUserProperties(ServiceBusReceivedMessage message)
     {
         await Assert.That(message.CorrelationId).IsEqualTo("correlation-" + message.MessageId);
