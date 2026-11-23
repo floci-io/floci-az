@@ -2316,13 +2316,15 @@
   "storage account listKeys" : {
     "body" : {
       "keys" : [ {
+        "creationTime" : "<timestamp>",
         "keyName" : "key1",
         "permissions" : "Full",
         "value" : "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
       }, {
+        "creationTime" : "<timestamp>",
         "keyName" : "key2",
         "permissions" : "Full",
-        "value" : "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+        "value" : "<random-account-key>"
       } ]
     },
     "headers" : {

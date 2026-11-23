@@ -224,7 +224,7 @@ All variables are optional; the default applies when unset.
 | `FLOCI_AZ_PORT` | `4577` | Port the emulator listens on |
 | `FLOCI_AZ_BASE_URL` | `http://localhost:4577` | Base URL embedded in API responses |
 | `FLOCI_AZ_HOSTNAME` | _(unset)_ | Override the hostname in SAS and invoke URLs (useful behind a reverse proxy) |
-| `FLOCI_AZ_AUTH_MODE` | `dev` | Not enforced yet: every value, `strict` included, accepts any credentials without validating SharedKey signatures. Blob service SAS signatures are checked against `auth.storage-account-keys` regardless |
+| `FLOCI_AZ_AUTH_MODE` | `dev` | Not enforced yet: every value behaves like `dev`. Shared Key signatures are checked with `FLOCI_AZ_PARITY_OVERRIDES_STRICT_STORAGE_KEYS`; every Blob SAS is checked against the account's keys regardless |
 | `FLOCI_AZ_PARITY` | `compat` | Azure parity level. `compat`: responses stay as floci-az has always answered them. `azure`: every parity override on. `strict`: `azure` plus Azure's refusals. See the [ARM page](../services/arm.md#parity-levels) |
 | `FLOCI_AZ_PARITY_OVERRIDES_SUBSCRIPTION_LISTING` | _(on from `azure`)_ | `true`: `GET /subscriptions` also lists subscriptions registered on first use, and a subscription is echoed with the directory's id |
 | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_SUBSCRIPTIONS` | _(on from `strict`)_ | `true`: an unknown subscription is `404 SubscriptionNotFound`; `false`: it is registered on first use |

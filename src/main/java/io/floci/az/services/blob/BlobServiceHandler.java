@@ -11,6 +11,7 @@ import io.floci.az.core.StoredObject;
 import io.floci.az.core.SyntheticHttpHeaders;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;
+import io.floci.az.core.auth.AuthenticationFailed;
 import io.floci.az.core.auth.StorageSasAuthorization;
 import io.floci.az.core.auth.StorageSasToken;
 import io.floci.az.core.storage.StorageBackend;
@@ -44,6 +45,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -155,10 +157,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
         Response response;
         if (request.authContext() != null && !request.authContext().isValid()) {
-            response = new AzureErrorResponse("AuthenticationFailed",
-                    "Server failed to authenticate the request. Make sure the value of Authorization header "
-                            + "is formed correctly including the signature.")
-                    .toXmlResponse(Response.Status.FORBIDDEN.getStatusCode());
+            response = AuthenticationFailed.xml(request.authContext().failureDetail());
         } else if (path.isEmpty() || path.equals("/")) {
             if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
                 response = listContainers(request);
@@ -379,8 +378,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             response = normalizeDataLakeErrorResponse(response);
         }
 
+        // An AuthenticationFailed carries the request id its message names.
+        String requestId = Objects.requireNonNullElseGet(
+                response.getHeaderString("x-ms-request-id"), () -> UUID.randomUUID().toString());
         return Response.fromResponse(response)
-                .header("x-ms-request-id", UUID.randomUUID().toString())
+                .header("x-ms-request-id", null)
+                .header("x-ms-request-id", requestId)
                 .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
                 .header("Date", RFC1123_DATE_TIME.format(Instant.now()))
                 .build();

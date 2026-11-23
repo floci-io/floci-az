@@ -1,6 +1,5 @@
 package io.floci.az.core.auth;
 
-import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -20,29 +19,25 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 
 @ApplicationScoped
 public class StorageSasAuthorization {
 
-    public static final String DEFAULT_STORAGE_ACCOUNT_KEY =
-            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
-
     private static final String HMAC_SHA256 = "HmacSHA256";
 
     private final UserDelegationKeyMaterial keyMaterial;
-    private final Map<String, String> storageAccountKeys;
+    private final StorageAccountKeys keys;
 
     @Inject
-    public StorageSasAuthorization(UserDelegationKeyMaterial keyMaterial, EmulatorConfig config) {
+    public StorageSasAuthorization(UserDelegationKeyMaterial keyMaterial, StorageAccountKeys keys) {
         this.keyMaterial = keyMaterial;
-        this.storageAccountKeys = Map.copyOf(config.auth().storageAccountKeys());
-        for (String key : storageAccountKeys.values()) {
-            if (Base64.getDecoder().decode(key).length == 0) {
-                throw new IllegalArgumentException("Storage account SAS signing keys must not be empty");
-            }
-        }
+        this.keys = keys;
+    }
+
+    /** The {@code AuthenticationErrorDetail} of a SAS no key signed: the string the service signed. */
+    public static String signatureMismatch(String stringToSign) {
+        return "Signature did not match. String to sign used was " + stringToSign;
     }
 
     public Optional<Response> authorizeRead(AzureRequest request, String container, String path, StorageSasToken token) {
@@ -90,6 +85,9 @@ public class StorageSasAuthorization {
             StorageSasToken token,
             Operation operation
     ) {
+        if (token.isAccountSas()) {
+            return authorizeAccountSas(request, container, path, token, operation);
+        }
         if (token.resource() == null || token.permissions() == null || token.expiryTime() == null) {
             return Optional.of(authenticationFailed());
         }
@@ -109,8 +107,9 @@ public class StorageSasAuthorization {
                     || LocalDate.parse(token.version()).isBefore(LocalDate.parse("2020-02-10")))) {
             return Optional.of(authenticationFailed());
         }
-        if (!signatureMatches(request, container, path, token)) {
-            return Optional.of(authenticationFailed());
+        Optional<String> mismatch = signatureMismatch(request, container, path, token);
+        if (mismatch.isPresent()) {
+            return Optional.of(AuthenticationFailed.xml(mismatch));
         }
         if (!resourceCoversPath(request, token, path)) {
             return Optional.of(authorizationPermissionMismatch());
@@ -142,19 +141,54 @@ public class StorageSasAuthorization {
                 && !sasExpiry.get().isAfter(keyExpiry.get());
     }
 
-    private boolean signatureMatches(AzureRequest request, String container, String path, StorageSasToken token) {
+    /**
+     * An account SAS to the Blob service: signed by one of the account's keys, then granting the Blob service
+     * ({@code ss}), the level the request addresses ({@code srt}: the service, a container, or an object) and the
+     * operation's permission, checked in that order.
+     */
+    private Optional<Response> authorizeAccountSas(
+            AzureRequest request,
+            String container,
+            String path,
+            StorageSasToken token,
+            Operation operation
+    ) {
+        if (token.permissions() == null || token.expiryTime() == null) {
+            return Optional.of(authenticationFailed());
+        }
+        String stringToSign = token.accountStringToSign(request.accountName());
+        if (keys.signer(request.accountName(), stringToSign, token.signature()).isEmpty()) {
+            return Optional.of(AuthenticationFailed.xml(Optional.of(signatureMismatch(stringToSign))));
+        }
+        if (token.services().indexOf('b') < 0) {
+            return Optional.of(mismatch("AuthorizationServiceMismatch", "service"));
+        }
+        char level = container == null || container.isBlank() ? 's'
+                : normalizePath(path) == null || normalizePath(path).isBlank() ? 'c' : 'o';
+        if (token.resourceTypes().indexOf(level) < 0) {
+            return Optional.of(mismatch("AuthorizationResourceTypeMismatch", "resource type"));
+        }
+        if (!operation.allowedBy(token)) {
+            return Optional.of(authorizationPermissionMismatch());
+        }
+        return Optional.empty();
+    }
+
+    /** The string the request's service SAS signs, when the key it names did not sign it. */
+    private Optional<String> signatureMismatch(
+            AzureRequest request, String container, String path, StorageSasToken token) {
         String canonicalName = canonicalName(request.accountName(), container, signedPath(token, path));
-        String key = token.isUserDelegation()
-                ? keyMaterial.signingKeyForAccount(request.accountName())
-                : storageAccountKeys.getOrDefault(request.accountName(), DEFAULT_STORAGE_ACCOUNT_KEY);
-        String signedFields = token.isUserDelegation()
-                ? stringToSign(request, token, canonicalName)
-                : serviceStringToSign(token, canonicalName);
-        String expected = hmac(key, signedFields);
+        if (!token.isUserDelegation()) {
+            String signedFields = serviceStringToSign(token, canonicalName);
+            return keys.signer(request.accountName(), signedFields, token.signature()).isPresent()
+                    ? Optional.empty() : Optional.of(signatureMismatch(signedFields));
+        }
+        String signedFields = stringToSign(request, token, canonicalName);
+        String expected = hmac(keyMaterial.signingKeyForAccount(request.accountName()), signedFields);
         return MessageDigest.isEqual(
                 expected.getBytes(StandardCharsets.UTF_8),
                 token.signature().getBytes(StandardCharsets.UTF_8)
-        );
+        ) ? Optional.empty() : Optional.of(signatureMismatch(signedFields));
     }
 
     // Service SAS has its own layout; delegation-key and agent fields are not included.
@@ -364,9 +398,13 @@ public class StorageSasAuthorization {
     }
 
     private static Response authenticationFailed() {
-        return new AzureErrorResponse("AuthenticationFailed",
-                "Server failed to authenticate the request. Make sure the value of Authorization header "
-                        + "is formed correctly including the signature.")
+        return AuthenticationFailed.xml(Optional.empty());
+    }
+
+    /** One of the SAS error codes: "This request is not authorized to perform this operation using this ...". */
+    private static Response mismatch(String code, String what) {
+        return new AzureErrorResponse(code,
+                "This request is not authorized to perform this operation using this " + what + ".")
                 .toXmlResponse(Response.Status.FORBIDDEN.getStatusCode());
     }
 

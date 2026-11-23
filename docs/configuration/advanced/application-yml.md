@@ -13,8 +13,7 @@ floci-az:
   # hostname: myhost.internal
 
   auth:
-    # Not enforced yet: every value, strict included, accepts any credentials
-    # without SharedKey signature validation (see the note below the table).
+    # Not enforced yet: every value behaves like dev (see the note below the table).
     mode: dev
 
   # Azure parity level: compat (default) | azure | strict. Each override
@@ -153,12 +152,12 @@ floci-az:
 | `FLOCI_AZ_DOCKER_ENDPOINT_MODE` | `auto` | How sidecar containers are addressed: `auto` (container name or IP and internal port inside Docker, `localhost` and the published port otherwise) or `published` (the Docker daemon's host and the published port, for remote daemons such as docker-in-docker or kubedock) |
 | `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into the name of every container and volume floci-az creates (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |
 
-`auth.mode` is not read by any service today. Setting it to `strict` does not turn on SharedKey
-or SAS signature validation: requests are accepted exactly as in `dev`. The one signature floci-az
-does check, the Blob service SAS, is validated against the per-account keys below whatever
-`auth.mode` says.
+`auth.mode` is not read by any service today. Setting it to `strict` does not turn on Shared Key
+signature validation: `parity-overrides.strict-storage-keys` does. Every SAS the Blob service serves
+is validated against the account's keys whatever either setting says
+([Account keys](../../services/blob.md#account-keys)).
 
-Blob service SAS signing keys are configured per account (independent of `auth.mode`):
+An account's `key1` is configured per account (independent of `auth.mode`); its `key2` is random:
 
 ```yaml
 floci-az:

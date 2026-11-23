@@ -132,6 +132,9 @@ floci-az:
     # strict-search-keys: true      # FLOCI_AZ_PARITY_OVERRIDES_STRICT_SEARCH_KEYS; default on from strict.
     #                               # The Azure AI Search data plane serves declared services only, and an
     #                               # api-key must be one of the service's admin keys
+    # strict-storage-keys: true     # FLOCI_AZ_PARITY_OVERRIDES_STRICT_STORAGE_KEYS; default on from strict.
+    #                               # Blob, Queue and Table refuse a Shared Key, Shared Key Lite or account SAS
+    #                               # request no current account key signed (403 AuthenticationFailed)
     # strict-locations: true        # FLOCI_AZ_PARITY_OVERRIDES_STRICT_LOCATIONS; default on from strict.
     #                               # A resource PUT naming a location the cloud does not offer is
     #                               # 400 NoRegisteredProviderFound
@@ -393,9 +396,9 @@ floci-az:
       enabled: true       # FLOCI_AZ_SERVICES_MANAGEMENT_GROUPS_ENABLED: Microsoft.Management management groups and subscription membership
 
   auth:
-    # Not enforced yet: every value behaves like dev, accepting any credentials without
-    # SharedKey signature validation. Blob service SAS signatures are checked against
-    # storage-account-keys below regardless of this setting.
+    # Not enforced yet: every value behaves like dev. Storage account key signatures are
+    # checked through parity-overrides.strict-storage-keys; every SAS the Blob service
+    # serves is checked against the account's keys regardless of this setting.
     mode: dev
-    storage-account-keys:
+    storage-account-keys:           # key1 of each account (the development key otherwise); key2 is random
       devstoreaccount1: "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="

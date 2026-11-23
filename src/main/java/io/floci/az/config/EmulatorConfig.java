@@ -197,6 +197,16 @@ public interface EmulatorConfig {
     }
 
     /**
+     * Whether the Blob, Queue and Table data planes refuse a Shared Key, Shared Key Lite or account SAS request that
+     * none of the account's current keys signed, or a Shared Key request dated more than 15 minutes ago. On from
+     * {@code parity: strict}; {@code parity-overrides.strict-storage-keys} overrides it either way. The Blob service
+     * checks every SAS it serves either way.
+     */
+    default boolean strictStorageKeys() {
+        return parityOverrides().strictStorageKeys().orElse(parity().includes(ParityLevel.STRICT));
+    }
+
+    /**
      * {@code floci-az.parity-overrides}: each switch is unset by default and then follows {@link #parity()}.
      * Later phases add their own switches here.
      */
@@ -236,6 +246,9 @@ public interface EmulatorConfig {
 
         /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictSearchKeys()}. */
         Optional<Boolean> strictSearchKeys();
+
+        /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictStorageKeys()}. */
+        Optional<Boolean> strictStorageKeys();
     }
 
     /** The cloud a tenant lives in when nothing else names one. */
@@ -926,15 +939,16 @@ public interface EmulatorConfig {
 
     interface AuthConfig {
         /**
-         * Reserved; nothing reads it today. Every value, {@code strict} included, behaves like
-         * {@code dev}: any credentials are accepted and SharedKey signatures are not validated.
-         * Blob service SAS signatures are checked against {@link #storageAccountKeys()}
-         * independently of this setting.
+         * Reserved; nothing reads it today. Every value, {@code strict} included, behaves like {@code dev}. Storage
+         * account key signatures are checked through {@code parity-overrides.strict-storage-keys}.
          */
         @WithDefault("dev")
         String mode();
 
-        /** Base64 account keys used to validate shared-key Blob service SAS signatures. */
+        /**
+         * Base64 {@code key1} of each named storage account; an account with none has the development key. Its
+         * {@code key2} is random, and {@code regenerateKey} replaces either one.
+         */
         Map<String, String> storageAccountKeys();
     }
 

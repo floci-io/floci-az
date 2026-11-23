@@ -87,6 +87,8 @@ floci-az:
 
 ## Intentional deviations
 
-- **Shared Key signatures are accepted but not cryptographically verified.**
-- **No SAS enforcement**: SAS query parameters are parsed but not validated.
+- **Shared Key signatures are verified only with `parity-overrides.strict-storage-keys`**, as are
+  account SAS signatures; see [Account keys](blob.md#account-keys).
+- **No SAS permission enforcement**: a SAS's permissions are not checked, and a service SAS's
+  signature is not verified.
 - **Message dequeue count** is tracked but `maxDequeueCount` poison-message handling is not modeled.

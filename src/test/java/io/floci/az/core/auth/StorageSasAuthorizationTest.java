@@ -2,6 +2,8 @@ package io.floci.az.core.auth;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
+import io.floci.az.core.storage.InMemoryStorage;
+import io.floci.az.core.storage.StorageFactory;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 
@@ -43,7 +45,10 @@ class StorageSasAuthorizationTest {
     private Optional<Response> authorize(String account, String key) throws Exception {
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.auth().storageAccountKeys()).thenReturn(Map.of("customaccount", CUSTOM_KEY));
-        StorageSasAuthorization authorization = new StorageSasAuthorization(new UserDelegationKeyMaterial(), config);
+        StorageFactory storageFactory = mock(StorageFactory.class);
+        when(storageFactory.create(StorageAccountKeys.STORE)).thenReturn(new InMemoryStorage<>());
+        StorageSasAuthorization authorization = new StorageSasAuthorization(new UserDelegationKeyMaterial(),
+                new StorageAccountKeys(storageFactory, config));
         String expiry = Instant.now().plusSeconds(3600).toString();
         String fields = "r\n\n" + expiry + "\n/blob/" + account + "/container/file\n\n\n\n2020-12-06\nb\n\n\n\n\n\n\n";
         Mac mac = Mac.getInstance("HmacSHA256");

@@ -173,10 +173,37 @@ floci-az:
 | `storage.services.blob.mode` | `FLOCI_AZ_STORAGE_SERVICES_BLOB_MODE` | *(inherits `storage.mode`)* | Per-service backend override (`memory` / `persistent` / `hybrid` / `wal`) |
 | `storage.services.blob.flush-interval-ms` | `FLOCI_AZ_STORAGE_SERVICES_BLOB_FLUSH_INTERVAL_MS` | `5000` | Background flush-to-disk interval for the `hybrid` mode only; ignored by `memory` / `persistent` / `wal` (`wal` compacts on `storage.wal.compaction-interval-ms` instead) |
 
+## Account keys
+
+Each storage account has two keys, as in Azure, shared by its Blob, Queue and Table services:
+
+- `key1` is the account's entry under `floci-az.auth.storage-account-keys`, or the well-known development
+  storage key when it has none, so clients that sign with either keep working.
+- `key2` is 512 random bits, created the first time anything asks for the account's keys.
+- ARM `listKeys` returns both, each with its `creationTime`. `regenerateKey` (`{"keyName":"key1"}` or
+  `"key2"`) replaces the named key with 512 random bits, leaves the other one as it is, and answers with
+  both. Deleting the account drops its keys.
+- Keys are kept in the `storage-account-keys` store, which follows the global storage mode.
+
+Requests signed with an account key are checked against the current keys:
+
+| Credential | Default | With `parity-overrides.strict-storage-keys` |
+|---|---|---|
+| Blob service SAS, Blob account SAS | Verified | Verified |
+| Shared Key and Shared Key Lite (Blob, Queue, Table) | Accepted; the key that signed is recorded | Verified; the request date must also be at most 15 minutes old |
+| Queue and Table account SAS | Accepted; the key that signed is recorded | Verified |
+
+A request that fails is answered `403 AuthenticationFailed`, with the request id and time in the
+message, and (Blob and Queue) an `AuthenticationErrorDetail` that names the string the emulator signed.
+The account is the one the URL addresses: a header that names another account fails. For path-style
+URLs the account name appears twice in the canonicalized resource (`/devstoreaccount1/devstoreaccount1/...`),
+as for the Azure storage emulators. Queue and Table service SAS are not verified.
+
 ## Intentional deviations
 
-- **Shared Key signatures are accepted but not cryptographically verified**: the emulator is a
-  local dev target; any well-formed `Authorization` header (or the Azurite key) is honored.
+- **Shared Key signatures are verified only with `parity-overrides.strict-storage-keys`**: by
+  default any well-formed `Authorization` header is honored, and floci-az only records which
+  account key signed it. See [Account keys](#account-keys).
 - **ADLS large-operation behavior is simplified** - directory rename and recursive delete complete
   atomically in the local backend rather than reproducing Azure's server-side multi-request batching.
   Hadoop observes a completed operation with no continuation token, which is protocol-compatible for
@@ -188,13 +215,12 @@ floci-az:
 - **ADLS close/event semantics are storage-only** - `close=true` is accepted and committed data is
   immediately visible, but Azure Event Grid/change-notification side effects are not emulated.
 - **SAS enforcement supports shared-key service SAS and user delegation SAS.** Service SAS
-  signatures use `floci-az.auth.storage-account-keys`, a map from account names to base64 keys.
-  Accounts without an explicit entry use the standard Azurite key, including ARM-created accounts.
-  Explicit entries take precedence. ARM `listKeys` on a storage account returns the same key
-  (configured or default) as `key1` and `key2`, so a SAS signed with a listed key is accepted.
-  Invalid signatures are rejected, including in dev mode,
-  as are expired tokens and operations outside the granted permissions. This is separate from
-  the permissive Shared Key `Authorization` header behavior above.
+  and account SAS signatures are checked against the account's current `key1` and `key2`
+  ([Account keys](#account-keys)). Invalid signatures are rejected, including in dev mode,
+  as are expired tokens and operations outside the granted permissions. An account SAS must also
+  grant the Blob service (`ss`) and the level the request addresses (`srt`: `s` for the service,
+  `c` for a container, `o` for a blob). This is separate from the permissive Shared Key
+  `Authorization` header behavior above.
   Shared-key service SAS supports directory scope (`sr=d`). Directory service SAS requires
   `sdd` and version 2020-02-10 or later. SDK-generated user delegation SAS tokens
   for container (`sr=c`), blob (`sr=b`), Blob snapshot (`sr=bs`), and ADLS directory (`sr=d`)
