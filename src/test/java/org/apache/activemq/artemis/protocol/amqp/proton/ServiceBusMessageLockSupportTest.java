@@ -146,6 +146,36 @@ class ServiceBusMessageLockSupportTest {
     }
 
     @Test
+    void aDeliveryFreedWithItsSessionIsStillParked() throws Exception {
+        // A client that ends its session or connection without detaching the link: Artemis frees the proton
+        // session before it closes the sender, and freeing settles every delivery locally.
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Queue queue = fixture.parkable();
+            when(fixture.delivery.isSettled()).thenReturn(true);
+
+            fixture.park();
+
+            verify(fixture.consumer).removeReferenceByID(fixture.reference.getMessageID());
+            verify(queue, never()).cancel(any(MessageReference.class), anyLong());
+            fixture.expiry.get().run();
+            verify(queue).cancel(eq(fixture.reference), anyLong());
+        }
+    }
+
+    @Test
+    void parkSkipsADeliveryThePeerSettled() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            when(fixture.delivery.remotelySettled()).thenReturn(true);
+
+            fixture.park();
+
+            verify(fixture.consumer, never()).removeReferenceByID(anyLong());
+        }
+    }
+
+    @Test
     void parkSkipsAReferenceTheConsumerNoLongerHolds() throws Exception {
         try (Fixture fixture = new Fixture()) {
             fixture.track(false);

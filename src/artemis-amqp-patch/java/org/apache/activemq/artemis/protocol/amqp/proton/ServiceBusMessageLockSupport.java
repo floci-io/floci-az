@@ -204,7 +204,10 @@ public final class ServiceBusMessageLockSupport {
          MessageLock lock = entry.getValue();
          locks.remove(entry.getKey());
          lock.timer.cancel(false);
-         if (entry.getKey().isSettled()) {
+         // Only the peer's settlement counts. A client that ends its session or connection without detaching the
+         // link first reaches here after Artemis has freed the proton session, and freeing settles every delivery
+         // locally, so isSettled() would be true for the very messages this has to keep locked.
+         if (entry.getKey().remotelySettled()) {
             continue;
          }
          MessageReference reference;
