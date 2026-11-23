@@ -91,8 +91,9 @@ How it departs from Azure:
   with `;EntityPath={entity}` for a queue or topic rule. The host and port are the AMQP endpoint
   `GET /{account}-servicebus/namespaces` reports for that namespace, because nothing serves
   `{ns}.servicebus.windows.net`. The keys are real random values, but floci-az does not check them.
-- **Entities are not updated in place yet.** A `PUT` of a queue, topic or subscription that exists
-  answers it unchanged, as the Atom API does; the ARM-only properties it sends (`status`,
+- **Entities are not updated in place through ARM yet.** An ARM `PUT` of a queue, topic or subscription
+  that exists answers it unchanged (the Atom API's `If-Match` update, which the SDK administration
+  clients send, does apply new settings); the ARM-only properties it sends (`status`,
   `enablePartitioning`, `enableExpress`, `forwardTo` and similar) are stored and echoed, but the broker
   settings stay as they were created. Rules, authorization rules and namespaces are updated.
 - **The network rule set is stored, not enforced**, and is answered with Azure's defaults

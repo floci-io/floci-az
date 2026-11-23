@@ -7,6 +7,7 @@ import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.activemq.artemis.core.server.RoutingContext;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
+import org.apache.activemq.artemis.core.server.impl.RoutingContextImpl;
 import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerPlugin;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
 import org.apache.qpid.proton.Proton;
@@ -155,6 +156,21 @@ class ServiceBusExpiryPluginTest {
         assertNull(copy.getObjectProperty("DeadLetterErrorDescription"));
     }
 
+    @Test
+    void divertedMessagesUseTheirOwnAddressForSubscriptionExpiry() throws Exception {
+        configure(2_000);
+        AMQPStandardMessage message = message();
+        message.setAddress("orders");
+        when(queue.isDurable()).thenReturn(true);
+        RoutingContext context = new RoutingContextImpl(null);
+        context.addQueue(SimpleString.of("orders"), queue);
+        assertNull(context.getAddress(), "A divert does not set an explicit context address");
+
+        plugin.afterMessageRoute(message, context, false, false, RoutingStatus.OK);
+
+        verify(pool).schedule(any(Runnable.class), eq(2_000L), eq(TimeUnit.MILLISECONDS));
+    }
+
     private void configure(long ttlMillis) throws Exception {
         type.getMethod("configure", String.class, long.class, String.class)
                 .invoke(plugin, "orders", ttlMillis, DEAD_LETTER_ADDRESS);
@@ -166,7 +182,7 @@ class ServiceBusExpiryPluginTest {
 
     private void route(AMQPStandardMessage message) throws Exception {
         RoutingContext context = mock(RoutingContext.class);
-        when(context.getAddress()).thenReturn(SimpleString.of("orders"));
+        when(context.getAddress(message)).thenReturn(SimpleString.of("orders"));
         when(context.getDurableQueues(any())).thenReturn(List.of(queue));
         when(context.getNonDurableQueues(any())).thenReturn(List.of());
         plugin.afterMessageRoute(message, context, false, false, RoutingStatus.OK);

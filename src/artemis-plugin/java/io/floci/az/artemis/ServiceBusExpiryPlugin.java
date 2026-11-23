@@ -177,8 +177,10 @@ public final class ServiceBusExpiryPlugin
             return;
         }
 
-        Set<Queue> queues = new HashSet<>(context.getDurableQueues(context.getAddress()));
-        queues.addAll(context.getNonDurableQueues(context.getAddress()));
+        // Diverts leave the context address unset and route using the copied message's address.
+        SimpleString address = context.getAddress(message);
+        Set<Queue> queues = new HashSet<>(context.getDurableQueues(address));
+        queues.addAll(context.getNonDurableQueues(address));
         ActiveMQServer activeServer = server;
         if (activeServer == null) {
             return;

@@ -427,6 +427,219 @@ public class ServiceBusServiceTest {
                 .body(containsString("AutoDeleteOnIdle must be at least PT5M"));
     }
 
+    @Test
+    void updatingAQueueWithIfMatchAppliesTheNewSettings() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/update-queue")
+                .then().statusCode(201);
+
+        given().header("If-Match", "*").body(queueDescription("PT50S", 7))
+                .when().put(BASE + "/update-queue")
+                .then().statusCode(200)
+                .body(containsString("<LockDuration>PT50S</LockDuration>"))
+                .body(containsString("<MaxDeliveryCount>7</MaxDeliveryCount>"));
+
+        given().when().get(BASE + "/update-queue")
+                .then().statusCode(200)
+                .body(containsString("<LockDuration>PT50S</LockDuration>"))
+                .body(containsString("<MaxDeliveryCount>7</MaxDeliveryCount>"));
+    }
+
+    @Test
+    void updatingAQueueKeepsRequiresSessionFromCreation() {
+        given().body(entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                        + "<RequiresSession>true</RequiresSession></QueueDescription>"))
+                .when().put(BASE + "/update-session-queue")
+                .then().statusCode(201);
+
+        given().header("If-Match", "*").body(queueDescription("PT50S", 7))
+                .when().put(BASE + "/update-session-queue")
+                .then().statusCode(200)
+                .body(containsString("<RequiresSession>true</RequiresSession>"));
+    }
+
+    @Test
+    void puttingAnExistingQueueWithoutIfMatchLeavesItUnchanged() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/recreate-queue")
+                .then().statusCode(201);
+
+        given().body(queueDescription("PT50S", 7))
+                .when().put(BASE + "/recreate-queue")
+                .then().statusCode(200)
+                .body(containsString("<MaxDeliveryCount>3</MaxDeliveryCount>"));
+    }
+
+    @Test
+    void updatingATopicWithIfMatchAppliesTheNewSettings() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/update-topic")
+                .then().statusCode(201)
+                .body(containsString("<EnableSubscriptionPartitioning>false</EnableSubscriptionPartitioning>"))
+                .body(containsString("<IsAnonymousAccessible>false</IsAnonymousAccessible>"));
+
+        given().header("If-Match", "*")
+                .body(entry("<TopicDescription xmlns=\"" + SB_NS + "\">"
+                        + "<DefaultMessageTimeToLive>PT1H</DefaultMessageTimeToLive>"
+                        + "<UserMetadata>updated</UserMetadata>"
+                        + "</TopicDescription>"))
+                .when().put(BASE + "/update-topic")
+                .then().statusCode(200)
+                .body(containsString("<DefaultMessageTimeToLive>PT1H</DefaultMessageTimeToLive>"))
+                .body(containsString("<UserMetadata>updated</UserMetadata>"));
+
+        given().when().get(BASE + "/update-topic")
+                .then().statusCode(200)
+                .body(containsString("<DefaultMessageTimeToLive>PT1H</DefaultMessageTimeToLive>"))
+                .body(containsString("<UserMetadata>updated</UserMetadata>"));
+    }
+
+    @Test
+    void updatingASubscriptionWithIfMatchAppliesTheNewSettings() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/update-sub-topic")
+                .then().statusCode(201);
+        given().body(subscriptionDescription("PT30S", 3))
+                .when().put(BASE + "/update-sub-topic/subscriptions/update-sub")
+                .then().statusCode(201);
+
+        given().header("If-Match", "*").body(subscriptionDescription("PT50S", 7))
+                .when().put(BASE + "/update-sub-topic/subscriptions/update-sub")
+                .then().statusCode(200)
+                .body(containsString("<LockDuration>PT50S</LockDuration>"))
+                .body(containsString("<MaxDeliveryCount>7</MaxDeliveryCount>"));
+
+        given().when().get(BASE + "/update-sub-topic/subscriptions/update-sub")
+                .then().statusCode(200)
+                .body(containsString("<LockDuration>PT50S</LockDuration>"))
+                .body(containsString("<MaxDeliveryCount>7</MaxDeliveryCount>"));
+    }
+
+    @Test
+    void updatingAMissingQueueAnswersNotFoundWithoutCreatingIt() {
+        given().header("If-Match", "*").body(queueDescription("PT50S", 7))
+                .when().put(BASE + "/update-missing-queue")
+                .then().statusCode(404);
+
+        given().when().get(BASE + "/update-missing-queue")
+                .then().statusCode(404);
+    }
+
+    @Test
+    void updatingAMissingTopicAnswersNotFoundWithoutCreatingIt() {
+        given().header("If-Match", "*").body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/update-missing-topic")
+                .then().statusCode(404);
+
+        given().when().get(BASE + "/update-missing-topic")
+                .then().statusCode(404);
+    }
+
+    @Test
+    void updatingAMissingSubscriptionAnswersNotFound() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/update-missing-sub-topic")
+                .then().statusCode(201);
+
+        given().header("If-Match", "*").body(subscriptionDescription("PT50S", 7))
+                .when().put(BASE + "/update-missing-sub-topic/subscriptions/missing")
+                .then().statusCode(404);
+    }
+
+    @Test
+    void updatingAQueueThatChangesRequiresSessionIsRejected() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/update-flip-session-queue")
+                .then().statusCode(201);
+
+        given().header("If-Match", "*")
+                .body(entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                        + "<RequiresSession>true</RequiresSession></QueueDescription>"))
+                .when().put(BASE + "/update-flip-session-queue")
+                .then().statusCode(400)
+                .body(containsString("RequiresSession"));
+
+        given().when().get(BASE + "/update-flip-session-queue")
+                .then().statusCode(200)
+                .body(containsString("<RequiresSession>false</RequiresSession>"));
+    }
+
+    @Test
+    void updatingAQueueThatChangesRequiresDuplicateDetectionIsRejected() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/update-flip-dedup-queue")
+                .then().statusCode(201);
+
+        given().header("If-Match", "*")
+                .body(entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                        + "<RequiresDuplicateDetection>true</RequiresDuplicateDetection></QueueDescription>"))
+                .when().put(BASE + "/update-flip-dedup-queue")
+                .then().statusCode(400)
+                .body(containsString("RequiresDuplicateDetection"));
+    }
+
+    @Test
+    void updatingAQueueThatRestatesItsFixedSettingsIsAccepted() {
+        given().body(entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                        + "<RequiresSession>true</RequiresSession></QueueDescription>"))
+                .when().put(BASE + "/update-restate-queue")
+                .then().statusCode(201);
+
+        given().header("If-Match", "*")
+                .body(entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                        + "<LockDuration>PT50S</LockDuration>"
+                        + "<RequiresDuplicateDetection>false</RequiresDuplicateDetection>"
+                        + "<RequiresSession>true</RequiresSession></QueueDescription>"))
+                .when().put(BASE + "/update-restate-queue")
+                .then().statusCode(200)
+                .body(containsString("<LockDuration>PT50S</LockDuration>"));
+    }
+
+    @Test
+    void updatingATopicThatChangesRequiresDuplicateDetectionIsRejected() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/update-flip-dedup-topic")
+                .then().statusCode(201);
+
+        given().header("If-Match", "*")
+                .body(entry("<TopicDescription xmlns=\"" + SB_NS + "\">"
+                        + "<RequiresDuplicateDetection>true</RequiresDuplicateDetection></TopicDescription>"))
+                .when().put(BASE + "/update-flip-dedup-topic")
+                .then().statusCode(400)
+                .body(containsString("RequiresDuplicateDetection"));
+    }
+
+    @Test
+    void updatingASubscriptionThatChangesRequiresSessionIsRejected() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/update-flip-session-topic")
+                .then().statusCode(201);
+        given().body(subscriptionDescription("PT30S", 3))
+                .when().put(BASE + "/update-flip-session-topic/subscriptions/sub")
+                .then().statusCode(201);
+
+        given().header("If-Match", "*")
+                .body(entry("<SubscriptionDescription xmlns=\"" + SB_NS + "\">"
+                        + "<RequiresSession>true</RequiresSession></SubscriptionDescription>"))
+                .when().put(BASE + "/update-flip-session-topic/subscriptions/sub")
+                .then().statusCode(400)
+                .body(containsString("RequiresSession"));
+    }
+
+    private static String queueDescription(String lockDuration, int maxDeliveryCount) {
+        return entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                + "<LockDuration>" + lockDuration + "</LockDuration>"
+                + "<MaxDeliveryCount>" + maxDeliveryCount + "</MaxDeliveryCount>"
+                + "</QueueDescription>");
+    }
+
+    private static String subscriptionDescription(String lockDuration, int maxDeliveryCount) {
+        return entry("<SubscriptionDescription xmlns=\"" + SB_NS + "\">"
+                + "<LockDuration>" + lockDuration + "</LockDuration>"
+                + "<MaxDeliveryCount>" + maxDeliveryCount + "</MaxDeliveryCount>"
+                + "</SubscriptionDescription>");
+    }
+
     private static String entry(String description) {
         return "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
                 + description + "</content></entry>";
