@@ -270,9 +270,11 @@ class EventGridHandlerTest {
             .when().post("/" + TOPIC + "-eventgrid/api/events")
             .then().statusCode(200);
 
-        // Give the async delivery scheduler a chance to (not) deliver.
-        Thread.sleep(1000);
-        assertTrue(notifications.isEmpty(), "event under /shipments should not match subjectBeginsWith=/orders");
+        // Delivery runs in publish order on one thread, so once a later matching event arrives, a
+        // dispatched /shipments event would already have arrived before it.
+        publishBarrierEvent("/orders/barrier");
+        assertEquals("evt-barrier", awaitNotification().path("id").asText());
+        assertEquals(1, notifications.size(), "event under /shipments should not match subjectBeginsWith=/orders");
     }
 
     @Test
@@ -349,7 +351,11 @@ class EventGridHandlerTest {
             Thread.sleep(100);
         }
         assertEquals(2, failedDeliveries.get(), "both attempts should reach the failing endpoint");
-        Thread.sleep(500);
+        // The last attempt drops or dead-letters the event on the delivery thread, before the thread
+        // runs the barrier's delivery, so the barrier arriving means that decision is made.
+        createSubscription("barrier", "/barrier");
+        publishBarrierEvent("/barrier/1");
+        assertEquals("evt-barrier", awaitNotification().path("id").asText());
         assertTrue(listBlobs("deadletter-none").isEmpty(), "no blob may be written without a dead-letter destination");
     }
 
@@ -519,6 +525,15 @@ class EventGridHandlerTest {
     private void publishOrderEvent(String id) {
         String events = "[{\"id\":\"" + id + "\",\"subject\":\"/orders/123\",\"eventType\":\"Order.Created\","
                 + "\"eventTime\":\"2026-06-20T00:00:00Z\",\"dataVersion\":\"1.0\",\"data\":{\"orderId\":123}}]";
+        given().contentType("application/json").body(events)
+            .when().post("/" + TOPIC + "-eventgrid/api/events")
+            .then().statusCode(200);
+    }
+
+    /** An event published after the one under test, whose delivery marks the delivery thread as past it. */
+    private void publishBarrierEvent(String subject) {
+        String events = "[{\"id\":\"evt-barrier\",\"subject\":\"" + subject + "\",\"eventType\":\"Barrier\","
+                + "\"eventTime\":\"2026-06-20T00:00:00Z\",\"dataVersion\":\"1.0\",\"data\":{}}]";
         given().contentType("application/json").body(events)
             .when().post("/" + TOPIC + "-eventgrid/api/events")
             .then().statusCode(200);
