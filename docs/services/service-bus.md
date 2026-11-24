@@ -31,6 +31,14 @@ the dead-letter queue. Explicitly closing a session without settling its message
 increment the count. Completed messages remain removed. This follows Azure's
 [session delivery-count contract](https://learn.microsoft.com/azure/service-bus-messaging/message-sessions#impact-of-delivery-count).
 
+## Entity names and case
+
+As in Azure, the data plane compares entity paths ignoring case. A queue created as `orders`
+accepts senders and receivers on `ORDERS` or `Orders`, and the same holds for topics,
+subscriptions (`Events/subscriptions/WORKER`), dead-letter queues and entity management nodes.
+The broker keeps the spelling the entity was created with. The Atom management API still matches
+the entity name in the request path exactly.
+
 ## Management plane
 
 Entity CRUD is served over HTTP at `/{account}-servicebus/`:

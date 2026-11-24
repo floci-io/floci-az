@@ -383,7 +383,7 @@
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java"
                                     token="address = SimpleString.of(targetAddress);"
-                                    value="address = SimpleString.of(AmqpEntityAddress.toEntityPath(targetAddress));"
+                                    value="address = SimpleString.of(ServiceBusSessionSupport.targetEntityPath(sessionSPI.getProtocolManager().getServer(), targetAddress));"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java"
