@@ -52,6 +52,8 @@ class AciDockerTest {
     private static final String RG   = "test-rg-aci-docker";
     private static final String NAME = "docker-test-group";
     private static final String API  = "?api-version=2023-05-01";
+    /** How often the waits below re-read the group; the deadlines, not this, bound each wait. */
+    private static final long POLL_MILLIS = 500;
     private static final String GROUP_PATH =
             "/subscriptions/" + SUB + "/resourceGroups/" + RG
                     + "/providers/Microsoft.ContainerInstance/containerGroups/" + NAME;
@@ -74,7 +76,7 @@ class AciDockerTest {
                     "name": "sidecar",
                     "properties": {
                       "image": "busybox:stable",
-                      "command": ["sh", "-c", "while true; do wget -qO- http://localhost:5678 || true; sleep 1; done"],
+                      "command": ["sh", "-c", "trap 'exit 0' TERM; while true; do wget -qO- http://localhost:5678 || true; sleep 1 & wait $!; done"],
                       "resources": {"requests": {"cpu": 0.25, "memoryInGB": 0.125}}
                     }
                   }
@@ -139,7 +141,7 @@ class AciDockerTest {
         long deadline = System.currentTimeMillis() + 30_000;
         String content = "";
         while (!content.contains("hello-from-pod") && System.currentTimeMillis() < deadline) {
-            Thread.sleep(2_000);
+            Thread.sleep(POLL_MILLIS);
             Response r = given().when().get(GROUP_PATH + "/containers/sidecar/logs" + API);
             if (r.statusCode() == 200) {
                 content = r.path("content");
@@ -167,16 +169,19 @@ class AciDockerTest {
     @DisplayName("stop halts the containers; start brings them back")
     void stopThenStart() throws InterruptedException {
         given().when().post(GROUP_PATH + "/stop" + API).then().statusCode(204);
-        Thread.sleep(2_000);
-        given().when().get(GROUP_PATH + API)
-                .then().statusCode(200)
-                .body("properties.instanceView.state", equalTo("Stopped"));
+        long stopDeadline = System.currentTimeMillis() + 30_000;
+        String stopped = given().when().get(GROUP_PATH + API).path("properties.instanceView.state");
+        while (!"Stopped".equals(stopped) && System.currentTimeMillis() < stopDeadline) {
+            Thread.sleep(POLL_MILLIS);
+            stopped = given().when().get(GROUP_PATH + API).path("properties.instanceView.state");
+        }
+        assertEquals("Stopped", stopped, "group did not report Stopped after stop");
 
         given().when().post(GROUP_PATH + "/start" + API).then().statusCode(202);
         long deadline = System.currentTimeMillis() + 60_000;
         String state = "Stopped";
         while (!"Running".equals(state) && System.currentTimeMillis() < deadline) {
-            Thread.sleep(2_000);
+            Thread.sleep(POLL_MILLIS);
             state = given().when().get(GROUP_PATH + API).path("properties.instanceView.state");
         }
         assertEquals("Running", state, "group did not return to Running after start");
@@ -227,7 +232,7 @@ class AciDockerTest {
             long deadline = System.currentTimeMillis() + 90_000;
             String state = "Creating";
             while ("Creating".equals(state) && System.currentTimeMillis() < deadline) {
-                Thread.sleep(2_000);
+                Thread.sleep(POLL_MILLIS);
                 state = given().when().get(path + API).path("properties.provisioningState");
             }
             assertEquals("Succeeded", state,
@@ -261,7 +266,7 @@ class AciDockerTest {
                         "name": "only",
                         "properties": {
                           "image": "busybox:stable",
-                          "command": ["sh", "-c", "echo %s; sleep 300"],
+                          "command": ["sh", "-c", "echo %s; trap 'exit 0' TERM; sleep 300 & wait $!"],
                           "resources": {"requests": {"cpu": 0.25, "memoryInGB": 0.125}}
                         }
                       }
@@ -312,7 +317,7 @@ class AciDockerTest {
                         "name": "only",
                         "properties": {
                           "image": "busybox:stable",
-                          "command": ["sh", "-c", "sleep 300"],
+                          "command": ["sh", "-c", "trap 'exit 0' TERM; sleep 300 & wait $!"],
                           "resources": {"requests": {"cpu": 0.25, "memoryInGB": 0.125}}
                         }
                       }
@@ -337,7 +342,7 @@ class AciDockerTest {
             long deadline = System.currentTimeMillis() + 60_000;
             String state = "Stopped";
             while (!"Running".equals(state) && System.currentTimeMillis() < deadline) {
-                Thread.sleep(2_000);
+                Thread.sleep(POLL_MILLIS);
                 state = given().when().get(path + API).path("properties.instanceView.state");
             }
             assertEquals("Running", state, "start did not recreate the missing containers");
@@ -377,7 +382,7 @@ class AciDockerTest {
         long deadline = System.currentTimeMillis() + timeoutMs;
         String state = whileState;
         while (whileState.equals(state) && System.currentTimeMillis() < deadline) {
-            Thread.sleep(2_000);
+            Thread.sleep(POLL_MILLIS);
             state = given().when().get(path + API).path("properties.provisioningState");
         }
         return state;
@@ -388,7 +393,7 @@ class AciDockerTest {
         String state = "Creating";
         while (!"Succeeded".equals(state) && !"Failed".equals(state)
                 && System.currentTimeMillis() < deadline) {
-            Thread.sleep(3_000);
+            Thread.sleep(POLL_MILLIS);
             Response r = given().when().get(GROUP_PATH + API);
             if (r.statusCode() == 200) {
                 state = r.path("properties.provisioningState");

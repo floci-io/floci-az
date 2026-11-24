@@ -110,7 +110,7 @@ class VmDockerTest {
 
         while (!"Succeeded".equals(state) && !"Failed".equals(state)
                 && System.currentTimeMillis() < deadline) {
-            Thread.sleep(3_000);
+            Thread.sleep(500);
             Response r = given().when().get(VM_PATH + API);
             if (r.statusCode() == 200) {
                 state = r.path("properties.provisioningState");

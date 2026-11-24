@@ -33,6 +33,8 @@ import java.util.Map;
  * @param groupAdd Supplementary group IDs added to the container process
  * @param networkAliases Extra names the container answers to on {@code networkMode}, when that is a
  *        user-defined network (the daemon refuses aliases on a built-in one, so none are sent there)
+ * @param init Whether Docker runs its init process as PID 1 (Docker {@code --init}), so the container's
+ *        command gets the signals a stop sends instead of ignoring them as PID 1
  */
 public record ContainerSpec(
         String image,
@@ -55,8 +57,21 @@ public record ContainerSpec(
         String workingDir,
         String user,
         List<String> groupAdd,
-        List<String> networkAliases
+        List<String> networkAliases,
+        boolean init
 ) {
+    /** A spec without Docker's init process, for callers that predate it. */
+    public ContainerSpec(String image, String name, List<String> env, List<String> cmd, List<String> entrypoint,
+                         Long memoryBytes, Map<Integer, Integer> portBindings, List<Integer> exposedPorts,
+                         String networkMode, List<Mount> mounts, List<Bind> binds, List<String> extraHosts,
+                         Map<String, String> labels, LogConfig logConfig, boolean privileged, String cgroupnsMode,
+                         List<String> dnsServers, String workingDir, String user, List<String> groupAdd,
+                         List<String> networkAliases) {
+        this(image, name, env, cmd, entrypoint, memoryBytes, portBindings, exposedPorts, networkMode, mounts, binds,
+                extraHosts, labels, logConfig, privileged, cgroupnsMode, dnsServers, workingDir, user, groupAdd,
+                networkAliases, false);
+    }
+
     /** A spec without network aliases, for callers that predate them. */
     public ContainerSpec(String image, String name, List<String> env, List<String> cmd, List<String> entrypoint,
                          Long memoryBytes, Map<Integer, Integer> portBindings, List<Integer> exposedPorts,
