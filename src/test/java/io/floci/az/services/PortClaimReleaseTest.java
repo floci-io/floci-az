@@ -17,8 +17,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -155,12 +157,13 @@ class PortClaimReleaseTest {
     @DisplayName("stopServer releases the claim even when the container teardown throws")
     void stopServerReleasesClaimWhenTeardownFails() throws IOException {
         ContainerLifecycleManager.EndpointInfo endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", pgPort());
-        // The readiness probe connects to the claimed port, so something has to listen there while the
-        // server starts. It opens once the manager has claimed the port (the claim needs it free) and
-        // closes before the teardown, whose assertions reclaim the port.
+        // The readiness probe sends PostgreSQL's startup message to the claimed port and needs an answer, so
+        // something has to listen there and reply while the server starts. It opens once the manager has
+        // claimed the port (the claim needs it free) and closes before the teardown, whose assertions
+        // reclaim the port.
         ServerSocket[] engine = new ServerSocket[1];
         when(containerManager.createAndStart(any(ContainerSpec.class))).thenAnswer(invocation -> {
-            engine[0] = new ServerSocket(pgPort());
+            engine[0] = answeringAuthenticationOk(new ServerSocket(pgPort()));
             return new ContainerLifecycleManager.ContainerInfo("pg-running", Map.of(5432, endpoint));
         });
 
@@ -184,6 +187,28 @@ class PortClaimReleaseTest {
         assertEquals(pgPort(), portAllocator.claimOrZero(pgPort()),
             "a failed teardown must not strand the claim: the port is unreachable for every later create");
         portAllocator.release(pgPort());
+    }
+
+    /**
+     * Answers every connection on {@code socket} with PostgreSQL's AuthenticationOk ({@code 'R'}, length 8,
+     * code 0), the reply that tells the readiness probe the server accepts sessions.
+     */
+    private static ServerSocket answeringAuthenticationOk(ServerSocket socket) {
+        Thread acceptor = new Thread(() -> {
+            while (!socket.isClosed()) {
+                try (Socket client = socket.accept()) {
+                    OutputStream out = client.getOutputStream();
+                    out.write(new byte[] {'R', 0, 0, 0, 8, 0, 0, 0, 0});
+                    out.flush();
+                    client.getInputStream().readAllBytes();
+                } catch (IOException ignored) {
+                    // The socket closes when the test is done with it; nothing is left to answer.
+                }
+            }
+        });
+        acceptor.setDaemon(true);
+        acceptor.start();
+        return socket;
     }
 
     /**
