@@ -41,45 +41,72 @@ import static org.mockito.Mockito.mockConstruction;
 class ArtemisReadinessProbeTest {
 
     private static final byte[] AMQP_SASL_HEADER = {'A', 'M', 'Q', 'P', 3, 1, 0, 0};
+    /** The production timing scaled down tenfold, so deadline tests wait milliseconds rather than seconds. */
+    private static final ArtemisReadinessProbe.Timing FAST = new ArtemisReadinessProbe.Timing(100L, 50L);
 
     @ParameterizedTest
     @MethodSource("unresponsiveEndpoints")
-    void unresponsiveEndpointReachesReadinessDeadline(String host, int timeoutSeconds) {
-        try (MockedConstruction<Socket> sockets = mockConstruction(Socket.class, (socket, context) ->
-                doAnswer(invocation -> {
-                    int timeoutMillis = invocation.getArgument(1);
-                    assertTrue(timeoutMillis > 0, "connect must have a finite deadline");
-                    assertTrue(timeoutMillis <= 1_000, "connect must stay within its one-second budget");
-                    Thread.sleep(timeoutMillis);
-                    throw new SocketTimeoutException("endpoint no longer replies");
-                }).when(socket).connect(any(), anyInt()))) {
-            RuntimeException failure = assertTimeout(Duration.ofSeconds(timeoutSeconds).plusMillis(300), () ->
-                    assertThrows(RuntimeException.class, () ->
-                            ArtemisReadinessProbe.awaitAmqp(new EndpointInfo(host, 5672), timeoutSeconds)));
-            assertTrue(failure.getMessage().contains("within " + timeoutSeconds + "s"));
+    void unresponsiveEndpointReachesReadinessDeadline(String host, int timeoutMillis) {
+        try (MockedConstruction<Socket> sockets = unresponsiveSockets(FAST.attemptMillis())) {
+            RuntimeException failure = assertTimeout(Duration.ofMillis(timeoutMillis + 300L), () ->
+                    assertThrows(RuntimeException.class, () -> ArtemisReadinessProbe.awaitAmqp(
+                            new EndpointInfo(host, 5672), Duration.ofMillis(timeoutMillis), FAST)));
+            assertTrue(failure.getMessage().contains("within " + timeoutMillis + "ms"));
         }
     }
 
     static Stream<Arguments> unresponsiveEndpoints() {
-        return Stream.of(Arguments.of(null, 1), Arguments.of("192.0.2.1", 1),
-                Arguments.of("192.0.2.1", 2));
+        return Stream.of(Arguments.of(null, 200), Arguments.of("192.0.2.1", 200),
+                Arguments.of("192.0.2.1", 400));
+    }
+
+    @Test
+    void theSecondsApiKeepsItsOneSecondAttemptBudget() {
+        // A 2 s budget leaves room above one second, so a larger or smaller attempt budget shows in the
+        // first connect's timeout. The connect stops the probe at once instead of waiting it out.
+        List<Integer> connectTimeouts = new CopyOnWriteArrayList<>();
+        try (MockedConstruction<Socket> sockets = mockConstruction(Socket.class, (socket, context) ->
+                doAnswer(invocation -> {
+                    connectTimeouts.add(invocation.getArgument(1));
+                    throw new IllegalStateException("stop after the first connect");
+                }).when(socket).connect(any(), anyInt()))) {
+            assertThrows(IllegalStateException.class, () ->
+                    ArtemisReadinessProbe.awaitAmqp(new EndpointInfo("192.0.2.1", 5672), 2));
+            assertEquals(List.of(1_000), connectTimeouts);
+        }
+    }
+
+    /** Sockets whose connect waits out its whole timeout, which must be finite and within {@code budgetMillis}. */
+    private static MockedConstruction<Socket> unresponsiveSockets(long budgetMillis) {
+        return mockConstruction(Socket.class, (socket, context) ->
+                doAnswer(invocation -> {
+                    int timeoutMillis = invocation.getArgument(1);
+                    assertTrue(timeoutMillis > 0, "connect must have a finite deadline");
+                    assertTrue(timeoutMillis <= budgetMillis, "connect must stay within its attempt budget");
+                    Thread.sleep(timeoutMillis);
+                    throw new SocketTimeoutException("endpoint no longer replies");
+                }).when(socket).connect(any(), anyInt()));
     }
 
     @Test
     void quickFailureRetriesWithoutSleepingPastRemainingBudget() {
+        // The first connect fails at once, the pause takes 200 of the 300 ms, and the second connect waits out
+        // the remaining 100 ms. A pause clamped to the deadline ends the probe near 300 ms; an unclamped one
+        // sleeps another 200 ms, past the 400 ms limit.
+        ArtemisReadinessProbe.Timing longPause = new ArtemisReadinessProbe.Timing(1_000L, 200L);
         try (MockedConstruction<Socket> sockets = mockConstruction(Socket.class, (socket, context) ->
                 doAnswer(invocation -> {
                     if (context.getCount() > 1) {
                         int timeoutMillis = invocation.getArgument(1);
-                        Thread.sleep(Math.min(400, timeoutMillis));
+                        Thread.sleep(timeoutMillis);
                     }
                     throw new SocketTimeoutException("endpoint no longer replies");
                 }).when(socket).connect(any(), anyInt()))) {
-            RuntimeException failure = assertTimeout(Duration.ofMillis(1_300), () ->
-                    assertThrows(RuntimeException.class, () ->
-                            ArtemisReadinessProbe.awaitAmqp(new EndpointInfo("192.0.2.1", 5672), 1)));
+            RuntimeException failure = assertTimeout(Duration.ofMillis(400), () ->
+                    assertThrows(RuntimeException.class, () -> ArtemisReadinessProbe.awaitAmqp(
+                            new EndpointInfo("192.0.2.1", 5672), Duration.ofMillis(300), longPause)));
             assertTrue(sockets.constructed().size() >= 2, "an immediate failure must retry within the deadline");
-            assertTrue(failure.getMessage().contains("within 1s"));
+            assertTrue(failure.getMessage().contains("within 300ms"));
         }
     }
 
@@ -88,8 +115,8 @@ class ArtemisReadinessProbeTest {
         // What Docker Desktop's port forwarder does while nothing in the container listens yet.
         try (FakeListener listener = FakeListener.plain(connectionNumber -> false)) {
             RuntimeException failure = assertThrows(RuntimeException.class, () ->
-                    ArtemisReadinessProbe.awaitAmqp(listener.endpoint(), 1));
-            assertTrue(failure.getMessage().contains("within 1s"));
+                    ArtemisReadinessProbe.awaitAmqp(listener.endpoint(), Duration.ofMillis(300), FAST));
+            assertTrue(failure.getMessage().contains("within 300ms"));
             assertTrue(listener.accepted() >= 1, "the probe must have connected");
         }
     }
@@ -105,7 +132,8 @@ class ArtemisReadinessProbeTest {
     @Test
     void theProbeKeepsTryingUntilTheBrokerAnswers() throws Exception {
         try (FakeListener listener = FakeListener.plain(connectionNumber -> connectionNumber >= 3)) {
-            assertDoesNotThrow(() -> ArtemisReadinessProbe.awaitAmqp(listener.endpoint(), 10));
+            assertDoesNotThrow(() ->
+                    ArtemisReadinessProbe.awaitAmqp(listener.endpoint(), Duration.ofSeconds(10), FAST));
             assertEquals(3, listener.accepted());
         }
     }
@@ -123,18 +151,18 @@ class ArtemisReadinessProbeTest {
         TlsBundle served = new ArtemisTlsGenerator().generate();
         TlsBundle expected = new ArtemisTlsGenerator().generate();
         try (FakeListener listener = FakeListener.tls(served)) {
-            assertThrows(RuntimeException.class, () ->
-                    ArtemisReadinessProbe.awaitAmqps(listener.endpoint(), expected.certPem(), 1));
+            assertThrows(RuntimeException.class, () -> ArtemisReadinessProbe.awaitAmqps(
+                    listener.endpoint(), expected.certPem(), Duration.ofMillis(300), FAST));
         }
     }
 
     @Test
     void aPeerThatAcceptsButNeverAnswersTheProtocolHeaderReachesTheDeadline() throws Exception {
         try (SilentListener listener = new SilentListener()) {
-            RuntimeException failure = assertTimeoutPreemptively(Duration.ofSeconds(4), () ->
+            RuntimeException failure = assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
                     assertThrows(RuntimeException.class, () ->
-                            ArtemisReadinessProbe.awaitAmqp(listener.endpoint(), 2)));
-            assertTrue(failure.getMessage().contains("within 2s"));
+                            ArtemisReadinessProbe.awaitAmqp(listener.endpoint(), Duration.ofMillis(400), FAST)));
+            assertTrue(failure.getMessage().contains("within 400ms"));
             assertTrue(listener.accepted() >= 1, "the probe must have connected");
         }
     }
@@ -143,10 +171,10 @@ class ArtemisReadinessProbeTest {
     void aPeerThatAcceptsButNeverAnswersTheTlsHandshakeReachesTheDeadline() throws Exception {
         TlsBundle tls = new ArtemisTlsGenerator().generate();
         try (SilentListener listener = new SilentListener()) {
-            RuntimeException failure = assertTimeoutPreemptively(Duration.ofSeconds(4), () ->
-                    assertThrows(RuntimeException.class, () ->
-                            ArtemisReadinessProbe.awaitAmqps(listener.endpoint(), tls.certPem(), 2)));
-            assertTrue(failure.getMessage().contains("within 2s"));
+            RuntimeException failure = assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
+                    assertThrows(RuntimeException.class, () -> ArtemisReadinessProbe.awaitAmqps(
+                            listener.endpoint(), tls.certPem(), Duration.ofMillis(400), FAST)));
+            assertTrue(failure.getMessage().contains("within 400ms"));
             assertTrue(listener.accepted() >= 1, "the probe must have connected");
         }
     }
