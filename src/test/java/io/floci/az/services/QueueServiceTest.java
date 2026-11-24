@@ -537,9 +537,7 @@ public class QueueServiceTest {
         ExecutorService pool = Executors.newFixedThreadPool(consumers);
         try {
             for (int round = 0; round < 10; round++) {
-                for (int i = 0; i < messages; i++) {
-                    sendMessage("round" + round + "-" + i);
-                }
+                sendAll(pool, "round" + round + "-", messages);
                 List<Callable<List<String>>> receives = new ArrayList<>();
                 for (int consumer = 0; consumer < consumers; consumer++) {
                     receives.add(() -> given()
@@ -636,9 +634,7 @@ public class QueueServiceTest {
         ExecutorService pool = Executors.newFixedThreadPool(1 + receivers);
         try {
             for (int round = 0; round < 30; round++) {
-                for (int i = 0; i < 32; i++) {
-                    sendMessage("round" + round + "-" + i);
-                }
+                sendAll(pool, "round" + round + "-", 32);
                 List<Callable<Integer>> calls = new ArrayList<>();
                 calls.add(() -> given().when().delete("/{account}/{queue}/messages", ACCOUNT, QUEUE).statusCode());
                 for (int receiver = 0; receiver < receivers; receiver++) {
@@ -874,6 +870,22 @@ public class QueueServiceTest {
             .when().post("/{account}/{queue}/messages", ACCOUNT, QUEUE)
             .then().statusCode(201)
             .extract().response();
+    }
+
+    /**
+     * Puts {@code count} messages through the pool and returns once all are stored. Put Message takes no
+     * queue lock, so sending a round's setup in parallel changes nothing in the race the round then runs;
+     * it only spends less time getting there.
+     */
+    private static void sendAll(ExecutorService pool, String prefix, int count) throws Exception {
+        List<Callable<Response>> sends = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            String text = prefix + i;
+            sends.add(() -> sendMessage(text));
+        }
+        for (Future<Response> sent : pool.invokeAll(sends)) {
+            sent.get();
+        }
     }
 
     /** Releases every call at the same moment and returns their results in the order of the calls. */
