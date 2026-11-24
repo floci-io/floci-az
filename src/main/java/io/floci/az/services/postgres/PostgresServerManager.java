@@ -13,7 +13,12 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -150,7 +155,7 @@ public class PostgresServerManager {
                     containerDetector.isRunningInContainer() && !containerManager.connectsAtPublishedPorts()
                         ? ContainerLifecycleManager.containerNetworkEndpoint(spec, info, PG_CONTAINER_PORT)
                         : new ContainerLifecycleManager.EndpointInfo(reachableHost, reachablePort);
-                waitForReady(probe.host(), probe.port(), pgConfig.startupTimeoutSeconds());
+                waitForReady(probe.host(), probe.port(), probeUser(entry), pgConfig.startupTimeoutSeconds());
             } catch (RuntimeException startupFailure) {
                 // The caller rolls back state that never learned this containerId, so a failed
                 // start must dispose of its own container or it leaks as a running orphan.
@@ -327,43 +332,100 @@ public class PostgresServerManager {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    /** Protocol 3.0, the version every supported PostgreSQL speaks. */
+    private static final int PROTOCOL_VERSION = 196_608;
+    /** SQLSTATE cannot_connect_now: the postmaster is up but still starting, recovering or shutting down. */
+    private static final String CANNOT_CONNECT_NOW = "57P03";
+    private static final long READY_POLL_MILLIS = 500;
+    private static final int READY_READ_TIMEOUT_MILLIS = 2_000;
+
+    /** The role the readiness handshake names: the server's admin, or the image's default for an Entra-only server. */
+    private static String probeUser(PostgresState.ServerEntry entry) {
+        String login = entry.administratorLogin();
+        return login == null || login.isBlank() ? "postgres" : login;
+    }
+
     /**
-     * Polls the PostgreSQL port until it accepts TCP connections, then waits a short
-     * additional period to allow the engine to finish internal initialisation.
+     * Polls until PostgreSQL answers a startup message the way a server accepting sessions does, as
+     * {@code pg_isready} decides it: an authentication request, or any error other than
+     * {@code cannot_connect_now}.
      *
-     * <p>The {@code postgres} image briefly opens and then closes the port during its
-     * first-boot init phase; a short post-TCP sleep covers that window without requiring
-     * a JDBC/libpq driver on the main runtime classpath. Clients use their own retry logic.
+     * <p>A bare TCP connect is not proof: Docker's port proxy accepts before anything listens, and the
+     * {@code postgres} image's first-boot init runs a temporary server that listens on no TCP address, then
+     * restarts. The handshake needs no driver on the runtime classpath, and the connection is closed at the
+     * authentication request, so no session is opened.
      *
-     * <p>Throws when the port never opens before the deadline, so the caller fails the create
-     * (state rollback, 500) instead of reporting a server nothing could reach as Ready.
+     * <p>Throws when no such answer arrives before the deadline, so the caller fails the create (state
+     * rollback, 500) instead of reporting a server nothing could reach as Ready.
      */
-    static void waitForReady(String host, int port, int timeoutSeconds) {
+    static void waitForReady(String host, int port, String user, int timeoutSeconds) {
         LOG.infof("Waiting for PostgreSQL to be ready on %s:%d (timeout=%ds)…", host, port, timeoutSeconds);
         long deadline = System.currentTimeMillis() + (long) timeoutSeconds * 1000;
-
-        // Phase 1 — wait for the port to accept TCP connections
         boolean connected = false;
-        while (!connected && System.currentTimeMillis() < deadline) {
+        while (System.currentTimeMillis() < deadline) {
             try (Socket s = new Socket(host, port)) {
-                LOG.infof("PostgreSQL TCP %s:%d is open — waiting for engine init…", host, port);
                 connected = true;
-            } catch (Exception e) {
-                sleep(1000);
+                s.setSoTimeout(READY_READ_TIMEOUT_MILLIS);
+                if (acceptsSessions(s, user)) {
+                    LOG.infof("PostgreSQL ready: %s:%d", host, port);
+                    return;
+                }
+            } catch (IOException e) {
+                LOG.debugf("PostgreSQL on %s:%d not ready yet: %s", host, port, e.getMessage());
             }
+            sleep(Math.max(0, Math.min(READY_POLL_MILLIS, deadline - System.currentTimeMillis())));
         }
-        if (!connected) {
-            throw new RuntimeException(String.format(
-                "PostgreSQL on %s:%d did not accept a connection within %ds", host, port, timeoutSeconds));
-        }
+        throw new RuntimeException(connected
+            ? String.format("PostgreSQL on %s:%d did not accept sessions within %ds", host, port, timeoutSeconds)
+            : String.format("PostgreSQL on %s:%d did not accept a connection within %ds", host, port, timeoutSeconds));
+    }
 
-        // Phase 2 — give the engine a moment to finish startup after the port opens.
-        long postTcpMs = Math.min(5_000L, deadline - System.currentTimeMillis());
-        if (postTcpMs > 0) {
-            sleep(postTcpMs);
+    /**
+     * Sends a protocol 3.0 startup message and reads the server's first reply: {@code 'R'} (an authentication
+     * request) means it accepts sessions, an {@code 'E'} error means so too unless its SQLSTATE is
+     * {@code cannot_connect_now}, and a closed connection means nothing is serving the port yet.
+     */
+    static boolean acceptsSessions(Socket socket, String user) throws IOException {
+        ByteArrayOutputStream params = new ByteArrayOutputStream();
+        for (String part : List.of("user", user, "database", "postgres")) {
+            params.write(part.getBytes(StandardCharsets.UTF_8));
+            params.write(0);
         }
+        params.write(0);
+        DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+        out.writeInt(8 + params.size());
+        out.writeInt(PROTOCOL_VERSION);
+        params.writeTo(out);
+        out.flush();
 
-        LOG.infof("PostgreSQL ready: %s:%d", host, port);
+        DataInputStream in = new DataInputStream(socket.getInputStream());
+        int type = in.read();
+        if (type == 'R') {
+            return true;
+        }
+        if (type != 'E') {
+            return false;
+        }
+        byte[] body = new byte[Math.max(0, in.readInt() - 4)];
+        in.readFully(body);
+        return !CANNOT_CONNECT_NOW.equals(sqlState(body));
+    }
+
+    /** The {@code C} (SQLSTATE) field of an ErrorResponse body, or null when it carries none. */
+    private static String sqlState(byte[] body) {
+        int i = 0;
+        while (i < body.length && body[i] != 0) {
+            byte field = body[i++];
+            int end = i;
+            while (end < body.length && body[end] != 0) {
+                end++;
+            }
+            if (field == 'C') {
+                return new String(body, i, end - i, StandardCharsets.UTF_8);
+            }
+            i = end + 1;
+        }
+        return null;
     }
 
     private static void sleep(long ms) {
