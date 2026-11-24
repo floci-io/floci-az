@@ -62,11 +62,17 @@ class ArtemisReadinessProbeTest {
 
     @Test
     void theSecondsApiKeepsItsOneSecondAttemptBudget() {
-        try (MockedConstruction<Socket> sockets = unresponsiveSockets(1_000)) {
-            RuntimeException failure = assertTimeout(Duration.ofMillis(1_300), () ->
-                    assertThrows(RuntimeException.class, () ->
-                            ArtemisReadinessProbe.awaitAmqp(new EndpointInfo("192.0.2.1", 5672), 1)));
-            assertTrue(failure.getMessage().contains("within 1s"));
+        // A 2 s budget leaves room above one second, so a larger or smaller attempt budget shows in the
+        // first connect's timeout. The connect stops the probe at once instead of waiting it out.
+        List<Integer> connectTimeouts = new CopyOnWriteArrayList<>();
+        try (MockedConstruction<Socket> sockets = mockConstruction(Socket.class, (socket, context) ->
+                doAnswer(invocation -> {
+                    connectTimeouts.add(invocation.getArgument(1));
+                    throw new IllegalStateException("stop after the first connect");
+                }).when(socket).connect(any(), anyInt()))) {
+            assertThrows(IllegalStateException.class, () ->
+                    ArtemisReadinessProbe.awaitAmqp(new EndpointInfo("192.0.2.1", 5672), 2));
+            assertEquals(List.of(1_000), connectTimeouts);
         }
     }
 
@@ -84,19 +90,23 @@ class ArtemisReadinessProbeTest {
 
     @Test
     void quickFailureRetriesWithoutSleepingPastRemainingBudget() {
+        // The first connect fails at once, the pause takes 200 of the 300 ms, and the second connect waits out
+        // the remaining 100 ms. A pause clamped to the deadline ends the probe near 300 ms; an unclamped one
+        // sleeps another 200 ms, past the 400 ms limit.
+        ArtemisReadinessProbe.Timing longPause = new ArtemisReadinessProbe.Timing(1_000L, 200L);
         try (MockedConstruction<Socket> sockets = mockConstruction(Socket.class, (socket, context) ->
                 doAnswer(invocation -> {
                     if (context.getCount() > 1) {
                         int timeoutMillis = invocation.getArgument(1);
-                        Thread.sleep(Math.min(40, timeoutMillis));
+                        Thread.sleep(timeoutMillis);
                     }
                     throw new SocketTimeoutException("endpoint no longer replies");
                 }).when(socket).connect(any(), anyInt()))) {
             RuntimeException failure = assertTimeout(Duration.ofMillis(400), () ->
                     assertThrows(RuntimeException.class, () -> ArtemisReadinessProbe.awaitAmqp(
-                            new EndpointInfo("192.0.2.1", 5672), Duration.ofMillis(100), FAST)));
+                            new EndpointInfo("192.0.2.1", 5672), Duration.ofMillis(300), longPause)));
             assertTrue(sockets.constructed().size() >= 2, "an immediate failure must retry within the deadline");
-            assertTrue(failure.getMessage().contains("within 100ms"));
+            assertTrue(failure.getMessage().contains("within 300ms"));
         }
     }
 
