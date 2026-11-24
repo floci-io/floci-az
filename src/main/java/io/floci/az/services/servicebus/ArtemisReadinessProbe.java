@@ -17,6 +17,7 @@ import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
@@ -35,15 +36,24 @@ public final class ArtemisReadinessProbe {
 
     /** The SASL layer's protocol header; Artemis answers it with the same eight bytes. */
     private static final byte[] AMQP_SASL_HEADER = {'A', 'M', 'Q', 'P', 3, 1, 0, 0};
-    private static final long ATTEMPT_MILLIS = 1_000L;
-    private static final long RETRY_PAUSE_MILLIS = 500L;
+    /** One second per connect or read, then half a second before the next attempt. */
+    static final Timing DEFAULT_TIMING = new Timing(1_000L, 500L);
+
+    /** How long one attempt may take and how long to pause after a failed one, in milliseconds. */
+    record Timing(long attemptMillis, long retryPauseMillis) {
+    }
 
     private ArtemisReadinessProbe() {
     }
 
     /** Waits until the plain AMQP acceptor at {@code endpoint} answers the AMQP protocol header. */
     public static void awaitAmqp(EndpointInfo endpoint, int timeoutSeconds) {
-        await(endpoint, "AMQP", timeoutSeconds, ArtemisReadinessProbe::exchangeProtocolHeader);
+        awaitAmqp(endpoint, Duration.ofSeconds(timeoutSeconds), DEFAULT_TIMING);
+    }
+
+    /** {@link #awaitAmqp(EndpointInfo, int)} with a sub-second budget, so tests need not wait out whole seconds. */
+    static void awaitAmqp(EndpointInfo endpoint, Duration timeout, Timing timing) {
+        await(endpoint, "AMQP", timeout, timing, ArtemisReadinessProbe::exchangeProtocolHeader);
     }
 
     /**
@@ -51,8 +61,13 @@ public final class ArtemisReadinessProbe {
      * {@code certPem}, the one floci-az generated for this broker.
      */
     public static void awaitAmqps(EndpointInfo endpoint, String certPem, int timeoutSeconds) {
+        awaitAmqps(endpoint, certPem, Duration.ofSeconds(timeoutSeconds), DEFAULT_TIMING);
+    }
+
+    /** {@link #awaitAmqps(EndpointInfo, String, int)} with a sub-second budget, for tests. */
+    static void awaitAmqps(EndpointInfo endpoint, String certPem, Duration timeout, Timing timing) {
         SSLSocketFactory factory = trusting(certPem);
-        await(endpoint, "AMQPS", timeoutSeconds, socket -> {
+        await(endpoint, "AMQPS", timeout, timing, socket -> {
             try (SSLSocket tls = (SSLSocket) factory.createSocket(
                     socket, endpoint.host(), endpoint.port(), false)) {
                 tls.startHandshake();
@@ -65,14 +80,15 @@ public final class ArtemisReadinessProbe {
         void run(Socket connected) throws IOException;
     }
 
-    private static void await(EndpointInfo endpoint, String label, int timeoutSeconds, Exchange exchange) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+    private static void await(EndpointInfo endpoint, String label, Duration timeout, Timing timing,
+                              Exchange exchange) {
+        long deadline = System.nanoTime() + timeout.toNanos();
         IOException lastFailure = null;
         while (System.nanoTime() < deadline) {
             try (Socket socket = new Socket()) {
                 socket.connect(new InetSocketAddress(InetAddress.getByName(endpoint.host()), endpoint.port()),
-                        attemptMillis(deadline));
-                socket.setSoTimeout(attemptMillis(deadline));
+                        attemptMillis(deadline, timing));
+                socket.setSoTimeout(attemptMillis(deadline, timing));
                 exchange.run(socket);
                 return;
             } catch (IOException e) {
@@ -80,14 +96,14 @@ public final class ArtemisReadinessProbe {
                 lastFailure = e;
             }
             try {
-                Thread.sleep(Math.min(RETRY_PAUSE_MILLIS, remainingMillis(deadline)));
+                Thread.sleep(Math.min(timing.retryPauseMillis(), remainingMillis(deadline)));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("Interrupted waiting for Artemis " + label + " on " + endpoint, e);
             }
         }
         throw new RuntimeException("Artemis did not answer " + label + " on " + endpoint
-                + " within " + timeoutSeconds + "s", lastFailure);
+                + " within " + describe(timeout), lastFailure);
     }
 
     private static void exchangeProtocolHeader(Socket socket) throws IOException {
@@ -100,8 +116,13 @@ public final class ArtemisReadinessProbe {
         }
     }
 
-    private static int attemptMillis(long deadline) {
-        return Math.toIntExact(Math.max(1L, Math.min(ATTEMPT_MILLIS, remainingMillis(deadline))));
+    private static int attemptMillis(long deadline, Timing timing) {
+        return Math.toIntExact(Math.max(1L, Math.min(timing.attemptMillis(), remainingMillis(deadline))));
+    }
+
+    /** Whole seconds as {@code 5s}, as the message read before sub-second budgets existed; otherwise {@code 300ms}. */
+    private static String describe(Duration timeout) {
+        return timeout.toMillisPart() == 0 ? timeout.toSeconds() + "s" : timeout.toMillis() + "ms";
     }
 
     private static long remainingMillis(long deadline) {
