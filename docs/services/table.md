@@ -36,10 +36,10 @@ authentication.
 ## Endpoint
 
 ```
-http://localhost:4577/{account}-table/Tables                                   # table operations
-http://localhost:4577/{account}-table/{table}(PartitionKey='p',RowKey='r')     # entity operations
-http://localhost:4577/{account}-table/{table}?comp=acl                         # table ACL
-http://localhost:4577/{account}-table/$batch                                   # batch transactions
+http://127.0.0.1:4577/{account}-table/Tables                                   # table operations
+http://127.0.0.1:4577/{account}-table/{table}(PartitionKey='p',RowKey='r')     # entity operations
+http://127.0.0.1:4577/{account}-table/{table}?comp=acl                         # table ACL
+http://127.0.0.1:4577/{account}-table/$batch                                   # batch transactions
 ```
 
 ## Quickstart
@@ -51,7 +51,7 @@ http://localhost:4577/{account}-table/$batch                                   #
 
     conn = ("DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
             "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
-            "TableEndpoint=http://localhost:4577/devstoreaccount1-table;")
+            "TableEndpoint=http://127.0.0.1:4577/devstoreaccount1-table;")
     svc = TableServiceClient.from_connection_string(conn)
     table = svc.create_table("people")
     table.upsert_entity({"PartitionKey": "team", "RowKey": "alice", "role": "eng"})

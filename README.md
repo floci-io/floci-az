@@ -457,10 +457,10 @@ Floci AZ uses path-style routing:
 
 | Service           | Endpoint                                              | Notes |
 |-------------------|-------------------------------------------------------|-------|
-| Blob              | `http://localhost:4577/{accountName}`                 | |
-| Data Lake Storage Gen2 | `http://localhost:4577/{accountName}`            | Use the `{accountName}.dfs.core.windows.net` Host header; maps to the Blob backend and supports Hadoop ABFS 3.3.4 filesystem/path flows, including HNS detection, conditional create/overwrite, properties/XAttrs, ACL metadata, leases, append/flush, listing, status, rename, and delete |
-| Queue             | `http://localhost:4577/{accountName}-queue`           | |
-| Table             | `http://localhost:4577/{accountName}-table`           | |
+| Blob              | `http://127.0.0.1:4577/{accountName}`                 | |
+| Data Lake Storage Gen2 | `http://127.0.0.1:4577/{accountName}`            | Use the `{accountName}.dfs.core.windows.net` Host header; maps to the Blob backend and supports Hadoop ABFS 3.3.4 filesystem/path flows, including HNS detection, conditional create/overwrite, properties/XAttrs, ACL metadata, leases, append/flush, listing, status, rename, and delete |
+| Queue             | `http://127.0.0.1:4577/{accountName}-queue`           | |
+| Table             | `http://127.0.0.1:4577/{accountName}-table`           | |
 | Functions         | `http://localhost:4577/{accountName}-functions`       | |
 | App Configuration | `http://localhost:4577/{accountName}-appconfig`       | Some SDKs require an `https://` URL: use a `ForceHttp` transport policy to rewrite to HTTP |
 | Cosmos DB         | `http://localhost:4577/{accountName}-cosmos`          | Python / Node SDKs. **Java SDK:** enable TLS (`FLOCI_AZ_TLS_ENABLED=true`) and use `https://localhost:4577`: the SDK enforces TLS; cert auto-generated at runtime, fetch from `GET /_floci/tls-cert` |
@@ -470,8 +470,10 @@ Floci AZ uses path-style routing:
 The standard development storage connection string works out of the box:
 
 ```text
-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
+DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:4577/devstoreaccount1;QueueEndpoint=http://127.0.0.1:4577/devstoreaccount1-queue;TableEndpoint=http://127.0.0.1:4577/devstoreaccount1-table;
 ```
+
+Use `127.0.0.1` rather than `localhost` in Storage endpoints. The .NET Storage SDK reads the account name from the path only when the host is an IP address or an Azurite port ([`IsHostIPEndPointStyle`](https://github.com/Azure/azure-sdk-for-net/blob/b665dd21a120cbb120357112b44e2b70fc50553b/sdk/storage/Azure.Storage.Common/src/Shared/UriExtensions.cs#L139)). With `localhost:4577` it takes the account as the container name, and requests fail with `501 NotImplemented`.
 
 <details>
 <summary><strong>Python</strong></summary>
@@ -483,7 +485,7 @@ from azure.storage.blob import BlobServiceClient
 conn_str = (
     "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
     "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
-    "BlobEndpoint=http://localhost:4577/devstoreaccount1;"
+    "BlobEndpoint=http://127.0.0.1:4577/devstoreaccount1;"
 )
 
 client = BlobServiceClient.from_connection_string(conn_str)
@@ -501,7 +503,7 @@ from azure.storage.queue import QueueServiceClient
 conn_str = (
     "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
     "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
-    "QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;"
+    "QueueEndpoint=http://127.0.0.1:4577/devstoreaccount1-queue;"
 )
 
 client = QueueServiceClient.from_connection_string(conn_str)
@@ -517,7 +519,7 @@ from azure.data.tables import TableServiceClient
 conn_str = (
     "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
     "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
-    "TableEndpoint=http://localhost:4577/devstoreaccount1-table;"
+    "TableEndpoint=http://127.0.0.1:4577/devstoreaccount1-table;"
 )
 
 service = TableServiceClient.from_connection_string(conn_str)
@@ -536,7 +538,7 @@ BlobServiceClient client = new BlobServiceClientBuilder()
     .connectionString(
         "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
         "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;" +
-        "BlobEndpoint=http://localhost:4577/devstoreaccount1;")
+        "BlobEndpoint=http://127.0.0.1:4577/devstoreaccount1;")
     .buildClient();
 
 client.createBlobContainer("my-container");
@@ -556,7 +558,7 @@ import { BlobServiceClient } from "@azure/storage-blob";
 const CONN =
   "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
   "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;" +
-  "BlobEndpoint=http://localhost:4577/devstoreaccount1;";
+  "BlobEndpoint=http://127.0.0.1:4577/devstoreaccount1;";
 
 const client = BlobServiceClient.fromConnectionString(CONN);
 const { containerClient } = await client.createContainer("my-container");
@@ -701,7 +703,7 @@ Azurite users can point their existing connection strings at Floci AZ with a sin
 DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02...;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;
 
 # After (Floci AZ, single port)
-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02...;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
+DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02...;BlobEndpoint=http://127.0.0.1:4577/devstoreaccount1;QueueEndpoint=http://127.0.0.1:4577/devstoreaccount1-queue;TableEndpoint=http://127.0.0.1:4577/devstoreaccount1-table;
 ```
 
 The account name and key are the same. Floci AZ consolidates all services onto port `4577`: no more separate ports per service.

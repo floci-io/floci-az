@@ -30,9 +30,9 @@ protocol with Shared Key authentication and XML responses.
 ## Endpoint
 
 ```
-http://localhost:4577/{account}-queue/{queue}                    # queue operations
-http://localhost:4577/{account}-queue/{queue}/messages           # message operations
-http://localhost:4577/{account}-queue/{queue}?comp=acl           # queue ACL
+http://127.0.0.1:4577/{account}-queue/{queue}                    # queue operations
+http://127.0.0.1:4577/{account}-queue/{queue}/messages           # message operations
+http://127.0.0.1:4577/{account}-queue/{queue}?comp=acl           # queue ACL
 ```
 
 The account also answers at the host-style address `{account}.queue.core.windows.net` when the
@@ -47,7 +47,7 @@ The account also answers at the host-style address `{account}.queue.core.windows
 
     conn = ("DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
             "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
-            "QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;")
+            "QueueEndpoint=http://127.0.0.1:4577/devstoreaccount1-queue;")
     queue = QueueClient.from_connection_string(conn, "my-queue")
     queue.create_queue()
     queue.send_message("hello world")
@@ -60,7 +60,7 @@ The account also answers at the host-style address `{account}.queue.core.windows
 
     ```bash
     az storage message put --queue-name my-queue --content "hello world" \
-      --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=...;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;"
+      --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=...;QueueEndpoint=http://127.0.0.1:4577/devstoreaccount1-queue;"
     ```
 
 The well-known Azurite development key (`Eby8vdM0…`) is accepted; any account name works.
