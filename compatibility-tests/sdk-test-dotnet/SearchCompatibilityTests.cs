@@ -11,8 +11,8 @@ using Azure.Search.Documents.Models;
 namespace FlociAz.Compatibility;
 
 /// <summary>
-/// Index management on the Azure AI Search data plane, through SearchIndexClient. Each test creates its own
-/// search service through ARM and signs in with that service's admin key.
+/// Index management, documents and queries on the Azure AI Search data plane, through SearchIndexClient and
+/// SearchClient. Each test creates its own search service through ARM and signs in with that service's admin key.
 /// </summary>
 public sealed class SearchCompatibilityTests
 {
@@ -213,6 +213,69 @@ public sealed class SearchCompatibilityTests
 
         await docs.DeleteDocumentsAsync("hotelId", new[] { "1", "never" }, cancellationToken: cancellationToken);
         await Assert.That((long)await docs.GetDocumentCountAsync(cancellationToken)).IsEqualTo(1L);
+    }
+
+    [Test]
+    [Timeout(180_000)]
+    public async Task SearchesRankCountSelectHighlightAndPage(CancellationToken cancellationToken)
+    {
+        await using var service = await SearchService.CreateAsync(cancellationToken);
+        await service.Client.CreateIndexAsync(Hotels("hotels-query"), cancellationToken);
+        SearchClient docs = service.Client.GetSearchClient("hotels-query");
+        var documents = new List<SearchDocument>
+        {
+            new() { ["hotelId"] = "1", ["hotelName"] = "Fancy seaside hotel", ["tags"] = new[] { "pool", "wifi" } },
+            new() { ["hotelId"] = "2", ["hotelName"] = "Plain hotel", ["tags"] = new[] { "wifi" } },
+            new() { ["hotelId"] = "3", ["hotelName"] = "Fancy resort", ["tags"] = new[] { "spa" } }
+        };
+        documents.AddRange(Enumerable.Range(0, 60)
+            .Select(i => new SearchDocument { ["hotelId"] = $"p{i}", ["hotelName"] = "Paged inn" }));
+        await docs.UploadDocumentsAsync(documents, cancellationToken: cancellationToken);
+
+        // The first query waits for the Solr sidecar, which the service create started.
+        var options = new SearchOptions { IncludeTotalCount = true, Select = { "hotelId", "hotelName" } };
+        SearchResults<SearchDocument> fancy = await docs.SearchAsync<SearchDocument>("fancy", options,
+            cancellationToken);
+        var hits = new List<SearchResult<SearchDocument>>();
+        await foreach (var hit in fancy.GetResultsAsync())
+        {
+            hits.Add(hit);
+        }
+        await Assert.That(fancy.TotalCount).IsEqualTo(2L);
+        await Assert.That(hits.Select(hit => hit.Document.GetString("hotelId")).ToList()).IsEquivalentTo(["1", "3"]);
+        await Assert.That(hits.All(hit => hit.Score > 0)).IsTrue();
+        await Assert.That(hits[0].Document.ContainsKey("rating")).IsFalse();
+
+        var all = new SearchOptions { SearchMode = SearchMode.All };
+        await Assert.That(await Ids(docs, "fancy hotel", all, cancellationToken)).IsEquivalentTo(["1"]);
+        var full = new SearchOptions { QueryType = SearchQueryType.Full };
+        await Assert.That(await Ids(docs, "hotelName:fanci~1", full, cancellationToken))
+            .IsEquivalentTo(["1", "3"]);
+
+        var highlight = new SearchOptions { HighlightFields = { "hotelName" } };
+        SearchResults<SearchDocument> marked = await docs.SearchAsync<SearchDocument>("seaside", highlight,
+            cancellationToken);
+        await foreach (var hit in marked.GetResultsAsync())
+        {
+            await Assert.That(hit.Highlights["hotelName"].ToList()).IsEquivalentTo(["Fancy <em>seaside</em> hotel"]);
+        }
+
+        // Sixty results take two pages: the SDK follows the next page parameters.
+        var paged = new SearchOptions { IncludeTotalCount = true };
+        await Assert.That((await Ids(docs, "paged", paged, cancellationToken)).Count).IsEqualTo(60);
+    }
+
+    private static async Task<List<string>> Ids(SearchClient docs, string text, SearchOptions options,
+        CancellationToken cancellationToken)
+    {
+        SearchResults<SearchDocument> results = await docs.SearchAsync<SearchDocument>(text, options,
+            cancellationToken);
+        var ids = new List<string>();
+        await foreach (var hit in results.GetResultsAsync())
+        {
+            ids.Add(hit.Document.GetString("hotelId"));
+        }
+        return ids;
     }
 
     private static SearchIndex Hotels(string name) => new(name)

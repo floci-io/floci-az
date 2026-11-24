@@ -358,7 +358,12 @@ floci-az:
     email:
       enabled: true
     search:
-      enabled: true       # Microsoft.Search: Azure AI Search services, admin and query keys (management plane)
+      enabled: true       # Microsoft.Search: Azure AI Search services, their indexes, documents and queries
+      engine:             # the Solr sidecar behind queries; pulled and started only once a search service exists
+        enabled: true     # false = never pull or start Solr; queries answer 503, everything else still works
+        image: "solr:10.1.0-slim"
+        heap: "256m"      # SOLR_HEAP of the container
+        start-timeout-seconds: 120   # how long a query waits for the pull and start before answering 503
     iothub:
       enabled: true       # Microsoft.Devices: Azure IoT Hub hubs and their shared access policies (management plane)
     arm:
@@ -399,3 +404,11 @@ floci-az:
     mode: dev
     storage-account-keys:
       devstoreaccount1: "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+
+# Unit tests never pull or start the Solr sidecar; the class that needs a real one turns it on in its test profile.
+"%test":
+  floci-az:
+    services:
+      search:
+        engine:
+          enabled: false

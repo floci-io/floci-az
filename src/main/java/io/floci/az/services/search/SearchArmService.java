@@ -135,16 +135,18 @@ public class SearchArmService {
     private final CloudDefaults defaults;
     private final ManagedIdentityStore identities;
     private final SearchIndexes indexes;
+    private final SearchSolrManager engine;
 
     @Inject
     public SearchArmService(StorageFactory storageFactory, GlobalNameRegistry names, CloudDefaults defaults,
-                            ManagedIdentityStore identities, SearchIndexes indexes) {
+                            ManagedIdentityStore identities, SearchIndexes indexes, SearchSolrManager engine) {
         this.services = ArmResourceStore.create(storageFactory, STORE, SearchModels.SEARCH_SERVICES,
                 SearchServiceResource.class, SearchServiceResource::id, key -> false);
         this.names = names;
         this.defaults = defaults;
         this.identities = identities;
         this.indexes = indexes;
+        this.engine = engine;
     }
 
     /** Serves one request under {@code /providers/Microsoft.Search/}. */
@@ -263,6 +265,10 @@ public class SearchArmService {
         }
         LOG.infov("ARM: {0} search service {1}", written.created() ? "created" : "updated",
                 written.stored().value().id());
+        if (written.created()) {
+            // The first service is what pulls and starts the Solr sidecar, in the background.
+            engine.prepare();
+        }
         return Response.status(written.created() ? 201 : 200).entity(written.stored().value().toArm())
                 .type("application/json").build();
     }
@@ -313,6 +319,10 @@ public class SearchArmService {
         }
         indexes.deleteAll(cloud(req).name(), removed.get().value().name());
         LOG.infov("ARM: deleted search service {0}", removed.get().value().id());
+        // A service used on the data plane only, without an ARM resource, still needs Solr for its indexes.
+        if (!hasServices() && !indexes.any()) {
+            engine.stop();
+        }
         return Response.ok().build();
     }
 
@@ -448,9 +458,15 @@ public class SearchArmService {
                 .map(ArmResourceStore.Stored::value);
     }
 
+    /** Whether any search service is stored, in any cloud, subscription or resource group. */
+    public boolean hasServices() {
+        return !services.all().isEmpty();
+    }
+
     /** Forgets every search service: {@code POST /_admin/reset}. */
     public void clear() {
         services.clear();
+        engine.stop();
     }
 
     // ── Request validation ───────────────────────────────────────────────────

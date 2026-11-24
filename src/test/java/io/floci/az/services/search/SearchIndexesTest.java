@@ -837,33 +837,12 @@ class SearchIndexesTest {
 
         given().when().get(BASE + "/synonymmaps" + API).then().statusCode(404)
             .body("error.code", equalTo("ResourceNotFound"));
-        // Queries come with the query engine.
-        given().when().get(BASE + "/indexes('later')/docs" + API).then().statusCode(404);
+        // Suggestions come in a later phase.
         given().contentType("application/json").body("{}")
-            .when().post(BASE + "/indexes('later')/docs/search.post.search" + API).then().statusCode(404);
+            .when().post(BASE + "/indexes('later')/docs/search.post.suggest" + API).then().statusCode(404);
         given().when().patch(BASE + "/indexes('later')" + API).then().statusCode(405);
         given().when().get(BASE + "/servicestats/x" + API).then().statusCode(404);
         given().when().get(BASE + "/servicestats('x')" + API).then().statusCode(404);
         given().when().post(BASE + "/servicestats" + API).then().statusCode(405);
-    }
-
-    @Test
-    void deletingTheServiceForgetsItsIndexes() {
-        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"basic\"}}")
-            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
-        post(minimal("owned")).then().statusCode(201);
-
-        given().when().delete(ARM_SERVICE + ARM_API).then().statusCode(200);
-
-        get("owned").then().statusCode(404);
-    }
-
-    @Test
-    void aResetForgetsEveryIndex() {
-        post(minimal("gone")).then().statusCode(201);
-
-        given().post("/_admin/reset").then().statusCode(204);
-
-        given().when().get(BASE + "/indexes" + API).then().statusCode(200).body("value", empty());
     }
 }

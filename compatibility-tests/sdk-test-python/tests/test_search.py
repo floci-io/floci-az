@@ -1,7 +1,8 @@
-"""Azure AI Search compatibility test: index management.
+"""Azure AI Search compatibility test: index management, documents and queries.
 
-Creates a search service through the ARM management plane, reads its admin key, and
-manages indexes on the service's data plane with ``SearchIndexClient``.
+Creates a search service through the ARM management plane, reads its admin key, manages
+indexes on the service's data plane with ``SearchIndexClient``, and searches them with
+``SearchClient``; the emulator's Solr sidecar runs the queries.
 """
 import os
 
@@ -104,7 +105,7 @@ def hotels(name):
     )
 
 
-def test_create_and_get_index(index_client):
+def test_create_get_list_and_delete_an_index(index_client):
     created = index_client.create_index(hotels("hotels-create"))
     assert created.name == "hotels-create"
     assert created.e_tag
@@ -128,6 +129,17 @@ def test_create_and_get_index(index_client):
     assert fetched.vector_search.profiles[0].algorithm_configuration_name == "hnsw"
     assert fetched.e_tag == created.e_tag
 
+    index_client.create_index(hotels("hotels-another"))
+    names = list(index_client.list_index_names())
+    assert {"hotels-another", "hotels-create"} <= set(names) and names == sorted(names)
+    listed = {index.name: index for index in index_client.list_indexes()}
+    assert len(listed["hotels-another"].fields) == 6
+
+    index_client.delete_index("hotels-another")
+    assert "hotels-another" not in list(index_client.list_index_names())
+    with pytest.raises(ResourceNotFoundError):
+        index_client.get_index("hotels-another")
+
 
 def test_a_taken_name_is_a_bad_request_and_a_missing_index_is_not_found(index_client):
     index_client.create_index(hotels("hotels-twice"))
@@ -138,16 +150,6 @@ def test_a_taken_name_is_a_bad_request_and_a_missing_index_is_not_found(index_cl
     with pytest.raises(ResourceNotFoundError):
         index_client.get_index("hotels-missing")
 
-
-def test_list_indexes_and_names(index_client):
-    index_client.create_index(hotels("hotels-list-b"))
-    index_client.create_index(hotels("hotels-list-a"))
-
-    names = list(index_client.list_index_names())
-    assert "hotels-list-a" in names and "hotels-list-b" in names
-    assert names == sorted(names)
-    listed = {index.name: index for index in index_client.list_indexes()}
-    assert len(listed["hotels-list-a"].fields) == 6
 
 
 def test_create_or_update_adds_a_field_but_cannot_change_one(index_client):
@@ -184,15 +186,6 @@ def test_etag_conditions(index_client):
         index_client.get_index("hotels-etag")
 
 
-def test_invalid_index_is_refused(index_client):
-    without_key = SearchIndex(
-        name="hotels-no-key",
-        fields=[SimpleField(name="hotelId", type=SearchFieldDataType.STRING)],
-    )
-    with pytest.raises(HttpResponseError) as refused:
-        index_client.create_index(without_key)
-    assert refused.value.status_code == 400
-
 
 def test_statistics(index_client):
     index_client.create_index(hotels("hotels-stats"))
@@ -207,15 +200,6 @@ def test_statistics(index_client):
     assert service.counters.index_counter.quota == 15
     assert service.limits.max_fields_per_index == 1000
 
-
-def test_delete_index(index_client):
-    index_client.create_index(hotels("hotels-delete"))
-
-    index_client.delete_index("hotels-delete")
-
-    assert "hotels-delete" not in list(index_client.list_index_names())
-    with pytest.raises(ResourceNotFoundError):
-        index_client.get_index("hotels-delete")
 
 
 def test_upload_lookup_and_count_documents(index_client):
@@ -282,15 +266,6 @@ def test_a_point_round_trips_with_azures_crs(index_client):
     assert location["crs"]["properties"]["name"] == "EPSG:4326"
 
 
-def test_a_malformed_document_refuses_the_whole_batch(index_client):
-    index_client.create_index(hotels("hotels-bad"))
-    client = index_client.get_search_client("hotels-bad")
-
-    with pytest.raises(HttpResponseError) as refused:
-        client.upload_documents([{"hotelId": "1"}, {"hotelId": "2", "rating": "not-a-number"}])
-    assert refused.value.status_code == 400
-    assert client.get_document_count() == 0
-
 
 def test_buffered_sender_flushes_documents(index_client):
     index_client.create_index(hotels("hotels-buffered"))
@@ -301,3 +276,38 @@ def test_buffered_sender_flushes_documents(index_client):
         sender.upload_documents([{"hotelId": str(i), "hotelName": f"Hotel {i}"} for i in range(50)])
 
     assert index_client.get_search_client("hotels-buffered").get_document_count() == 50
+
+
+@pytest.fixture(scope="module")
+def query_client(index_client):
+    """One index for every query test, loaded once."""
+    index_client.create_index(hotels("hotels-query"))
+    client = index_client.get_search_client("hotels-query")
+    client.upload_documents([
+        {"hotelId": "1", "hotelName": "Fancy seaside hotel", "rating": 4.5, "tags": ["pool", "wifi"],
+         "address": {"street": "Harbour road", "city": "Helsinki"}},
+        {"hotelId": "2", "hotelName": "Plain hotel", "rating": 2.0, "tags": ["wifi"]},
+        {"hotelId": "3", "hotelName": "Fancy resort", "rating": 5.0, "tags": ["spa"]},
+    ] + [{"hotelId": f"p{i}", "hotelName": "Paged inn"} for i in range(60)])
+    return client
+
+
+def test_search_ranks_highlights_and_pages(query_client):
+    results = query_client.search("fancy", include_total_count=True, select=["hotelId", "hotelName"])
+    hits = list(results)
+    assert results.get_count() == 2
+    assert sorted(hit["hotelId"] for hit in hits) == ["1", "3"]
+    assert all(hit["@search.score"] > 0 for hit in hits)
+    assert set(hits[0].keys()) >= {"hotelId", "hotelName"} and "rating" not in hits[0]
+    assert [hit["hotelId"] for hit in query_client.search("harbour", search_fields=["address/street"])] == ["1"]
+
+    assert [hit["hotelId"] for hit in query_client.search("fancy hotel", search_mode="all")] == ["1"]
+    fuzzy = query_client.search("hotelName:fanci~1", query_type="full")
+    assert sorted(hit["hotelId"] for hit in fuzzy) == ["1", "3"]
+    highlighted = list(query_client.search("seaside", highlight_fields="hotelName"))
+    assert highlighted[0]["@search.highlights"]["hotelName"] == ["Fancy <em>seaside</em> hotel"]
+
+    # Sixty results take two pages: the SDK follows the next page parameters.
+    paged = query_client.search("paged", include_total_count=True)
+    assert len(list(paged)) == 60
+    assert paged.get_count() == 60

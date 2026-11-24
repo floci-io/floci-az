@@ -120,6 +120,15 @@ floci-az:
       mocked: true
       dns-suffix: azurecontainerapps.io
       ingress-timeout-seconds: 60
+    search:
+      enabled: true
+      engine:
+        # The Solr sidecar that runs Azure AI Search queries. It is pulled and started only once a
+        # search service exists, and removed when the last one is deleted.
+        enabled: true          # false: never pull or start it; searches answer 503
+        image: solr:10.1.0-slim
+        heap: 256m
+        start-timeout-seconds: 120
 ```
 
 ## Key Environment Variables
@@ -149,6 +158,10 @@ floci-az:
 | `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true` | Enable/disable App Configuration |
 | `FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED` | `true` | Keep Container Apps ARM state without Docker runtimes |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH` | `~/.floci-az/functions` | Function code directory |
+| `FLOCI_AZ_SERVICES_SEARCH_ENGINE_ENABLED` | `true` | Run Azure AI Search queries in the Solr sidecar; `false` never pulls or starts it, and searches answer `503` |
+| `FLOCI_AZ_SERVICES_SEARCH_ENGINE_IMAGE` | `solr:10.1.0-slim` | Solr image of the AI Search sidecar |
+| `FLOCI_AZ_SERVICES_SEARCH_ENGINE_HEAP` | `256m` | JVM heap of the AI Search sidecar |
+| `FLOCI_AZ_SERVICES_SEARCH_ENGINE_START_TIMEOUT_SECONDS` | `120` | How long a search waits for the sidecar to start, the image pull included |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket |
 | `FLOCI_AZ_DOCKER_ENDPOINT_MODE` | `auto` | How sidecar containers are addressed: `auto` (container name or IP and internal port inside Docker, `localhost` and the published port otherwise) or `published` (the Docker daemon's host and the published port, for remote daemons such as docker-in-docker or kubedock) |
 | `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into the name of every container and volume floci-az creates (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |

@@ -220,6 +220,11 @@ public class BannerLogger {
         }
         if (config.services().search().enabled()) {
             sb.append(serviceStatus("search", true, getStorageMode("search")));
+            EmulatorConfig.SearchEngineConfig searchEngine = config.services().search().engine();
+            sb.append(searchEngine.enabled()
+                    ? String.format("     %-10s [enabled ] startup:%-10s image:%s\n", "queries", "on-service",
+                            searchEngine.image())
+                    : String.format("     %-10s [disabled]\n", "queries"));
         }
         if (config.services().iothub().enabled()) {
             sb.append(serviceStatus("iothub", true, getStorageMode("iothub")));

@@ -228,6 +228,22 @@ class SearchDocumentsTest {
     }
 
     @Test
+    void aValueTooLongForOneTermFailsAloneAsAnUploadOrAMerge() {
+        String big = "a b ".repeat(SearchDocuments.MAX_TERM_BYTES / 4 + 1);
+        batch("{\"id\": \"two\", \"title\": \"Second\"}").then().statusCode(200);
+
+        batch("{\"id\": \"one\", \"title\": \"" + big + "\"}, {\"id\": \"ok\", \"title\": \"Fine\"},"
+                + " {\"@search.action\": \"merge\", \"id\": \"two\", \"address\": {\"city\": \"" + big + "\"}}")
+            .then().statusCode(207)
+            .body("value.status", contains(false, true, false))
+            .body("value.statusCode", contains(400, 201, 400))
+            .body("value[0].errorMessage", startsWith("Field 'title' contains a term that is too large to process."))
+            .body("value[2].errorMessage", startsWith("Field 'address/city' contains a term"));
+        lookup("one").then().statusCode(404);
+        lookup("two").then().body("title", equalTo("Second"));
+    }
+
+    @Test
     void aDeleteSucceedsWhetherOrNotTheDocumentExists() {
         batch("{\"id\": \"one\"}, {\"id\": \"two\"}").then().statusCode(200);
 
@@ -426,18 +442,20 @@ class SearchDocumentsTest {
     }
 
     @Test
-    void deletingTheServiceOrResettingForgetsItsDocuments() {
+    void deletingTheServiceOrResettingForgetsItsIndexesAndDocuments() {
         given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"basic\"}}")
             .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
         batch("{\"id\": \"one\"}").then().statusCode(200);
 
         given().when().delete(ARM_SERVICE + ARM_API).then().statusCode(200);
+        given().when().get(BASE + "/indexes('hotels')" + API).then().statusCode(404);
         given().contentType("application/json").body(HOTELS).when().post(BASE + "/indexes" + API)
             .then().statusCode(201);
         lookup("one").then().statusCode(404);
 
         batch("{\"id\": \"two\"}").then().statusCode(200);
         given().post("/_admin/reset").then().statusCode(204);
+        given().when().get(BASE + "/indexes" + API).then().statusCode(200).body("value", hasSize(0));
         given().contentType("application/json").body(HOTELS).when().post(BASE + "/indexes" + API)
             .then().statusCode(201);
         lookup("two").then().statusCode(404);
