@@ -7,6 +7,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.acr.AcrModels.Registry;
+import io.floci.az.testing.AcrMockedProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
@@ -32,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
-@TestProfile(AcrHandlerTest.MockedProfile.class)
+@TestProfile(AcrMockedProfile.class)
 @DisplayName("ACR: one store keyed by canonical id, and the global name registry")
 class AcrGlobalNameTest {
 

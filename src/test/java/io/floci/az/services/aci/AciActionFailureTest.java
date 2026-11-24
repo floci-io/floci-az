@@ -1,15 +1,13 @@
 package io.floci.az.services.aci;
 
 import io.floci.az.services.aci.AciModels.ContainerGroup;
+import io.floci.az.testing.AciContainersProfile;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -22,16 +20,9 @@ import static org.mockito.Mockito.when;
  * restart's initial 204 as finished without polling, and stop has no LRO at all.
  */
 @QuarkusTest
-@TestProfile(AciActionFailureTest.RealModeProfile.class)
+@TestProfile(AciContainersProfile.class)
 @DisplayName("AciHandler: an action that fails is reported on the POST")
 class AciActionFailureTest {
-
-    public static class RealModeProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.aci.mocked", "false");
-        }
-    }
 
     private static final String API = "?api-version=2023-05-01";
     private static final String GROUP = "/subscriptions/test-sub-aci-fail/resourceGroups/test-rg-aci-fail"

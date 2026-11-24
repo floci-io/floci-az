@@ -1,8 +1,6 @@
 package io.floci.az.services.acr;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +15,6 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
@@ -43,17 +40,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * <p>Skipped automatically when Docker is unavailable.
  */
 @QuarkusTest
-@TestProfile(AcrCatalogPaginationDockerTest.RealModeProfile.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("ACR catalog pagination against a real registry (Docker required)")
 class AcrCatalogPaginationDockerTest {
-
-    public static class RealModeProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.acr.mocked", "false");
-        }
-    }
 
     /**
      * Ours sits between two neighbours in the shared container, which is what makes the cursor

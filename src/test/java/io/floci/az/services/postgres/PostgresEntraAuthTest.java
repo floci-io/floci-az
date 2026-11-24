@@ -1,13 +1,11 @@
 package io.floci.az.services.postgres;
 
+import io.floci.az.testing.PostgresMockedProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -17,16 +15,9 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 
 @QuarkusTest
-@TestProfile(PostgresEntraAuthTest.MockedProfile.class)
+@TestProfile(PostgresMockedProfile.class)
 @DisplayName("PostgreSQL flexible servers: Entra-only authentication and Microsoft Entra administrators")
 class PostgresEntraAuthTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.postgres.mocked", "true");
-        }
-    }
 
     private static final String BASE = "/subscriptions/sub-pg-entra/resourceGroups/rg-pg-entra"
         + "/providers/Microsoft.DBforPostgreSQL/flexibleServers/";

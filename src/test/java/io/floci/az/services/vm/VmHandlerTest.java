@@ -1,14 +1,10 @@
 package io.floci.az.services.vm;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -18,17 +14,9 @@ import static org.hamcrest.Matchers.*;
  * ARM surface in mocked mode (no Docker).
  */
 @QuarkusTest
-@TestProfile(VmHandlerTest.MockedProfile.class)
 @DisplayName("VmHandler — lifecycle and power state (mocked mode)")
 @SuppressWarnings("unused")
 class VmHandlerTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.vm.mocked", "true");
-        }
-    }
 
     private static final String SUB  = "test-sub-vm";
     private static final String RG   = "test-rg-vm";

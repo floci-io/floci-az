@@ -1,7 +1,7 @@
 package io.floci.az.services.acr;
 
+import io.floci.az.testing.AcrMockedProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.path.json.JsonPath;
 import io.restassured.response.Response;
@@ -34,16 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * answer with the registry's {@code UNSUPPORTED} error.</p>
  */
 @QuarkusTest
-@TestProfile(AcrTokenEndpointsTest.MockedProfile.class)
+@TestProfile(AcrMockedProfile.class)
 @DisplayName("ACR: Entra token exchange protocol")
 public class AcrTokenEndpointsTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.acr.mocked", "true");
-        }
-    }
 
     private static final String REGISTRY = "acrproto";
     private static final String LOGIN_SERVER = REGISTRY + ".azurecr.io";

@@ -2,8 +2,6 @@ package io.floci.az.services.postgres;
 
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterAll;
@@ -19,7 +17,6 @@ import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -41,18 +38,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * applied to the running container in test 4, and it is deleted in test 5.
  */
 @QuarkusTest
-@TestProfile(PostgresDockerTest.RealModeProfile.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("PostgresHandler — real Docker-backed mode (Docker required)")
 class PostgresDockerTest {
-
-    public static class RealModeProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.postgres.mocked", "false");
-        }
-    }
 
     private static final String SUB  = "test-sub-pg-docker";
     private static final String RG   = "test-rg-pg-docker";

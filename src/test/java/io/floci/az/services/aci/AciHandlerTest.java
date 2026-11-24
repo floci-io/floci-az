@@ -1,13 +1,10 @@
 package io.floci.az.services.aci;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
@@ -23,17 +20,9 @@ import static org.hamcrest.Matchers.*;
  * enum casing verbatim into state (non-canonical casing means a perpetual diff).</p>
  */
 @QuarkusTest
-@TestProfile(AciHandlerTest.MockedProfile.class)
 @DisplayName("AciHandler — container group lifecycle and azurerm fidelity (mocked mode)")
 @SuppressWarnings("unused")
 class AciHandlerTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.aci.mocked", "true");
-        }
-    }
 
     private static final String SUB  = "test-sub-aci";
     private static final String RG   = "test-rg-aci";

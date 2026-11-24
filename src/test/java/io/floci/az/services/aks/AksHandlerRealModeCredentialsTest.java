@@ -2,13 +2,9 @@ package io.floci.az.services.aks;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -20,17 +16,9 @@ import static org.mockito.Mockito.doThrow;
  * held in {@code Creating} or forced to {@code Failed} without Docker.
  */
 @QuarkusTest
-@TestProfile(AksHandlerRealModeCredentialsTest.RealModeProfile.class)
 @DisplayName("AksHandler: credentials of a cluster that is not running (real mode)")
 @SuppressWarnings("unused")
 class AksHandlerRealModeCredentialsTest {
-
-    public static class RealModeProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.aks.mocked", "false");
-        }
-    }
 
     private static final String BASE =
             "/subscriptions/test-sub-aks-real/resourceGroups/test-rg-aks-real"

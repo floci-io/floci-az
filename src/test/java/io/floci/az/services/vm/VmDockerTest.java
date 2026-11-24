@@ -1,7 +1,7 @@
 package io.floci.az.services.vm;
 
+import io.floci.az.testing.VmContainersProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.AfterAll;
@@ -15,7 +15,6 @@ import org.junit.jupiter.api.TestMethodOrder;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -34,18 +33,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * the HTTP reset is done inside the first {@code @Test}.
  */
 @QuarkusTest
-@TestProfile(VmDockerTest.RealModeProfile.class)
+@TestProfile(VmContainersProfile.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("VmHandler — real Docker-backed mode (Docker required)")
 class VmDockerTest {
-
-    public static class RealModeProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.vm.mocked", "false");
-        }
-    }
 
     private static final String SUB  = "test-sub-vm-docker";
     private static final String RG   = "test-rg-vm-docker";

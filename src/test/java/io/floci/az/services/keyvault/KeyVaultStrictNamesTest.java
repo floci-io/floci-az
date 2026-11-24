@@ -1,29 +1,20 @@
 package io.floci.az.services.keyvault;
 
+import io.floci.az.testing.StrictNamesProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.Map;
-
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 
 @QuarkusTest
-@TestProfile(KeyVaultStrictNamesTest.StrictNames.class)
+@TestProfile(StrictNamesProfile.class)
 @DisplayName("Key Vault ARM: parity-overrides.strict-names refuses a vault or managed HSM name outside Azure's rule")
 class KeyVaultStrictNamesTest {
-
-    public static class StrictNames implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.parity-overrides.strict-names", "true");
-        }
-    }
 
     private static final String BASE = "/subscriptions/sub-kvnames/resourceGroups/rg/providers/Microsoft.KeyVault/";
     private static final String API = "?api-version=2023-07-01";

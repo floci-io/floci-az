@@ -1,7 +1,7 @@
 package io.floci.az.services.aci;
 
+import io.floci.az.testing.AciContainersProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.AfterAll;
@@ -15,7 +15,6 @@ import org.junit.jupiter.api.TestMethodOrder;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -35,18 +34,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * assertion. Tests are ordered and share state; the HTTP reset is done inside the first test.</p>
  */
 @QuarkusTest
-@TestProfile(AciDockerTest.RealModeProfile.class)
+@TestProfile(AciContainersProfile.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("AciHandler — real Docker-backed mode (Docker required)")
 class AciDockerTest {
-
-    public static class RealModeProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.aci.mocked", "false");
-        }
-    }
 
     private static final String SUB  = "test-sub-aci-docker";
     private static final String RG   = "test-rg-aci-docker";

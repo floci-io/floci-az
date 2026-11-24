@@ -1,14 +1,12 @@
 package io.floci.az.services.policy.evaluation;
 
+import io.floci.az.testing.RedisMockedProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -20,16 +18,9 @@ import static org.hamcrest.Matchers.isOneOf;
  * properties, so they show every case; mocked mode keeps Docker out of it.
  */
 @QuarkusTest
-@TestProfile(PolicyPatchEvaluationTest.MockedRedis.class)
+@TestProfile(RedisMockedProfile.class)
 @DisplayName("Policy evaluation of a PATCH: the stored resource merged with the patch")
 class PolicyPatchEvaluationTest {
-
-    public static class MockedRedis implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.redis.mocked", "true");
-        }
-    }
 
     private static final String SUB = "test-sub-patch";
     private static final String RG = "test-rg-patch";

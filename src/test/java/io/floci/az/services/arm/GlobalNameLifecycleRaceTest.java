@@ -6,8 +6,6 @@ import io.floci.az.services.postgres.PostgresState;
 import io.floci.az.services.redis.RedisCacheManager;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,7 +33,6 @@ import static org.mockito.Mockito.doAnswer;
  * start's write-back, and a failed start must only release its own claim.
  */
 @QuarkusTest
-@TestProfile(GlobalNameLifecycleRaceTest.RealContainers.class)
 @DisplayName("A global name deleted during container startup stays deleted")
 class GlobalNameLifecycleRaceTest {
 
@@ -45,17 +42,6 @@ class GlobalNameLifecycleRaceTest {
     private static final String POSTGRES_BODY = "{\"location\":\"eastus\",\"sku\":{\"name\":\"Standard_B1ms\",\"tier\":\"Burstable\"},"
             + "\"properties\":{\"administratorLogin\":\"a\",\"administratorLoginPassword\":\"P@ssw0rd1234\","
             + "\"version\":\"16\"}}";
-
-    /** Container-backed mode, with the container managers mocked so startup can be held open. */
-    public static class RealContainers implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci-az.services.redis.mocked", "false",
-                    "floci-az.services.acr.mocked", "false",
-                    "floci-az.services.postgres.mocked", "false");
-        }
-    }
 
     @InjectMock
     RedisCacheManager cacheManager;

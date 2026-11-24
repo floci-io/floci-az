@@ -1,14 +1,12 @@
 package io.floci.az.services.acr;
 
+import io.floci.az.testing.AcrMockedProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
@@ -27,15 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * <p>Always runs in mocked mode (no registry container) regardless of the default in application.yml.
  */
 @QuarkusTest
-@TestProfile(AcrHandlerTest.MockedProfile.class)
+@TestProfile(AcrMockedProfile.class)
 public class AcrHandlerTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.acr.mocked", "true");
-        }
-    }
 
     private static final String SUB = "00000000-0000-0000-0000-000000000001";
     private static final String RG = "test-rg";

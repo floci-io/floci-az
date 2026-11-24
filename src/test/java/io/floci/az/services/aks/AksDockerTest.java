@@ -1,8 +1,6 @@
 package io.floci.az.services.aks;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -16,7 +14,6 @@ import org.junit.jupiter.api.TestMethodOrder;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Base64;
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -35,18 +32,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * the HTTP reset is done inside the first {@code @Test} method.
  */
 @QuarkusTest
-@TestProfile(AksDockerTest.RealModeProfile.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("AksHandler — real k3s mode (Docker required)")
 class AksDockerTest {
-
-    public static class RealModeProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.aks.mocked", "false");
-        }
-    }
 
     private static final String SUB  = "test-sub-aks-docker";
     private static final String RG   = "test-rg-docker";

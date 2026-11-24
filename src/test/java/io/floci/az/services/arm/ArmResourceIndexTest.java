@@ -1,13 +1,9 @@
 package io.floci.az.services.arm;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
@@ -29,16 +25,8 @@ import static org.hamcrest.Matchers.oneOf;
  * while the subscription listing spans every group.</p>
  */
 @QuarkusTest
-@TestProfile(ArmResourceIndexTest.MockedProfile.class)
 @DisplayName("ARM resource index — resource-group and subscription scope")
 class ArmResourceIndexTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.vm.mocked", "true");
-        }
-    }
 
     private static final String SUB = "test-sub-index";
     private static final String RG_A = "test-rg-index-a";

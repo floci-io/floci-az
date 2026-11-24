@@ -1,13 +1,11 @@
 package io.floci.az.services.graph;
 
+import io.floci.az.testing.ClientCredentialValidationProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
@@ -17,18 +15,11 @@ import static org.hamcrest.Matchers.startsWith;
 
 /** Secrets minted by {@code addPassword} are what the token endpoint checks under {@code validate-client-credentials}. */
 @QuarkusTest
-@TestProfile(GraphApplicationsCredentialTest.Enforced.class)
+@TestProfile(ClientCredentialValidationProfile.class)
 @DisplayName("Microsoft Graph applications: minted secrets authenticate, within their dates, until removed")
 class GraphApplicationsCredentialTest {
 
     private static final String TENANT = "00000000-0000-0000-0000-000000000002";
-
-    public static class Enforced implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.entra.validate-client-credentials", "true");
-        }
-    }
 
     @Test
     void aMintedSecretAuthenticatesUntilRemovedAndOnlyWithinItsDates() {

@@ -1,14 +1,13 @@
 package io.floci.az.services.redis;
 
+import io.floci.az.testing.RedisMockedProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -20,17 +19,10 @@ import static org.hamcrest.Matchers.*;
  * Covers ARM path routing, CRUD, and the listKeys / regenerateKey actions.</p>
  */
 @QuarkusTest
-@TestProfile(RedisHandlerTest.MockedProfile.class)
+@TestProfile(RedisMockedProfile.class)
 @DisplayName("RedisHandler — routing and CRUD (mocked mode)")
 @SuppressWarnings("unused")
 class RedisHandlerTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.redis.mocked", "true");
-        }
-    }
 
     private static final String SUB  = "test-sub-redis";
     private static final String RG   = "test-rg-redis";
