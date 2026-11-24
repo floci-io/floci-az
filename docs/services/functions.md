@@ -66,6 +66,13 @@ answers from the same ownership for a `Site` or `Microsoft.Web/sites` name. Path
 the same site. With `parity-overrides.strict-names` a name outside 2 to 60 letters, digits and hyphens, or starting
 or ending with a hyphen, is refused with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
 
+App Service plans (`Microsoft.Web/serverFarms`) are stored ARM documents in the same `arm-web` store, with no
+runtime behind them: `PUT` creates or replaces a plan, `PATCH` changes only the `sku`, `kind`, `tags` and
+`properties` it sends, and `GET` lists them per resource group or across a subscription. The `sku`, `kind` and
+`properties` (including `reserved` for Linux) read back as written. A plan name is unique within its resource group
+only, so it claims no global name. Paths under a plan (`.../serverFarms/{name}/virtualNetworkConnections` and the
+like) answer `404`, and `numberOfSites` stays `0`: a plan does not count the sites that reference it.
+
 ### Functions
 
 | Method | Path | Description |

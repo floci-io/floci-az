@@ -49,6 +49,7 @@ class ResourceGroupAzureParityTest {
     private static final String KV_API = "?api-version=2023-07-01";
     private static final String REDIS_API = "?api-version=2024-11-01";
     private static final String EVENT_GRID_API = "?api-version=2022-06-15";
+    private static final String WEB_API = "?api-version=2023-12-01";
 
     private static String group(String name) {
         return "/subscriptions/" + SUB + "/resourceGroups/" + name;
@@ -137,6 +138,7 @@ class ResourceGroupAzureParityTest {
         String vault = group("RG-Cascade") + "/providers/Microsoft.KeyVault/vaults/cascade-kv-0001";
         String cache = group("rg-cascade") + "/providers/Microsoft.Cache/redis/cascade-cache";
         String topic = group("rg-cascade") + "/providers/Microsoft.EventGrid/topics/cascade-topic";
+        String plan = group("rg-cascade") + "/providers/Microsoft.Web/serverFarms/cascade-plan";
         String kept = group("rg-keep") + "/providers/Microsoft.Storage/storageAccounts/keptacct0001";
         json("{\"location\":\"eastus\",\"kind\":\"StorageV2\",\"sku\":{\"name\":\"Standard_LRS\"}}")
             .when().put(account + STORAGE_API).then().statusCode(200);
@@ -145,14 +147,17 @@ class ResourceGroupAzureParityTest {
         json("{\"location\":\"eastus\",\"properties\":{\"sku\":{\"name\":\"Basic\",\"family\":\"C\",\"capacity\":0}}}")
             .when().put(cache + REDIS_API).then().statusCode(201);
         json("{\"location\":\"eastus\",\"properties\":{}}").when().put(topic + EVENT_GRID_API).then().statusCode(201);
+        json("{\"location\":\"eastus\",\"sku\":{\"name\":\"Y1\"},\"properties\":{\"reserved\":true}}")
+            .when().put(plan + WEB_API).then().statusCode(200);
         json("{\"location\":\"eastus\",\"kind\":\"StorageV2\",\"sku\":{\"name\":\"Standard_LRS\"}}")
             .when().put(kept + STORAGE_API).then().statusCode(200);
 
         // The vault was created under a differently cased group name: the cascade still finds it.
         given().when().get("/subscriptions/" + SUB + "/resources" + API)
             .then().statusCode(200)
-            .body("value", hasSize(5))
-            .body("value.name", hasItems("cascadeacct0001", "cascade-kv-0001", "cascade-cache", "cascade-topic"));
+            .body("value", hasSize(6))
+            .body("value.name", hasItems("cascadeacct0001", "cascade-kv-0001", "cascade-cache", "cascade-topic",
+                "cascade-plan"));
 
         given().when().delete(group("rg-cascade") + API).then().statusCode(202);
 
@@ -160,6 +165,7 @@ class ResourceGroupAzureParityTest {
         given().when().get(vault + KV_API).then().statusCode(404);
         given().when().get(cache + REDIS_API).then().statusCode(404);
         given().when().get(topic + EVENT_GRID_API).then().statusCode(404);
+        given().when().get(plan + WEB_API).then().statusCode(404);
         given().when().get("/subscriptions/" + SUB + "/resources" + API)
             .then().statusCode(200)
             .body("value.id", hasItem(kept))
