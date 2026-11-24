@@ -365,7 +365,8 @@ public class PostgresServerManager {
         while (System.currentTimeMillis() < deadline) {
             try (Socket s = new Socket(host, port)) {
                 connected = true;
-                s.setSoTimeout(READY_READ_TIMEOUT_MILLIS);
+                s.setSoTimeout((int) Math.max(1, Math.min(READY_READ_TIMEOUT_MILLIS,
+                    deadline - System.currentTimeMillis())));
                 if (acceptsSessions(s, user)) {
                     LOG.infof("PostgreSQL ready: %s:%d", host, port);
                     return;

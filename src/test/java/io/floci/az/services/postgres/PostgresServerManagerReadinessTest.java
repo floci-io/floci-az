@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -20,6 +21,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -48,6 +50,19 @@ class PostgresServerManagerReadinessTest {
         try (FakeServer server = new FakeServer(attempt -> null)) {
             RuntimeException failure = assertThrows(RuntimeException.class,
                     () -> PostgresServerManager.waitForReady("127.0.0.1", server.port(), "admin", 1));
+
+            assertThat(failure.getMessage(), containsString("did not accept sessions within 1s"));
+        }
+    }
+
+    @Test
+    void aSilentServerStillFailsWithinTheDeadline() throws Exception {
+        // The kernel completes the connect from the backlog, but nothing ever reads or answers the startup
+        // message, so only the read timeout ends each attempt. It must not run past the 1 s deadline.
+        try (ServerSocket silent = new ServerSocket(0)) {
+            RuntimeException failure = assertTimeout(Duration.ofMillis(1_500), () -> assertThrows(
+                    RuntimeException.class,
+                    () -> PostgresServerManager.waitForReady("127.0.0.1", silent.getLocalPort(), "admin", 1)));
 
             assertThat(failure.getMessage(), containsString("did not accept sessions within 1s"));
         }
