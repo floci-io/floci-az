@@ -1461,14 +1461,45 @@ public class DeploymentEngine {
         return tenant;
     }
 
-    /** {@code environment()}: the cloud's own metadata document, Azure's endpoints and suffixes, named for it. */
+    /**
+     * {@code environment()}: the cloud's own metadata document, Azure's endpoints, named for it, with ARM's
+     * {@code suffixes} object in place of the metadata one. The two differ: ARM names seven suffixes, spells two of
+     * them differently ({@code keyvaultDns}, {@code azureDatalake...}) and puts a leading dot on the host suffixes
+     * ({@code .vault.azure.net}), so {@code concat(name, environment().suffixes.keyvaultDns)} is a host name.
+     */
     private ObjectNode environmentObject(CloudProfile cloud) {
         ObjectNode environment = cloud.metadataPayload("2022-09-01")
             .filter(JsonNode::isObject)
             .map(payload -> (ObjectNode) payload)
             .orElseGet(JsonNodeFactory.instance::objectNode);
         environment.put("name", cloud.name());
+        environment.set("suffixes", armSuffixes(environment.path("suffixes")));
         return environment;
+    }
+
+    /** ARM's {@code environment().suffixes}, from the metadata suffixes: name, metadata key, leading dot. */
+    private static final List<EnvironmentSuffix> ARM_SUFFIXES = List.of(
+        new EnvironmentSuffix("acrLoginServer", "acrLoginServer", true),
+        new EnvironmentSuffix("azureDatalakeAnalyticsCatalogAndJob", "azureDataLakeAnalyticsCatalogAndJob", false),
+        new EnvironmentSuffix("azureDatalakeStoreFileSystem", "azureDataLakeStoreFileSystem", false),
+        new EnvironmentSuffix("azureFrontDoorEndpointSuffix", "azureFrontDoorEndpointSuffix", false),
+        new EnvironmentSuffix("keyvaultDns", "keyVaultDns", true),
+        new EnvironmentSuffix("sqlServerHostname", "sqlServerHostname", true),
+        new EnvironmentSuffix("storage", "storage", false));
+
+    private record EnvironmentSuffix(String armName, String metadataName, boolean leadingDot) {
+    }
+
+    private static ObjectNode armSuffixes(JsonNode metadataSuffixes) {
+        ObjectNode suffixes = JsonNodeFactory.instance.objectNode();
+        for (EnvironmentSuffix suffix : ARM_SUFFIXES) {
+            JsonNode value = metadataSuffixes.path(suffix.metadataName());
+            if (value.isTextual() && !value.asText().isEmpty()) {
+                String text = value.asText();
+                suffixes.put(suffix.armName(), suffix.leadingDot() && !text.startsWith(".") ? "." + text : text);
+            }
+        }
+        return suffixes;
     }
 
     /**

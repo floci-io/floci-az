@@ -225,9 +225,12 @@ expansion could not fit in.
 | Numeric | `add`, `sub`, `mul`, `div`, `mod`, `min`, `max` |
 | Date | `utcNow`, `dateTimeAdd`, `dateTimeFromEpoch`, `dateTimeToEpoch` |
 
-`environment()` returns the subscription's cloud's own metadata (Azure's endpoints and suffixes), so a
-template that builds a hostname from `environment().suffixes.storage` gets the real Azure suffix, which the
-emulator routes.
+`environment()` returns the subscription's cloud's own metadata (Azure's endpoints), so a template that builds
+a hostname from `environment().suffixes.storage` gets the real Azure suffix, which the emulator routes. Its
+`suffixes` object has ARM's shape rather than the metadata one: the seven suffixes ARM documents, with a leading dot
+on the host suffixes (`keyvaultDns` is `.vault.azure.net`, as are `sqlServerHostname` and `acrLoginServer`), so
+`concat(name, environment().suffixes.keyvaultDns)` is a host name. `/metadata/endpoints` keeps the metadata shape
+(`keyVaultDns`, no dot), which the CLI and the SDKs read.
 
 ### Key Vault parameter references
 
