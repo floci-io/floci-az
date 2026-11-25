@@ -1,13 +1,9 @@
 package io.floci.az.services.containerapps;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.endsWith;
@@ -21,16 +17,8 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 
 @QuarkusTest
-@TestProfile(ContainerAppsHandlerTest.MockedProfile.class)
 @DisplayName("Container Apps ARM and revision behavior")
 public class ContainerAppsHandlerTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.container-apps.mocked", "true");
-        }
-    }
 
     private static final String SUB = "test-sub-containerapps";
     private static final String RG = "test-rg-containerapps";

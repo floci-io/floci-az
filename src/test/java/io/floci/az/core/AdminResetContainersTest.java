@@ -7,15 +7,12 @@ import io.floci.az.services.redis.RedisCacheManager;
 import io.floci.az.services.redis.RedisModels.RedisCache;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -38,22 +35,10 @@ import static org.mockito.Mockito.verify;
  * would, and a test suite resetting between tests left one container per cache behind on every run.
  */
 @QuarkusTest
-@TestProfile(AdminResetContainersTest.ContainerBacked.class)
 @DisplayName("/_admin/reset removes the sidecar containers of the resources it drops")
 class AdminResetContainersTest {
 
     private static final String RG = "/subscriptions/sub-reset/resourceGroups/rg-reset/providers";
-
-    /** Container-backed mode, with the container managers mocked so no container really starts. */
-    public static class ContainerBacked implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci-az.services.redis.mocked", "false",
-                    "floci-az.services.aks.mocked", "false",
-                    "floci-az.services.acr.mocked", "false");
-        }
-    }
 
     @InjectMock
     RedisCacheManager cacheManager;

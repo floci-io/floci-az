@@ -10,7 +10,6 @@ import io.floci.az.services.containerapps.ContainerAppsModels.ContainerAppState;
 import io.floci.az.services.containerapps.ContainerAppsModels.ManagedEnvironmentState;
 import io.floci.az.services.containerapps.ContainerAppsModels.RevisionState;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,7 +26,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
-@TestProfile(ContainerAppsHandlerTest.MockedProfile.class)
 @DisplayName("Container Apps: environments and apps in one backend, each in its own store")
 class ContainerAppsResourceStoreTest {
 

@@ -2,13 +2,10 @@ package io.floci.az.services.mariadb;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -28,7 +25,6 @@ import static org.mockito.Mockito.verify;
  * mocked so no Docker is needed.
  */
 @QuarkusTest
-@TestProfile(MariaDbPasswordRotationTest.ContainerBacked.class)
 @DisplayName("MariaDB admin password changes reach the running container")
 class MariaDbPasswordRotationTest {
 
@@ -43,13 +39,6 @@ class MariaDbPasswordRotationTest {
             + "\"storageProfile\":{\"storageMB\":5120}}}";
     private static final String PASSWORD_PATCH =
             "{\"properties\":{\"administratorLoginPassword\":\"" + NEW_PASSWORD + "\"}}";
-
-    public static class ContainerBacked implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.maria-db.mocked", "false");
-        }
-    }
 
     @InjectMock
     MariaDbServerManager serverManager;

@@ -1,30 +1,21 @@
 package io.floci.az.services.entra;
 
+import io.floci.az.testing.ClientCredentialValidationProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
 /** The token endpoint with {@code entra.validate-client-credentials=true}. */
 @QuarkusTest
-@TestProfile(ClientCredentialValidationTest.Enforced.class)
+@TestProfile(ClientCredentialValidationProfile.class)
 class ClientCredentialValidationTest {
 
     private static final String TENANT = "00000000-0000-0000-0000-000000000002";
     private static final String UNKNOWN_CLIENT = "00000000-0000-0000-0000-000000000003";
-
-    public static class Enforced implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.entra.validate-client-credentials", "true");
-        }
-    }
 
     @Test
     void theDevAppAuthenticatesWithItsSecretInTheForm() {

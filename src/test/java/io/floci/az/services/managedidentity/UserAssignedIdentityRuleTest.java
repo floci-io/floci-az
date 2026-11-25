@@ -1,11 +1,9 @@
 package io.floci.az.services.managedidentity;
 
+import io.floci.az.testing.AcrMockedProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.anyOf;
@@ -15,16 +13,8 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
-@TestProfile(UserAssignedIdentityRuleTest.MockedAcr.class)
+@TestProfile(AcrMockedProfile.class)
 class UserAssignedIdentityRuleTest {
-
-    /** The rule reads registry records; it needs no registry:2 container. */
-    public static class MockedAcr implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.acr.mocked", "true");
-        }
-    }
 
     private static final String RG = "/subscriptions/sub-uairule/resourceGroups/rg-uairule";
     private static final String IDENTITIES = RG + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/";

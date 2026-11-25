@@ -2,8 +2,6 @@ package io.floci.az.core;
 
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
@@ -37,15 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * configured base URL in both host and port.
  */
 @QuarkusTest
-@TestProfile(Http2BaseUrlTest.MockedAciProfile.class)
 class Http2BaseUrlTest {
-
-    public static class MockedAciProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.aci.mocked", "true");
-        }
-    }
 
     private static final String TENANT = "00000000-0000-0000-0000-000000000002";
 

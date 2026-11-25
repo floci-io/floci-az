@@ -2,8 +2,6 @@ package io.floci.az.services.postgres;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.RestAssured;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +40,6 @@ import static org.mockito.Mockito.verify;
  * container before it is committed. The container manager is mocked, so no Docker is needed.
  */
 @QuarkusTest
-@TestProfile(PostgresPasswordRotationTest.ContainerBacked.class)
 @DisplayName("PostgreSQL admin password changes reach the running container")
 class PostgresPasswordRotationTest {
 
@@ -57,13 +54,6 @@ class PostgresPasswordRotationTest {
             + "\"administratorLoginPassword\":\"" + OLD_PASSWORD + "\",\"version\":\"16\"}}";
     private static final String PASSWORD_PATCH =
             "{\"properties\":{\"administratorLoginPassword\":\"" + NEW_PASSWORD + "\"}}";
-
-    public static class ContainerBacked implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.postgres.mocked", "false");
-        }
-    }
 
     private static final String OTHER_PASSWORD = "Other_Owner789!";
 

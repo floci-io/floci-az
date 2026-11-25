@@ -1,29 +1,20 @@
 package io.floci.az.services.web;
 
+import io.floci.az.testing.StrictNamesProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.Map;
-
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 
 @QuarkusTest
-@TestProfile(WebStrictNamesTest.StrictNames.class)
+@TestProfile(StrictNamesProfile.class)
 @DisplayName("Web ARM: parity-overrides.strict-names refuses a site name outside Azure's rule")
 class WebStrictNamesTest {
-
-    public static class StrictNames implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.parity-overrides.strict-names", "true");
-        }
-    }
 
     private static final String BASE = "/subscriptions/sub-sitenames/resourceGroups/rg/providers/Microsoft.Web/sites/";
     private static final String API = "?api-version=2023-01-01";

@@ -1,16 +1,15 @@
 package io.floci.az.services.vm;
 
 import io.floci.az.services.vm.VmModels.VirtualMachine;
+import io.floci.az.testing.VmContainersProfile;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,16 +27,9 @@ import static org.mockito.Mockito.doThrow;
  * the VM must report {@code provisioningState=Failed}, not a running VM that does not exist.
  */
 @QuarkusTest
-@TestProfile(VmHandlerContainerStartFailureTest.RealModeProfile.class)
+@TestProfile(VmContainersProfile.class)
 @DisplayName("VmHandler: container start failure in container-backed mode")
 class VmHandlerContainerStartFailureTest {
-
-    public static class RealModeProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.vm.mocked", "false");
-        }
-    }
 
     private static final String API = "?api-version=2024-11-01";
     private static final String VM_PATH = "/subscriptions/test-sub-vm-fail/resourceGroups/test-rg-vm-fail"
