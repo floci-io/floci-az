@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import io.floci.az.core.ArmRouter;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.ArmResourceId;
@@ -680,6 +681,8 @@ public class DeploymentEngine {
                         collectLoopReferences(loop, scope, dependsOn);
                     }
                 } else {
+                    // A property name can be an expression too, and a reference() in it orders the resource as well.
+                    collectReferences(TextNode.valueOf(field.getKey()), scope, dependsOn);
                     collectReferences(field.getValue(), scope, dependsOn);
                 }
             }

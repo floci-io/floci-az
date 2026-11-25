@@ -73,7 +73,7 @@ public final class ExpressionEvaluator {
             Iterator<Map.Entry<String, JsonNode>> fields = value.fields();
             while (fields.hasNext()) {
                 Map.Entry<String, JsonNode> field = fields.next();
-                result.set(field.getKey(), evaluateValue(field.getValue(), scope));
+                result.set(evaluateKey(field.getKey(), scope), evaluateValue(field.getValue(), scope));
             }
             return result;
         }
@@ -85,6 +85,24 @@ public final class ExpressionEvaluator {
             return result;
         }
         return value.deepCopy();
+    }
+
+    /**
+     * A property name, evaluated as Azure evaluates one: a name that is an expression becomes its string value (what
+     * Bicep emits for an interpolated key such as {@code '${identity.id}'} under {@code userAssignedIdentities}), an
+     * escaped {@code [[...} name loses its escape, and any other name is itself. A name that evaluates to anything
+     * but a string is an {@code InvalidTemplate}.
+     */
+    public static String evaluateKey(String key, TemplateScope scope) {
+        if (!ExpressionParser.isExpression(key)) {
+            return ExpressionParser.unescape(key);
+        }
+        JsonNode name = evaluate(ExpressionParser.parse(key), scope);
+        if (name == null || !name.isTextual()) {
+            throw TemplateException.invalid("The template language expression '" + key + "' is used as a property "
+                + "name, so it must evaluate to a string, not a '" + typeName(name) + "'.");
+        }
+        return name.asText();
     }
 
     private static JsonNode call(FunctionCall call, TemplateScope scope) {
