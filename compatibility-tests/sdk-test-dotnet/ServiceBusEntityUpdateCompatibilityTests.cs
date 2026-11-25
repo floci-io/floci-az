@@ -67,6 +67,8 @@ public sealed class ServiceBusEntityUpdateCompatibilityTests
             ServiceBusReceivedMessage message = await receiver.ReceiveMessageAsync(TimeSpan.FromSeconds(10), cancellationToken);
             await Assert.That(message).IsNotNull();
             TimeSpan lockLeft = message.LockedUntil - DateTimeOffset.UtcNow;
+            // The updated 5 s lock, not the 60 s it was created with; the floor rejects a lock shorter than asked for.
+            await Assert.That(lockLeft).IsGreaterThan(TimeSpan.FromSeconds(2));
             await Assert.That(lockLeft).IsLessThan(TimeSpan.FromSeconds(20));
 
             // One delivery allowed: abandoning it moves the message to the dead-letter queue.
@@ -99,16 +101,19 @@ public sealed class ServiceBusEntityUpdateCompatibilityTests
             createdTopic.MaxSizeInMegabytes = 2048;
             TopicProperties updatedTopic = (await admin.UpdateTopicAsync(createdTopic, cancellationToken)).Value;
             await Assert.That(updatedTopic.DefaultMessageTimeToLive).IsEqualTo(TimeSpan.FromHours(2));
+            await Assert.That(updatedTopic.MaxSizeInMegabytes).IsEqualTo(2048);
 
             createdSubscription.MaxDeliveryCount = 8;
             createdSubscription.LockDuration = TimeSpan.FromSeconds(20);
             SubscriptionProperties updatedSubscription =
                 (await admin.UpdateSubscriptionAsync(createdSubscription, cancellationToken)).Value;
             await Assert.That(updatedSubscription.MaxDeliveryCount).IsEqualTo(8);
+            await Assert.That(updatedSubscription.LockDuration).IsEqualTo(TimeSpan.FromSeconds(20));
 
             TopicProperties readTopic = (await admin.GetTopicAsync(topic, cancellationToken)).Value;
             SubscriptionProperties readSubscription =
                 (await admin.GetSubscriptionAsync(topic, "consumer", cancellationToken)).Value;
+            await Assert.That(readTopic.DefaultMessageTimeToLive).IsEqualTo(TimeSpan.FromHours(2));
             await Assert.That(readTopic.MaxSizeInMegabytes).IsEqualTo(2048);
             await Assert.That(readSubscription.MaxDeliveryCount).IsEqualTo(8);
             await Assert.That(readSubscription.LockDuration).IsEqualTo(TimeSpan.FromSeconds(20));

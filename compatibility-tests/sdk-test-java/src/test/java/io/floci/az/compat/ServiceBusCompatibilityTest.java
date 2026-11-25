@@ -90,8 +90,11 @@ class ServiceBusCompatibilityTest {
         try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
             ServiceBusReceivedMessage message = receiver.receiveMessages(1, RECV_TIMEOUT).stream()
                     .findFirst().orElseThrow();
-            assertTrue(message.getLockedUntil().isBefore(OffsetDateTime.now().plusSeconds(20)),
+            OffsetDateTime now = OffsetDateTime.now();
+            assertTrue(message.getLockedUntil().isBefore(now.plusSeconds(20)),
                     "lock follows the updated PT6S, not PT60S: " + message.getLockedUntil());
+            assertTrue(message.getLockedUntil().isAfter(now.plusSeconds(3)),
+                    "lock is not shorter than the PT6S asked for: " + message.getLockedUntil());
             // One delivery allowed: abandoning it dead-letters the message.
             receiver.abandon(message);
         }
