@@ -710,4 +710,68 @@ class ApiManagementHandlerTest {
         given().when().get(GATEWAY + "/orders/x")
                 .then().statusCode(201);
     }
+
+    @Test
+    void productPoliciesAreServedAndGoWithTheirProduct() throws IOException {
+        createService();
+        put("/products/starter", "{\"properties\":{}}");
+        putPolicy("/products/starter", "<set-header name=\"X-Product\" exists-action=\"override\">"
+                + "<value>starter</value></set-header>");
+
+        given().when().get(SERVICE_ID + "/products/starter/policies/policy" + API)
+                .then().statusCode(200)
+                .body("id", equalTo(SERVICE_ID + "/products/starter/policies/policy"))
+                .body("type", equalTo("Microsoft.ApiManagement/service/products/policies"))
+                .body("properties.value", containsString("X-Product"));
+        given().when().get(SERVICE_ID + "/products/starter/policies" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", equalTo("policy"));
+
+        given().contentType("application/json").body("{\"properties\":{\"value\":\"<policies/>\"}}")
+                .when().put(SERVICE_ID + "/products/missing/policies/policy" + API)
+                .then().statusCode(404);
+
+        given().when().delete(SERVICE_ID + "/products/starter/policies/policy" + API).then().statusCode(200);
+        given().when().get(SERVICE_ID + "/products/starter/policies/policy" + API).then().statusCode(404);
+
+        putPolicy("/products/starter", "<set-header name=\"X-Product\" exists-action=\"override\">"
+                + "<value>again</value></set-header>");
+        given().when().delete(SERVICE_ID + "/products/starter" + API).then().statusCode(200);
+        put("/products/starter", "{\"properties\":{}}");
+        given().when().get(SERVICE_ID + "/products/starter/policies" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(0));
+    }
+
+    @Test
+    void theGatewayAppliesThePolicyOfTheProductARequestComesInThrough() throws IOException {
+        createService();
+        createApi("orders", "orders", true);
+        put("/products/starter", "{\"properties\":{}}");
+        put("/products/starter/apis/orders", "{}");
+        put("/products/premium", "{\"properties\":{}}");
+        put("/products/premium/apis/orders", "{}");
+        put("/subscriptions/s1", "{\"properties\":{\"scope\":\"/products/starter\",\"primaryKey\":\"starter-key\","
+                + "\"secondaryKey\":\"starter-key2\"}}");
+        put("/subscriptions/s2", "{\"properties\":{\"scope\":\"/products/premium\",\"primaryKey\":\"premium-key\","
+                + "\"secondaryKey\":\"premium-key2\"}}");
+        putPolicy("", "<set-header name=\"X-Layers\" exists-action=\"override\"><value>service</value></set-header>");
+        putPolicy("/products/starter", "<set-header name=\"X-Product\" exists-action=\"override\">"
+                + "<value>starter</value></set-header>"
+                + "<set-header name=\"X-Layers\" exists-action=\"override\"><value>product</value></set-header>");
+        putPolicy("/apis/orders", "<set-header name=\"X-Api\" exists-action=\"override\"><value>orders</value>"
+                + "</set-header>");
+
+        given().header("Ocp-Apim-Subscription-Key", "starter-key").when().get(GATEWAY + "/orders/x")
+                .then().statusCode(201)
+                .body("headers.x-product", equalTo("starter"))
+                .body("headers.x-layers", equalTo("product"))
+                .body("headers.x-api", equalTo("orders"));
+        given().header("Ocp-Apim-Subscription-Key", "premium-key").when().get(GATEWAY + "/orders/x")
+                .then().statusCode(201)
+                .body("headers.x-product", nullValue())
+                .body("headers.x-layers", equalTo("service"))
+                .body("headers.x-api", equalTo("orders"));
+    }
 }

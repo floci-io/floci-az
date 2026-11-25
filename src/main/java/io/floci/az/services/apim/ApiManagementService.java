@@ -689,10 +689,20 @@ public class ApiManagementService implements GlobalNameSource {
                 case "DELETE" -> {
                     products.remove(productKey(sub, rg, serviceName, productId));
                     productApis.keySet().removeIf(k -> k.startsWith(productKey(sub, rg, serviceName, productId) + "/apis/"));
+                    policies.keySet().removeIf(k -> k.startsWith(productKey(sub, rg, serviceName, productId) + "/policies/"));
                     yield Response.ok().build();
                 }
                 default -> Response.status(405).build();
             };
+        }
+        if (parts.length >= 5 && "policies".equals(parts[4])) {
+            if (products.get(productKey(sub, rg, serviceName, productId)) == null) {
+                return notFound("products/" + productId);
+            }
+            return handlePolicy(request, method, productKey(sub, rg, serviceName, productId),
+                    "/subscriptions/" + sub + "/resourceGroups/" + rg
+                            + "/providers/Microsoft.ApiManagement/service/" + serviceName + "/products/" + productId,
+                    "Microsoft.ApiManagement/service/products/policies", parts);
         }
         if (parts.length >= 5 && "apis".equals(parts[4])) {
             if (parts.length == 5) {
