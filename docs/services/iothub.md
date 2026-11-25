@@ -1,12 +1,13 @@
 # Azure IoT Hub
 
 Compatible with the `Microsoft.Devices` ARM management plane as the `azurerm_iothub` Terraform resource, the
-`azure-mgmt-iothub` SDKs and the `az iot hub` and `az iot hub policy` commands use it. Floci AZ serves IoT hubs
-with their shared access policies and keys. Devices, telemetry and message routing are not served yet: see
-[Notes & limitations](#notes-limitations).
+`azure-mgmt-iothub` SDKs and the `az iot hub` and `az iot hub policy` commands use it, and with the device
+identity registry of the IoT Hub service API as `az iot hub device-identity` (the `azure-iot` extension) uses
+it. Floci AZ serves IoT hubs with their shared access policies and keys, and each hub's devices on its
+`hostName`. Telemetry and message routing are not served yet: see [Notes & limitations](#notes-limitations).
 
-> **Management plane only, for now.** The device identity registry, the MQTT and AMQP device endpoints and
-> message routing are not served. A hub's `hostName` does not answer requests yet.
+> **No device endpoints yet.** A hub's `hostName` serves the identity registry only. The MQTT, AMQP and
+> HTTPS device endpoints and message routing are not served, so a registered device cannot connect yet.
 
 > **HTTP-only: no Docker.** Hubs are in-process ARM state. There is no sidecar.
 
@@ -39,6 +40,10 @@ with their shared access policies and keys. Devices, telemetry and message routi
   and the provider's operations (`/providers/Microsoft.Devices/operations`)
 - **Managed identity**: `SystemAssigned`, `UserAssigned` and `SystemAssigned, UserAssigned`, answered as
   [Azure AI Search](search.md) answers them. A hub without one answers `"identity": {"type": "None"}`
+- **Device identity registry**: on `https://{hub}.azure-devices.net`, devices are created, read, updated
+  (status, keys, thumbprints) and deleted as `az iot hub device-identity create`, `show`, `update`,
+  `renew-key`, `list` and `delete` do, with symmetric keys generated when none are sent. Every request is
+  checked against the hub's shared access policies. See [Device registry](#device-registry)
 
 ---
 
@@ -62,7 +67,17 @@ GET    .../IotHubs/{name}/IotHubStats
 GET    /providers/Microsoft.Devices/operations
 ```
 
-Every api-version Azure lists for `Microsoft.Devices/IotHubs` is accepted and served the same way.
+The service API, on `https://{hub}.azure-devices.net`:
+
+```
+GET    /devices
+PUT/GET/DELETE /devices/{deviceId}
+POST   /devices/query
+POST   /devices/keys/regenerate
+```
+
+Every api-version Azure lists for `Microsoft.Devices/IotHubs` is accepted and served the same way, and so is
+every api-version of the service API.
 
 ---
 
@@ -81,8 +96,18 @@ az iot hub update -n my-hub -g my-rg --retention-day 3
 az iot hub consumer-group create --hub-name my-hub -g my-rg -n analytics
 az iot hub consumer-group list --hub-name my-hub -g my-rg
 az iot hub show-quota-metrics -n my-hub -g my-rg
+az extension add --name azure-iot
+az iot hub device-identity create -n my-hub -g my-rg -d esp32-1
+az iot hub device-identity connection-string show -n my-hub -g my-rg -d esp32-1
+az iot hub device-identity update -n my-hub -g my-rg -d esp32-1 --set status=disabled
+az iot hub device-identity list -n my-hub -g my-rg
+az iot hub device-identity delete -n my-hub -g my-rg -d esp32-1
 az iot hub delete -n my-hub -g my-rg
 ```
+
+The `device-identity` commands call `https://my-hub.azure-devices.net`, so that name must reach floci-az,
+over TLS with its certificate trusted: point it at floci-az in `/etc/hosts` (or the embedded DNS), as the
+az CLI compatibility tests do. floci-az's generated certificate covers `*.azure-devices.net`.
 
 ### Terraform / OpenTofu
 
@@ -197,6 +222,49 @@ hyphens, not all digits, no leading or trailing hyphen) is refused with `400 Inv
 
 ---
 
+## Device registry
+
+The registry answers on the hub's `hostName`, routed by the `Host` header. Its shapes follow the IoT Hub
+service API's `Device` and the field list on Learn's identity registry page:
+
+- **Device IDs** are 1 to 128 ASCII letters and digits plus `- . % _ * ? ! ( ) , : = @ $ '`, as Learn
+  gives them, and are case-sensitive: `Sensor` and `sensor` are two devices. Any other ID is refused
+  with `400 ArgumentInvalid`
+- **A `PUT` without `If-Match`** creates the device, and answers `409 DeviceAlreadyExists` for one that
+  exists. **With `If-Match`** it replaces the device: `*` or its current `etag` pass, any other ETag is
+  refused with `412 PreconditionFailed`, and a missing device answers `404 DeviceNotFound`. A `DELETE`
+  checks `If-Match` the same way and answers `204`
+- **Keys**: a `sas` identity (the default) gets a new 32-byte key in place of each key it leaves out. A key
+  that is sent must be base64 of 16 to 64 bytes. A `selfSigned` identity needs a `primaryThumbprint`.
+  `renew-key --key-type primary`, `secondary` and `both` call `POST /devices/keys/regenerate`, which
+  renews those keys of the listed devices and answers `{"policyKey", "errors", "rotatedKeys"}`: a device
+  that is missing or does not use symmetric keys is listed in `errors` and the rest are renewed.
+  `--key-type swap` sends the identity back with its keys swapped
+- **Generated values**: `generationId` is fixed when the device is created, and the `etag` changes on
+  every write. An IoT Edge device gets its own `deviceScope`, `ms-azure-iot-edge://{id}-{generationId}`.
+  `connectionState` is `Disconnected` and the activity times are `0001-01-01T00:00:00Z`, since nothing
+  connects yet
+- **Queries**: `POST /devices/query` answers the two queries `device-identity list` sends,
+  `select * from devices` and `select * from devices where capabilities.iotEdge = true` (any case and
+  spacing), with each device's twin. Pages follow `x-ms-max-item-count` (100 by default, at most 1000)
+  and `x-ms-continuation`. Any other query is refused with `400 SqlQueryInvalid`. The twins' desired and
+  reported properties are empty, as twins are not served yet
+- **Shared access signatures**: every request must carry
+  `Authorization: SharedAccessSignature sr={host}&sig={signature}&se={expiry}&skn={policy}`, signed with
+  the primary or secondary key of one of the hub's policies, for the hub's host name (or something under
+  it), and not expired. Reading needs `RegistryRead` or `RegistryWrite`, and writing `RegistryWrite`, so
+  `iothubowner` and `registryReadWrite` do both, `registryRead` only reads, and `service` and `device`
+  do neither. A device's own token (no `skn`) is refused too. A refusal answers
+  `401 IotHubUnauthorizedAccess`. The check runs whatever the parity overrides say
+- **Errors** are answered as the IoT Hub service SDKs parse them:
+  `{"Message": "ErrorCode:DeviceNotFound;...", "ExceptionMessage": "Tracking ID:..."}`, with the code in
+  the `iothub-errorcode` header. An unknown hub answers `404 IotHubNotFound`
+- **A hub's devices go with it**: deleting the hub, or its resource group, deletes its registry, so a hub
+  created again under the name starts empty. `IotHubStats` and the `TotalDeviceCount` of
+  `quotaMetrics` count the registry
+
+---
+
 ## Configuration
 
 ```yaml
@@ -213,15 +281,17 @@ floci-az:
 | Env var | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_IOTHUB_ENABLED` | `true` | Enable/disable the service |
-| `FLOCI_AZ_STORAGE_SERVICES_IOTHUB_MODE` | global mode | Storage mode for hubs and their keys |
+| `FLOCI_AZ_STORAGE_SERVICES_IOTHUB_MODE` | global mode | Storage mode for hubs, their keys and their devices |
 
 ---
 
 ## Notes & limitations
 
-- **No devices or messages yet.** The device identity registry (`az iot hub device-identity`), the device
-  endpoints (MQTT, AMQP, HTTPS) and cloud-to-device messaging are not served, so a hub's `hostName` and
-  connection strings cannot be used by a device yet.
+- **No device endpoints or messages yet.** The device endpoints (MQTT, AMQP, HTTPS) and cloud-to-device
+  messaging are not served, so a device's connection string cannot be used yet. Of the service API only the
+  identity registry is served: twins, modules, jobs, configurations and import and export of devices answer
+  `404`. The registry holds any number of devices; Azure's `TotalDeviceCount` limit is reported, not
+  enforced.
 - **Routing is stored, not run.** `properties.routing` endpoints, routes and enrichments are kept and
   answered as they were sent, but nothing is routed and their references are not checked.
 - **Consumer groups are management plane only.** Nothing reads messages through them: the built-in
@@ -229,11 +299,11 @@ floci-az:
   `az iot hub monitor-events` use it) is not served. Only the `events` endpoint has groups: any other
   endpoint name answers `404`. A hub has at most 20, `$Default` included, as Learn states for every
   tier. `$Default` cannot be deleted. Group names are 1 to 50 letters, digits, hyphens, periods and
-  underscores, and match ignoring case: the characters are azurerm's rule and the 50 is Event Hubs'
-  AMQP limit, as IoT Hub's documentation states neither.
-- **The read-only views count nothing yet.** `IotHubStats` answers zero devices and both `quotaMetrics`
-  have a `currentValue` of 0, since there are no devices or messages to count. Their maximums follow the
-  hub's SKU and units: `TotalMessages` is the SKU's daily message quota per unit (8,000 on `F1`, 400,000
+  underscores, as Learn's [resource naming rules](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules)
+  give them for `IotHubs / eventHubEndpoints / ConsumerGroups`, and match ignoring case.
+- **The read-only views count devices, not messages.** `IotHubStats` and the `TotalDeviceCount` of
+  `quotaMetrics` count the hub's registry; `TotalMessages` has a `currentValue` of 0, since no message
+  arrives yet. The maximums follow the hub's SKU and units: `TotalMessages` is the SKU's daily message quota per unit (8,000 on `F1`, 400,000
   on `S1` and `B1`, 6,000,000 on `S2` and `B2`, 300,000,000 on `S3` and `B3`) times the units, and
   `TotalDeviceCount` is 1,000,000 (500 on `F1`). `skus` lists the SKUs the hub can move to, each with
   the units it allows: those of its own tier, as Azure answered for an `S1` hub (`S1`, `S2`, `S3`), and
@@ -254,4 +324,9 @@ floci-az:
   too many units, a SKU change Azure does not allow (any but within a tier or from Basic to Standard),
   a retention period out of range, a partition count change and an unknown policy on
   `IotHubKeys/{keyName}/listkeys` are unrecorded too, so ARM's `InvalidRequestContent` and `NotFound`
-  stand in. Whether Azure masks Cosmos DB keys as `****` or leaves them out is also unrecorded.
+  stand in. Whether Azure masks Cosmos DB keys as `****` or leaves them out is also unrecorded. Learn's
+  20-group limit does not say whether `$Default` counts toward it; floci-az counts it. The registry's error
+  body is the shape the IoT Hub service SDKs parse rather than a recorded answer, and its codes and messages
+  for an invalid device ID or key, a body whose `deviceId` differs from the path's, an unsupported query and
+  a refused signature are unrecorded. So is the answer to a key regeneration that leaves some devices out:
+  floci-az answers `200` with them in `errors`. The key length rule (16 to 64 bytes) is unrecorded too.

@@ -6,6 +6,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -139,6 +140,63 @@ public final class IotHubModels {
         public IotHubResource withConsumerGroups(List<ConsumerGroup> groups) {
             return new IotHubResource(id, name, location, tags, sku, capacity, identity, properties, policies,
                     incarnation, version, createdAt, eventHubPath, eventHubNamespace, groups);
+        }
+    }
+
+    /**
+     * A device identity in a hub's identity registry, as the service API's {@code Device} carries it. What a device
+     * reports at run time (its connection state, its last activity) is not stored: nothing connects yet.
+     *
+     * @param deviceId            the device ID, case-sensitive, as the PUT that created it spelt it
+     * @param generationId        fixed when the identity is created, so a device created again under the same ID
+     *                            is told apart from the deleted one
+     * @param version             the write counter the ETag is built from
+     * @param status              {@code enabled} or {@code disabled}
+     * @param statusReason        the reason given for the status, or null
+     * @param statusUpdatedTime   when the status last changed, ISO-8601
+     * @param authType            {@code sas}, {@code selfSigned}, {@code certificateAuthority} or {@code none}
+     * @param primaryKey          the primary symmetric key, base64, on {@code sas}
+     * @param secondaryKey        the secondary symmetric key, base64, on {@code sas}
+     * @param primaryThumbprint   the primary X.509 thumbprint, on {@code selfSigned}
+     * @param secondaryThumbprint the secondary X.509 thumbprint, on {@code selfSigned}
+     * @param iotEdge             whether the device is an IoT Edge device
+     * @param deviceScope         the device scope, or null
+     * @param parentScopes        the scopes of the device's parents
+     */
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Device(
+            String deviceId,
+            String generationId,
+            long version,
+            String status,
+            String statusReason,
+            String statusUpdatedTime,
+            String authType,
+            String primaryKey,
+            String secondaryKey,
+            String primaryThumbprint,
+            String secondaryThumbprint,
+            boolean iotEdge,
+            String deviceScope,
+            List<String> parentScopes
+    ) {
+
+        public Device {
+            parentScopes = parentScopes == null ? List.of() : List.copyOf(parentScopes);
+        }
+
+        /**
+         * The device's ETag. Azure answers base64 of a decimal counter ({@code MjQ0NjU2NTE0} is {@code 244656514}),
+         * which changes on every write; this one is the generation and the write counter in the same shape.
+         */
+        public String etag() {
+            return Base64.getEncoder().encodeToString((generationId + version).getBytes(StandardCharsets.US_ASCII));
+        }
+
+        /** Whether the device may connect. */
+        public boolean enabled() {
+            return "enabled".equals(status);
         }
     }
 }

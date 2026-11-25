@@ -8,10 +8,12 @@ import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.PersistentStorage;
 import io.floci.az.services.iothub.IotHubModels.AccessPolicy;
 import io.floci.az.services.iothub.IotHubModels.ConsumerGroup;
+import io.floci.az.services.iothub.IotHubModels.Device;
 import io.floci.az.services.iothub.IotHubModels.IotHubResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -79,6 +81,30 @@ class IotHubPersistenceTest {
     }
 
     @Test
+    void aStoredDeviceKeepsItsKeysAndEtag() throws Exception {
+        // The file outlives the run, so a device an earlier run stored would make the create a conflict.
+        given().post("/_admin/reset").then().statusCode(204);
+        IotHubTestClient.createHub("persisted-devices");
+        Response created = IotHubTestClient.owner("persisted-devices")
+            .body("{\"deviceId\": \"esp32-1\"}").when().put("/devices/esp32-1" + IotHubTestClient.SERVICE_API);
+        created.then().statusCode(200);
+
+        PersistentStorage<String, StoredObject> reloaded =
+            new PersistentStorage<>(DIR.resolve("iothub.json"), new TypeReference<Map<String, StoredObject>>() { });
+        reloaded.load();
+        List<Device> devices = reloaded.scan(key -> key.startsWith("dev\0") && key.endsWith("\0esp32-1")).stream()
+            .map(stored -> readDevice(stored))
+            .toList();
+
+        assertEquals(1, devices.size());
+        Device device = devices.getFirst();
+        assertEquals(created.path("authentication.symmetricKey.primaryKey"), device.primaryKey());
+        assertEquals(created.path("authentication.symmetricKey.secondaryKey"), device.secondaryKey());
+        assertEquals(created.path("etag"), device.etag());
+        assertEquals(created.path("generationId"), device.generationId());
+    }
+
+    @Test
     void aHubStoredBeforeConsumerGroupsLoadsWithTheDefaultGroup() throws Exception {
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule())
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
@@ -92,6 +118,14 @@ class IotHubPersistenceTest {
 
         assertEquals(List.of(new ConsumerGroup("events", "$Default", "2026-11-01T10:00:00Z")),
                 stored.consumerGroups());
+    }
+
+    private static Device readDevice(StoredObject stored) {
+        try {
+            return new ObjectMapper().readValue(stored.data(), Device.class);
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private static IotHubResource read(ObjectMapper mapper, StoredObject stored) {

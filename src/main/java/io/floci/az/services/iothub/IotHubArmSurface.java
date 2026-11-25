@@ -30,10 +30,10 @@ public class IotHubArmSurface implements ArmSurfaceProvider {
             + "digits, and does not start or end with a hyphen.");
 
     /**
-     * 1 to 50 letters, digits, hyphens, periods and underscores, or the built-in {@code $Default}. The characters are
-     * azurerm's {@code IoTHubConsumerGroupName} rule (the portal's); the 50 is Event Hubs' AMQP limit on a consumer
-     * group name, since IoT Hub's own documentation states none. Checked in every mode, so a name the handler stores
-     * always fits it; {@code $Default} matches ignoring case, as the group names do.
+     * 1 to 50 letters, digits, hyphens, periods and underscores, or the built-in {@code $Default}, as Learn's resource
+     * naming rules give it for {@code IotHubs / eventHubEndpoints / ConsumerGroups} (scope: the endpoint, 1-50,
+     * "Alphanumerics, hyphens, periods, and underscores"). Checked in every mode, so a name the handler stores always
+     * fits it; {@code $Default} matches ignoring case, as the group names do.
      */
     static final NameRule CONSUMER_GROUP_NAME = new NameRule(1, 50,
         Pattern.compile("(?i:\\$Default)|[0-9a-zA-Z._-]{1,50}"),

@@ -121,7 +121,7 @@ public class TlsConfigSource implements ConfigSource {
 
     private static List<String> permittedDns() {
         List<String> dns = new ArrayList<>(List.of("localhost", "floci-az.io", publicSuffix(CloudSuffix.KEYVAULT),
-                publicSuffix(CloudSuffix.MHSM), publicSuffix(CloudSuffix.ACR)));
+                publicSuffix(CloudSuffix.MHSM), publicSuffix(CloudSuffix.ACR), publicSuffix(CloudSuffix.IOTHUB)));
         // A Redis cache is named in its own cloud (RedisCacheManager.azureHostName), so the CA covers every
         // cloud's Redis suffix the catalog settles.
         CloudCatalog.all().forEach(cloud -> cloud.suffix(CloudSuffix.REDIS).ifPresent(dns::add));
@@ -316,7 +316,8 @@ public class TlsConfigSource implements ConfigSource {
         all.addAll(List.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
                 "localhost.floci-az.io", "*.localhost.floci-az.io",
                 "*." + publicSuffix(CloudSuffix.KEYVAULT), "*." + publicSuffix(CloudSuffix.MHSM),
-                "*." + publicSuffix(CloudSuffix.ACR), "host.docker.internal"));
+                "*." + publicSuffix(CloudSuffix.ACR), "*." + publicSuffix(CloudSuffix.IOTHUB),
+                "host.docker.internal"));
         all.addAll(customHostnames);
         return all;
     }

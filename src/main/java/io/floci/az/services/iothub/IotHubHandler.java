@@ -5,10 +5,12 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
+import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.StoreIndexSource;
+import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudSuffix;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -22,8 +24,12 @@ import java.util.Map;
  * HTTP handler for Azure IoT Hub.
  *
  * <h2>ARM management plane</h2>
- * <p>{@code Microsoft.Devices/IotHubs} and their shared access policies, served by {@link IotHubArmService}. The
- * service-side registry and the device data plane are not served yet, so the handler claims no host suffix.
+ * <p>{@code Microsoft.Devices/IotHubs}, their shared access policies and their consumer groups, served by
+ * {@link IotHubArmService}.
+ *
+ * <h2>Service API</h2>
+ * <p>Requests to {@code {hub}.azure-devices.net}, served by {@link IotHubDataPlane}: the device identity registry so
+ * far. The device endpoints (MQTT, AMQP, HTTPS) are not served yet.
  */
 @ApplicationScoped
 public class IotHubHandler implements AzureServiceHandler, Resettable, StoreIndexSource, GlobalNameSource {
@@ -32,13 +38,19 @@ public class IotHubHandler implements AzureServiceHandler, Resettable, StoreInde
 
     static final String SERVICE_TYPE = "iothub";
 
+    /** The routing table is keyed by the public cloud's suffix, read from the catalog rather than spelled here. */
+    private static final String PUBLIC_HOST_SUFFIX = CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
+            .suffix(CloudSuffix.IOTHUB).orElseThrow();
+
     private final EmulatorConfig config;
     private final IotHubArmService arm;
+    private final IotHubDataPlane dataPlane;
 
     @Inject
-    public IotHubHandler(EmulatorConfig config, IotHubArmService arm) {
+    public IotHubHandler(EmulatorConfig config, IotHubArmService arm, IotHubDataPlane dataPlane) {
         this.config = config;
         this.arm = arm;
+        this.dataPlane = dataPlane;
     }
 
     @Override
@@ -54,14 +66,20 @@ public class IotHubHandler implements AzureServiceHandler, Resettable, StoreInde
     @Override
     public ServiceRoutes routes() {
         return ServiceRoutes.builder()
+                .host("." + PUBLIC_HOST_SUFFIX)
                 .provider(IotHubArmSurface.NAMESPACE)
                 .build();
     }
 
     @Override
     public Response handle(AzureRequest req) {
-        LOG.debugf("IotHubHandler %s %s", req.method(), req.resourcePath());
-        return arm.handle(req);
+        String path = req.resourcePath();
+        LOG.debugf("IotHubHandler %s %s", req.method(), path);
+        // A tenant-rooted path (providers/Microsoft.Devices/operations) has no slash before its provider marker.
+        if (ArmPaths.hasProvider(path.startsWith("/") ? path : "/" + path, IotHubArmSurface.NAMESPACE)) {
+            return arm.handle(req);
+        }
+        return dataPlane.handle(req);
     }
 
     // ── Resource index ───────────────────────────────────────────────────────
@@ -88,7 +106,7 @@ public class IotHubHandler implements AzureServiceHandler, Resettable, StoreInde
         return suffix == CloudSuffix.IOTHUB && arm.holds(name, owner);
     }
 
-    /** Wipes the hubs: {@code POST /_admin/reset}. */
+    /** Wipes the hubs and their devices: {@code POST /_admin/reset}. */
     @Override
     public void clear() {
         arm.clear();

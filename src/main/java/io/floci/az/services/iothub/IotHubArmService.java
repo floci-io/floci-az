@@ -35,7 +35,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -127,7 +126,10 @@ public class IotHubArmService {
     /** The units each SKU allows, from Azure's IoT Hub limits; the rest allow {@link #DEFAULT_MAX_UNITS}. */
     private static final Map<String, Integer> MAX_UNITS = Map.of("F1", 1, "S3", 10, "B3", 10);
     private static final int DEFAULT_MAX_UNITS = 200;
-    /** "You can have up to 20 consumer groups for each IoT hub" (Learn, the built-in endpoint), for every tier. */
+    /**
+     * "You can have up to 20 consumer groups for each IoT hub" (Learn, the built-in endpoint), for every tier. Learn
+     * does not say whether {@code $Default} counts; it is counted here.
+     */
     private static final int MAX_CONSUMER_GROUPS = 20;
 
     /** The read-only views of a hub, lower-cased: {@code skus}, {@code quotaMetrics} and {@code IotHubStats}. */
@@ -139,7 +141,6 @@ public class IotHubArmService {
     private static final List<String> IDENTITY_TYPES = List.of(IDENTITY_NONE, IDENTITY_SYSTEM, IDENTITY_USER,
             IDENTITY_SYSTEM + ", " + IDENTITY_USER);
 
-    private static final int KEY_BYTES = 32;
     private static final String LOWER_ALNUM = "abcdefghijklmnopqrstuvwxyz0123456789";
     private static final String HEX = "0123456789abcdef";
 
@@ -149,15 +150,17 @@ public class IotHubArmService {
     private final GlobalNameRegistry names;
     private final CloudDefaults defaults;
     private final ManagedIdentityStore identities;
+    private final IotHubDevices devices;
 
     @Inject
     public IotHubArmService(StorageFactory storageFactory, GlobalNameRegistry names, CloudDefaults defaults,
-                            ManagedIdentityStore identities) {
+                            ManagedIdentityStore identities, IotHubDevices devices) {
         this.hubs = ArmResourceStore.create(storageFactory, STORE, IotHubModels.IOT_HUBS, IotHubResource.class,
                 IotHubResource::id, key -> false);
         this.names = names;
         this.defaults = defaults;
         this.identities = identities;
+        this.devices = devices;
     }
 
     /** Serves one request under {@code /providers/Microsoft.Devices/}. */
@@ -214,7 +217,7 @@ public class IotHubArmService {
                 return methodNotAllowed();
             }
             return hubs.get(id.get())
-                    .map(stored -> ok(hubView(tail.get(2).toLowerCase(Locale.ROOT), stored.value())))
+                    .map(stored -> ok(hubView(req, tail.get(2).toLowerCase(Locale.ROOT), stored.value())))
                     .orElseGet(() -> hubNotFound(id.get()));
         }
         if (tail.size() == 5 && tail.get(2).equalsIgnoreCase("IotHubKeys") && tail.get(4).equalsIgnoreCase("listkeys")) {
@@ -245,11 +248,13 @@ public class IotHubArmService {
      * {@code IotHubResource_GetValidSkus}, {@code _GetQuotaMetrics} and {@code _GetStats}, answered as Azure answered
      * the az CLI. The two lists come in one page, without a {@code nextLink}.
      */
-    private static Object hubView(String view, IotHubResource hub) {
+    private Object hubView(AzureRequest req, String view, IotHubResource hub) {
+        IotHubDevices.Counts counts = devices.counts(cloudName(req), hub.name());
         return switch (view) {
             case "skus" -> Map.of("value", validSkus(hub.sku()));
-            case "quotametrics" -> Map.of("value", IotHubCatalog.quotaMetrics(hub.sku(), hub.capacity()));
-            default -> IotHubCatalog.registryStatistics();
+            case "quotametrics" -> Map.of("value",
+                    IotHubCatalog.quotaMetrics(hub.sku(), hub.capacity(), counts.total()));
+            default -> IotHubCatalog.registryStatistics(counts);
         };
     }
 
@@ -413,20 +418,26 @@ public class IotHubArmService {
     private Response delete(AzureRequest req, ArmResourceId id) {
         String ifMatch = ifMatch(req);
         Optional<ArmResourceStore.Stored<IotHubResource>> removed;
-        // The store's writes lock the store itself, so holding it makes the check and the delete one step.
-        synchronized (hubs) {
-            Optional<ArmResourceStore.Stored<IotHubResource>> found = hubs.get(id);
-            if (found.isPresent()) {
-                try {
-                    refuseStaleEtag(found.get().value(), ifMatch);
-                } catch (Refused refusal) {
-                    return refusal.response();
+        // The registry's lock is taken first, as the registry's writes take it before they read the hub: no device
+        // can be written between the hub's removal and its registry's, and a hub created again under the name, once
+        // the name is free, starts with no devices. The store's writes lock the store itself, so holding it too makes
+        // the check and the delete one step.
+        synchronized (devices.writeLock()) {
+            synchronized (hubs) {
+                Optional<ArmResourceStore.Stored<IotHubResource>> found = hubs.get(id);
+                if (found.isPresent()) {
+                    try {
+                        refuseStaleEtag(found.get().value(), ifMatch);
+                    } catch (Refused refusal) {
+                        return refusal.response();
+                    }
                 }
+                removed = hubs.delete(id);
             }
-            removed = hubs.delete(id);
-        }
-        if (removed.isEmpty()) {
-            return Response.noContent().build();
+            if (removed.isEmpty()) {
+                return Response.noContent().build();
+            }
+            devices.deleteAll(cloudName(req), removed.get().value().name());
         }
         LOG.infov("ARM: deleted IoT hub {0}", removed.get().value().id());
         return Response.ok().build();
@@ -670,9 +681,27 @@ public class IotHubArmService {
         return hubs.get(owner).filter(stored -> name.equalsIgnoreCase(stored.id().name())).isPresent();
     }
 
-    /** Forgets every hub: {@code POST /_admin/reset}. */
+    /** Forgets every hub and its devices: {@code POST /_admin/reset}. */
     public void clear() {
         hubs.clear();
+        devices.clear();
+    }
+
+    /** The hub that owns {@code name} in the request's cloud: hub names are global, so there is at most one. */
+    public Optional<IotHubResource> findByName(AzureRequest req, String name) {
+        return names.owner(cloud(req), CloudSuffix.IOTHUB, name)
+                .flatMap(hubs::get)
+                .map(ArmResourceStore.Stored::value);
+    }
+
+    /** The name of the cloud a request addresses, which the device registries are kept by. */
+    static String cloudName(AzureRequest req) {
+        return cloud(req).name();
+    }
+
+    /** The host name of a hub, {@code {name}.azure-devices.net} in the public cloud, from the request's cloud. */
+    static String hostName(AzureRequest req, String hubName) {
+        return hubName + "." + suffix(cloud(req), CloudSuffix.IOTHUB);
     }
 
     // ── Response ─────────────────────────────────────────────────────────────
@@ -975,11 +1004,9 @@ public class IotHubArmService {
         return ACCESS_RIGHTS.stream().filter(known -> known.replace(" ", "").equalsIgnoreCase(compact)).findFirst();
     }
 
-    /** A shared access key as Azure issues one: 32 random bytes, base64. */
+    /** A shared access key as Azure issues one. */
     private String newKey() {
-        byte[] key = new byte[KEY_BYTES];
-        random.nextBytes(key);
-        return Base64.getEncoder().encodeToString(key);
+        return IotHubKeys.newKey(random);
     }
 
     // ── Built-in endpoint names ──────────────────────────────────────────────
