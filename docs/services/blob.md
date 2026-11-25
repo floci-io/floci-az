@@ -89,6 +89,19 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   sets its own property either way, request metadata replaces the source's, and tags are the request's or,
   with `x-ms-copy-source-tag-option: COPY`, the source's (`400` when both are sent). Both answer `201`
   with the copied bytes' `Content-MD5`
+- **Blob Batch**: `POST /{container}?restype=container&comp=batch` over one container, or
+  `POST /?restype=service&comp=batch` over the account, deletes a set of blobs in one request. The batch
+  answers `202` with a `multipart/mixed` body in which every part echoes its `Content-ID` and carries that
+  object's own status, headers (`x-ms-request-id`, `x-ms-version`, `Date`) and error body, so a missing blob
+  is that part's `404 BlobNotFound` and fails nothing else. A sub-request's own headers and query are the
+  operation's: `If-Match`, `x-ms-if-tags`, `x-ms-delete-snapshots` (a blob with snapshots needs it, as a plain
+  delete does) and `?snapshot=`. The batch's SAS authorizes each delete, so a container SAS without `d` fails
+  every part with `403 AuthorizationPermissionMismatch` while the batch itself stays `202`. Delete Blob is the
+  only sub-request operation: Set Blob Tier and Set Blob Expiry are not implemented, so a batch of them
+  answers `501 NotImplemented` instead of per-object successes that change nothing. At most 256 sub-requests,
+  each addressed inside the batch's container (or account); an unusable `Content-Type`, a sub-request
+  addressed elsewhere, and an over-long batch are rejected whole with the Storage error shape —
+  `MissingRequiredHeader`, `InvalidHeaderValue`, `InvalidInput` or `ExceedsMaxBatchRequestCount`
 - **ARM containers and queues**: `.../blobServices/default/containers/{name}` and
   `.../queueServices/default/queues/{name}` answer from the data plane's own containers and queues, so a
   container or queue made on either plane is read on the other, and an ARM delete removes it with its blobs or
