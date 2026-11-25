@@ -214,8 +214,10 @@ final class BlobBatch {
         if (path == null) {
             throw invalidInput();
         }
-        // The blob name keeps its own slashes: only the account, container and blob are split apart.
-        String[] segments = (path.startsWith("/") ? path.substring(1) : path).split("/", 3);
+        // The blob name keeps its own slashes: split off exactly the segments the target names, so that
+        // {account}/{container}/{blob} yields the blob and {container}/{blob} yields the blob, however many
+        // slashes it holds.
+        String[] segments = (path.startsWith("/") ? path.substring(1) : path).split("/", pathAddressed ? 3 : 2);
         int nameOffset = 0;
         if (pathAddressed) {
             // A path-addressed endpoint repeats the account in every sub-request target, so the target must

@@ -94,6 +94,19 @@ class BlobBatchParseTest {
         assertEquals("InvalidInput", response.getHeaderString("x-ms-error-code"));
     }
 
+    @Test
+    void aHostAddressedTargetKeepsTheSlashesOfTheBlobName() {
+        byte[] body = body(part("Content-ID: 1",
+                "DELETE /" + CONTAINER + "/dir/file.txt HTTP/1.1"));
+
+        List<BlobBatch.SubRequest> subRequests = BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER, false);
+
+        assertEquals(1, subRequests.size());
+        assertEquals(CONTAINER, subRequests.getFirst().container());
+        // The whole name, not its first segment: the blob is "dir/file.txt", never "dir".
+        assertEquals("dir/file.txt", subRequests.getFirst().blob());
+    }
+
     private static Response rejected(Runnable parse) {
         return assertThrows(BlobBatch.BlobBatchException.class, parse::run).toResponse();
     }

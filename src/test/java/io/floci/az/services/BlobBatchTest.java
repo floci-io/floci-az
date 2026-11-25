@@ -293,6 +293,28 @@ class BlobBatchTest {
         given().when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "victim").then().statusCode(200);
     }
 
+    /** A nested blob name keeps every slash on the host-addressed endpoint too, which drops the account only. */
+    @Test
+    void hostAddressedBatchKeepsTheSlashesOfANestedBlobName() {
+        createContainer(CONTAINER);
+        uploadBlob(CONTAINER, "dir");
+        uploadBlob(CONTAINER, "dir/file.txt");
+
+        String boundary = "batch_host_nested";
+        Response response = given()
+                .header("Host", ACCOUNT + ".blob.core.windows.net")
+                .header("Content-Type", "multipart/mixed; boundary=" + boundary)
+                .body(bytes(batch(boundary,
+                        part(boundary, 1, "DELETE", "/" + CONTAINER + "/dir/file.txt"))))
+                .when().post("/{container}?restype=container&comp=batch", CONTAINER);
+
+        assertBatchAccepted(response, 1);
+        assertThat(subResponses(response), everyItem(startsWith("HTTP/1.1 202 Accepted")));
+        assertBlobMissing(CONTAINER, "dir/file.txt");
+        // The blob named "dir" is not the one the sub-request asked for.
+        given().when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "dir").then().statusCode(200);
+    }
+
     private static void createContainer(String container) {
         given().put("/{account}/{container}?restype=container", ACCOUNT, container).then().statusCode(201);
     }
