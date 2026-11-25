@@ -1019,6 +1019,7 @@ public class ContainerLifecycleManager {
         HostConfig hostConfig = HostConfig.newHostConfig();
 
         if (spec.privileged()) hostConfig.withPrivileged(true);
+        if (spec.init()) hostConfig.withInit(true);
 
         if (spec.cgroupnsMode() != null && !spec.cgroupnsMode().isBlank()) {
             hostConfig.withCgroupnsMode(spec.cgroupnsMode());

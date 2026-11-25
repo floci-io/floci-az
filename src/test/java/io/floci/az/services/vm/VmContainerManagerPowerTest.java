@@ -2,13 +2,16 @@ package io.floci.az.services.vm;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerBuilder;
+import io.floci.az.core.docker.ContainerLifecycleManager.ContainerInfo;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerLifecycleManager.ContainerPresence;
 import io.floci.az.core.docker.ContainerLifecycleManager.ContainerStateInfo;
+import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.services.vm.VmModels.VirtualMachine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -71,6 +74,24 @@ class VmContainerManagerPowerTest {
         when(lifecycle.containerState(CONTAINER)).thenReturn(
                 state("running", "2026-11-11T10:00:00Z"), state("exited", "2026-11-11T10:05:00Z"));
         assertFalse(manager.restartContainer(vm));
+    }
+
+    @Test
+    void theKeepAliveContainerRunsUnderInitSoAStopDoesNotWaitOutTheTimeout() {
+        ContainerBuilder builder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder spec = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        when(builder.newContainer(anyString())).thenReturn(spec);
+        when(spec.build()).thenReturn(new ContainerSpec("ubuntu:24.04"));
+        when(lifecycle.createAndStart(any())).thenReturn(new ContainerInfo("started", Map.of()));
+        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+        when(config.services().vm().defaultImage()).thenReturn("ubuntu:24.04");
+        VirtualMachine fresh = new VirtualMachine();
+        fresh.setName("vm2");
+
+        new VmContainerManager(builder, lifecycle, mock(VmImageResolver.class), config).startVm(fresh);
+
+        verify(spec).withInit(true);
+        assertEquals("started", fresh.getContainerId());
     }
 
     @Test

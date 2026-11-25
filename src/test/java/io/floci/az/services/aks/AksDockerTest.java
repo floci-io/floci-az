@@ -27,8 +27,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * AKS handler tests with {@code mocked=false} — starts a real k3s container.
  *
  * <p>Skipped automatically when Docker is unavailable.
- * k3s can take up to 120 s to reach /livez, so each poll step sleeps 5 s
- * with a 150 s overall timeout.
+ * k3s can take up to 120 s to reach /livez; the readiness poll re-reads the cluster every second
+ * within a 150 s overall timeout.
  *
  * <p>Tests are ordered and share state (cluster created in test 1, verified in 2-4, deleted in 5).
  * {@code @BeforeAll} only does a filesystem check so it is safe to run before Quarkus is ready;
@@ -112,7 +112,7 @@ class AksDockerTest {
 
         while (!"Succeeded".equals(state) && !"Failed".equals(state)
                 && System.currentTimeMillis() < deadline) {
-            Thread.sleep(5_000);
+            Thread.sleep(1_000);
             Response r = given()
                     .when().get(CLUSTER_PATH + "?api-version=2024-04-01");
             if (r.statusCode() == 200) {

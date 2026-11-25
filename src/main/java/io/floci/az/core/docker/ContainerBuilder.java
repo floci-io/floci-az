@@ -124,6 +124,7 @@ public class ContainerBuilder {
         private final Map<String, String> labels = new HashMap<>();
         private LogConfig logConfig;
         private boolean privileged;
+        private boolean init;
         private String cgroupnsMode;
         private String user;
         private final List<String> groupAdd = new ArrayList<>();
@@ -376,6 +377,16 @@ public class ContainerBuilder {
         }
 
         /**
+         * Runs Docker's init process as PID 1 (Docker {@code --init}). A process that is PID 1 ignores
+         * any signal it has no handler for, so a keep-alive command such as {@code tail -f /dev/null}
+         * would sit out a stop's whole grace period and be killed; under init it gets the SIGTERM.
+         */
+        public Builder withInit(boolean init) {
+            this.init = init;
+            return this;
+        }
+
+        /**
          * Sets the Docker cgroup namespace mode (for example, "host").
          */
         public Builder withCgroupnsMode(String cgroupnsMode) {
@@ -451,7 +462,8 @@ public class ContainerBuilder {
                     workingDir,
                     user,
                     List.copyOf(groupAdd),
-                    List.copyOf(networkAliases)
+                    List.copyOf(networkAliases),
+                    init
             );
         }
     }

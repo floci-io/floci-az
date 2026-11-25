@@ -79,6 +79,9 @@ public class VmContainerManager {
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels("vm", vm.getName(),
                         vm.getSubscriptionId(), vm.getResourceGroup(), vm.getLocation()))
                 .withCmd(KEEP_ALIVE)
+                // tail as PID 1 ignores SIGTERM, so every power-off and restart sat out the whole
+                // stop timeout before Docker killed it; under init it exits on the signal.
+                .withInit(true)
                 .withDockerNetwork(config.services().dockerNetwork())
                 .withLogRotation()
                 .build();
