@@ -21,7 +21,7 @@ az setup
 If you prefer using the standard `az` CLI without the wrapper, you must provide the connection string for each command:
 
 ```bash
-az storage container create --name mycontainer --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:4577/devstoreaccount1;"
+az storage container create --name mycontainer --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:4577/devstoreaccount1;"
 ```
 
 ## SDKs
@@ -29,7 +29,7 @@ az storage container create --name mycontainer --connection-string "DefaultEndpo
 Floci-AZ is compatible with official Azure SDKs. Use the standard development connection string:
 
 ```
-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
+DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:4577/devstoreaccount1;QueueEndpoint=http://127.0.0.1:4577/devstoreaccount1-queue;TableEndpoint=http://127.0.0.1:4577/devstoreaccount1-table;
 ```
 
 ### Path-style Routing
@@ -38,11 +38,13 @@ Floci-AZ uses path-style routing:
 
 | Service | Endpoint |
 |---|---|
-| Blob | `http://localhost:4577/{accountName}` |
-| Queue | `http://localhost:4577/{accountName}-queue` |
-| Table | `http://localhost:4577/{accountName}-table` |
+| Blob | `http://127.0.0.1:4577/{accountName}` |
+| Queue | `http://127.0.0.1:4577/{accountName}-queue` |
+| Table | `http://127.0.0.1:4577/{accountName}-table` |
 | Functions | `http://localhost:4577/{accountName}-functions` |
 | App Configuration | `http://localhost:4577/{accountName}-appconfig` |
+
+Use `127.0.0.1` rather than `localhost` in Storage endpoints. The .NET Storage SDK reads the account name from the path only when the host is an IP address or an Azurite port ([`IsHostIPEndPointStyle`](https://github.com/Azure/azure-sdk-for-net/blob/b665dd21a120cbb120357112b44e2b70fc50553b/sdk/storage/Azure.Storage.Common/src/Shared/UriExtensions.cs#L139)). With `localhost:4577` it takes the account as the container name, and requests fail with `501 NotImplemented`.
 
 ### App Configuration
 

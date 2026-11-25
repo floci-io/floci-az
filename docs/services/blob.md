@@ -107,9 +107,9 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 ## Endpoint
 
 ```
-http://localhost:4577/{account}/{container}                  # container operations
-http://localhost:4577/{account}/{container}/{blob}           # blob operations
-http://localhost:4577/{account}/{filesystem}?resource=filesystem&recursive=true  # ADLS listPaths
+http://127.0.0.1:4577/{account}/{container}                  # container operations
+http://127.0.0.1:4577/{account}/{container}/{blob}           # blob operations
+http://127.0.0.1:4577/{account}/{filesystem}?resource=filesystem&recursive=true  # ADLS listPaths
 ```
 
 The account also answers at the host-style address `{account}.blob.core.windows.net` (and the Data
@@ -135,7 +135,7 @@ ownership.
 
     conn = ("DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
             "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
-            "BlobEndpoint=http://localhost:4577/devstoreaccount1;")
+            "BlobEndpoint=http://127.0.0.1:4577/devstoreaccount1;")
     svc = BlobServiceClient.from_connection_string(conn)
     container = svc.create_container("my-container")
     container.upload_blob("hello.txt", b"hello world")
@@ -146,7 +146,7 @@ ownership.
 
     ```bash
     az storage container create --name my-container \
-      --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=...;BlobEndpoint=http://localhost:4577/devstoreaccount1;"
+      --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=...;BlobEndpoint=http://127.0.0.1:4577/devstoreaccount1;"
     ```
 
 The well-known Azurite development key (`Eby8vdM0…`) is accepted; any account name works.
