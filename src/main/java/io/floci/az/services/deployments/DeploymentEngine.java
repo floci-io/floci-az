@@ -709,7 +709,7 @@ public class DeploymentEngine {
      */
     private static void collectOuterReferences(JsonNode body, TemplateScope scope, List<DependencyGraph.Node> nodes,
                                                Set<String> dependsOn) {
-        for (Expression argument : DependencyGraph.implicitReferences(body)) {
+        for (Expression argument : DependencyGraph.implicitReferences(withoutInnerTemplates(body))) {
             JsonNode evaluated;
             try {
                 evaluated = ExpressionEvaluator.evaluate(argument, scope);
@@ -723,6 +723,33 @@ public class DeploymentEngine {
                 dependsOn.add(evaluated.asText());
             }
         }
+    }
+
+    /**
+     * {@code value} without the templates of the {@code inner}-scope nested deployments inside it: those evaluate
+     * their own expressions, so their names are their own and never the parent's, as in {@code withParentReferences}.
+     */
+    private static JsonNode withoutInnerTemplates(JsonNode value) {
+        if (value instanceof ObjectNode object) {
+            boolean innerChild = isInnerScope(object) && object.path("properties").has("template");
+            ObjectNode copy = JsonNodeFactory.instance.objectNode();
+            object.properties().forEach(field -> {
+                if (innerChild && field.getKey().equals("properties")) {
+                    ObjectNode properties = ((ObjectNode) field.getValue()).deepCopy();
+                    properties.remove("template");
+                    copy.set(field.getKey(), withoutInnerTemplates(properties));
+                } else {
+                    copy.set(field.getKey(), withoutInnerTemplates(field.getValue()));
+                }
+            });
+            return copy;
+        }
+        if (value instanceof ArrayNode array) {
+            ArrayNode copy = JsonNodeFactory.instance.arrayNode();
+            array.forEach(item -> copy.add(withoutInnerTemplates(item)));
+            return copy;
+        }
+        return value;
     }
 
     /** True for a nested deployment whose template evaluates its own expressions ({@code scope: inner}). */

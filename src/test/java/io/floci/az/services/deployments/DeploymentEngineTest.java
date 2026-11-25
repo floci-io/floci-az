@@ -682,4 +682,28 @@ class DeploymentEngineTest {
         assertEquals("literal", settings.path("[[add(1, 2)]").asText(),
             "a supplied key that reads as an expression is escaped, so the child keeps it literal: " + settings);
     }
+
+    @Test
+    void anInnerGrandchildsOwnReferencesDoNotOrderTheParent() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request("""
+            {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "module",
+               "properties": {"mode": "Incremental", "template": {"resources": [
+                 {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "grandchild",
+                  "properties": {"mode": "Incremental", "expressionEvaluationOptions": {"scope": "inner"},
+                    "template": {"resources": [
+                      {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa1",
+                       "location": "eastus"},
+                      {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa2",
+                       "location": "eastus",
+                       "tags": {"[reference('sa1').provisioningState]": "of-own-sa1"}}]}}}]}}},
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa1",
+               "location": "eastus", "dependsOn": ["module"]}]}}
+            """));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        List<String> puts = sent.stream().filter(request -> request.method().equals("PUT")).map(Sent::path).toList();
+        assertEquals(List.of(RG_ID + "/providers/Microsoft.Resources/deployments/module", SA_ID), puts,
+            "the grandchild's sa1 is its own, so the parent's sa1 can depend on the module without a cycle");
+    }
 }
