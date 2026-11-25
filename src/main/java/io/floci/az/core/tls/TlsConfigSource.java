@@ -121,10 +121,11 @@ public class TlsConfigSource implements ConfigSource {
 
     private static List<String> permittedDns() {
         List<String> dns = new ArrayList<>(List.of("localhost", "floci-az.io", publicSuffix(CloudSuffix.KEYVAULT),
-                publicSuffix(CloudSuffix.MHSM), publicSuffix(CloudSuffix.ACR), publicSuffix(CloudSuffix.IOTHUB)));
-        // A Redis cache is named in its own cloud (RedisCacheManager.azureHostName), so the CA covers every
-        // cloud's Redis suffix the catalog settles.
+                publicSuffix(CloudSuffix.MHSM), publicSuffix(CloudSuffix.ACR)));
+        // A Redis cache and an IoT hub are named in their own cloud (RedisCacheManager.azureHostName, a hub's
+        // hostName), so the CA covers every cloud's suffix the catalog settles for them.
         CloudCatalog.all().forEach(cloud -> cloud.suffix(CloudSuffix.REDIS).ifPresent(dns::add));
+        iotHubSuffixes().forEach(dns::add);
         dns.add("host.docker.internal");
         return List.copyOf(dns);
     }
@@ -309,6 +310,14 @@ public class TlsConfigSource implements ConfigSource {
         return defaultValue;
     }
 
+    /** Every cloud's IoT Hub suffix the catalog settles, public first. */
+    private static List<String> iotHubSuffixes() {
+        return CloudCatalog.all().stream()
+                .flatMap(cloud -> cloud.suffix(CloudSuffix.IOTHUB).stream())
+                .distinct()
+                .toList();
+    }
+
     private static List<String> buildSanList(List<String> customHostnames) {
         List<String> all = new ArrayList<>();
         // host.docker.internal: how function containers reach floci-az when it runs on the host
@@ -316,8 +325,10 @@ public class TlsConfigSource implements ConfigSource {
         all.addAll(List.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
                 "localhost.floci-az.io", "*.localhost.floci-az.io",
                 "*." + publicSuffix(CloudSuffix.KEYVAULT), "*." + publicSuffix(CloudSuffix.MHSM),
-                "*." + publicSuffix(CloudSuffix.ACR), "*." + publicSuffix(CloudSuffix.IOTHUB),
-                "host.docker.internal"));
+                "*." + publicSuffix(CloudSuffix.ACR)));
+        // A hub's service API answers on the hostName its own cloud gives it.
+        iotHubSuffixes().forEach(suffix -> all.add("*." + suffix));
+        all.add("host.docker.internal");
         all.addAll(customHostnames);
         return all;
     }

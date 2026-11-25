@@ -40,7 +40,7 @@ it. Floci AZ serves IoT hubs with their shared access policies and keys, and eac
   and the provider's operations (`/providers/Microsoft.Devices/operations`)
 - **Managed identity**: `SystemAssigned`, `UserAssigned` and `SystemAssigned, UserAssigned`, answered as
   [Azure AI Search](search.md) answers them. A hub without one answers `"identity": {"type": "None"}`
-- **Device identity registry**: on `https://{hub}.azure-devices.net`, devices are created, read, updated
+- **Device identity registry**: on `https://{hub}.azure-devices.net` (`.us` in the US Government cloud), devices are created, read, updated
   (status, keys, thumbprints) and deleted as `az iot hub device-identity create`, `show`, `update`,
   `renew-key`, `list` and `delete` do, with symmetric keys generated when none are sent. Every request is
   checked against the hub's shared access policies. See [Device registry](#device-registry)
@@ -107,7 +107,8 @@ az iot hub delete -n my-hub -g my-rg
 
 The `device-identity` commands call `https://my-hub.azure-devices.net`, so that name must reach floci-az,
 over TLS with its certificate trusted: point it at floci-az in `/etc/hosts` (or the embedded DNS), as the
-az CLI compatibility tests do. floci-az's generated certificate covers `*.azure-devices.net`.
+az CLI compatibility tests do. floci-az's generated certificate covers `*.azure-devices.net` and
+`*.azure-devices.us`.
 
 ### Terraform / OpenTofu
 
@@ -224,8 +225,11 @@ hyphens, not all digits, no leading or trailing hyphen) is refused with `400 Inv
 
 ## Device registry
 
-The registry answers on the hub's `hostName`, routed by the `Host` header. Its shapes follow the IoT Hub
-service API's `Device` and the field list on Learn's identity registry page:
+The registry answers on the hub's `hostName`, routed by the `Host` header: `{hub}.azure-devices.net`, or
+`{hub}.azure-devices.us` for a hub in the US Government cloud. A hub answers only on its own cloud's host
+name, and a request to another hub host finds no hub. The host serves the registry only: an ARM path sent to
+it answers `404`, since ARM requests go to the management endpoint. Its shapes follow the IoT Hub service
+API's `Device` and the field list on Learn's identity registry page:
 
 - **Device IDs** are 1 to 128 ASCII letters and digits plus `- . % _ * ? ! ( ) , : = @ $ '`, as Learn
   gives them, and are case-sensitive: `Sensor` and `sensor` are two devices. Any other ID is refused
@@ -260,8 +264,9 @@ service API's `Device` and the field list on Learn's identity registry page:
   `{"Message": "ErrorCode:DeviceNotFound;...", "ExceptionMessage": "Tracking ID:..."}`, with the code in
   the `iothub-errorcode` header. An unknown hub answers `404 IotHubNotFound`
 - **A hub's devices go with it**: deleting the hub, or its resource group, deletes its registry, so a hub
-  created again under the name starts empty. `IotHubStats` and the `TotalDeviceCount` of
-  `quotaMetrics` count the registry
+  created again under the name starts empty. Devices are kept per hub, not per name, so this holds even
+  when a restart interrupts the cleanup, and a request that a deleted hub authorized changes nothing in
+  its successor's registry. `IotHubStats` and the `TotalDeviceCount` of `quotaMetrics` count the registry
 
 ---
 

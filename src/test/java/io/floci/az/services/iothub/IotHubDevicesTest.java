@@ -1,9 +1,12 @@
 package io.floci.az.services.iothub;
 
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.services.iothub.IotHubModels.Device;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,6 +52,9 @@ class IotHubDevicesTest {
             + "\"authentication\": {\"symmetricKey\": {\"primaryKey\": null, \"secondaryKey\": null}, "
             + "\"type\": \"sas\"}, \"capabilities\": {\"iotEdge\": %s}}";
     private static final String BASE64_32 = "[A-Za-z0-9+/]{43}=";
+
+    @Inject
+    IotHubDevices devices;
 
     @BeforeEach
     void reset() {
@@ -426,5 +432,37 @@ class IotHubDevicesTest {
 
         owner("devhub-twins").when().get("/twins/d1" + SERVICE_API).then().statusCode(404);
         owner("devhub-twins").when().get("/devices/d1/modules" + SERVICE_API).then().statusCode(404);
+    }
+
+    @Test
+    void anArmRequestSentToAHubsHostIsNotServed() {
+        createHub("devhub-host");
+
+        // Sent to the hub's host, an ARM path skips the ARM request gate, so the registry answers it, and has no such
+        // path: no hub is created and no keys are listed.
+        owner("devhub-host").body("{\"location\": \"westus2\", \"sku\": {\"name\": \"S1\", \"capacity\": 1}}")
+            .when().put(hubPath("devhub-sneak") + API).then().statusCode(404)
+            .header("iothub-errorcode", equalTo("ResourceNotFound"));
+        owner("devhub-host").when().post(hubPath("devhub-host") + "/listkeys" + API).then().statusCode(404);
+        given().when().get(hubPath("devhub-sneak") + API).then().statusCode(404);
+    }
+
+    @Test
+    void aHubCreatedAgainNeverSeesTheDevicesAnEarlierHubLeft() {
+        // The devices of an earlier hub of the name whose cleanup a restart interrupted: they stay under its
+        // incarnation, which the new hub does not share (a random int, so a clash is a 1 in 2^32 chance).
+        devices.put(new IotHubDevices.Registry(CloudCatalog.PUBLIC_CLOUD, "devhub-again", 12345),
+                new Device("left", "1", 1, "enabled", null, "0001-01-01T00:00:00Z", "sas", null, null, null, null,
+                        false, null, List.of()));
+        createHub("devhub-again");
+
+        owner("devhub-again").when().get("/devices/left" + SERVICE_API).then().statusCode(404);
+        given().when().get(hubPath("devhub-again") + "/IotHubStats" + API).then().statusCode(200)
+            .body("totalDeviceCount", equalTo(0));
+
+        // Deleting the hub clears every incarnation's devices under the name.
+        deleteHub("devhub-again");
+        assertTrue(devices.list(new IotHubDevices.Registry(CloudCatalog.PUBLIC_CLOUD, "devhub-again", 12345))
+                .isEmpty());
     }
 }

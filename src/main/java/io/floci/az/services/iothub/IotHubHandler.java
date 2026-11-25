@@ -5,7 +5,6 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
-import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.GlobalNameSource;
@@ -28,7 +27,7 @@ import java.util.Map;
  * {@link IotHubArmService}.
  *
  * <h2>Service API</h2>
- * <p>Requests to {@code {hub}.azure-devices.net}, served by {@link IotHubDataPlane}: the device identity registry so
+ * <p>Requests to {@code {hub}.azure-devices.net} ({@code .us} in the US Government cloud), served by {@link IotHubDataPlane}: the device identity registry so
  * far. The device endpoints (MQTT, AMQP, HTTPS) are not served yet.
  */
 @ApplicationScoped
@@ -38,9 +37,15 @@ public class IotHubHandler implements AzureServiceHandler, Resettable, StoreInde
 
     static final String SERVICE_TYPE = "iothub";
 
-    /** The routing table is keyed by the public cloud's suffix, read from the catalog rather than spelled here. */
-    private static final String PUBLIC_HOST_SUFFIX = CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
-            .suffix(CloudSuffix.IOTHUB).orElseThrow();
+    /**
+     * The host suffixes of every cloud whose IoT Hub suffix the catalog settles ({@code azure-devices.net},
+     * {@code azure-devices.us}), so a hub answers on the {@code hostName} its own cloud gives it. They are read from
+     * the catalog rather than spelled here.
+     */
+    private static final List<String> HOST_SUFFIXES = CloudCatalog.all().stream()
+            .flatMap(cloud -> cloud.suffix(CloudSuffix.IOTHUB).stream())
+            .distinct()
+            .toList();
 
     private final EmulatorConfig config;
     private final IotHubArmService arm;
@@ -65,18 +70,19 @@ public class IotHubHandler implements AzureServiceHandler, Resettable, StoreInde
 
     @Override
     public ServiceRoutes routes() {
-        return ServiceRoutes.builder()
-                .host("." + PUBLIC_HOST_SUFFIX)
-                .provider(IotHubArmSurface.NAMESPACE)
-                .build();
+        ServiceRoutes.Builder routes = ServiceRoutes.builder();
+        HOST_SUFFIXES.forEach(suffix -> routes.host("." + suffix));
+        return routes.provider(IotHubArmSurface.NAMESPACE).build();
     }
 
     @Override
     public Response handle(AzureRequest req) {
         String path = req.resourcePath();
         LOG.debugf("IotHubHandler %s %s", req.method(), path);
-        // A tenant-rooted path (providers/Microsoft.Devices/operations) has no slash before its provider marker.
-        if (ArmPaths.hasProvider(path.startsWith("/") ? path : "/" + path, IotHubArmSurface.NAMESPACE)) {
+        // Only a request that came through the ARM request gate reaches the ARM service: one sent to a hub's host is
+        // routed here directly, past the gate's subscription, policy and name checks, so it is the registry's to
+        // answer, whatever its path. floci-az's own ARM calls (a resource group's cascade) pass the gate too.
+        if (req.armCall() != null) {
             return arm.handle(req);
         }
         return dataPlane.handle(req);

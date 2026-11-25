@@ -15,6 +15,7 @@ import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudProfile.Location;
 import io.floci.az.core.cloud.CloudSuffix;
+import io.floci.az.core.directory.AzureDirectory;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.entra.TokenIssuer;
 import io.floci.az.services.iothub.IotHubModels.AccessPolicy;
@@ -151,16 +152,18 @@ public class IotHubArmService {
     private final CloudDefaults defaults;
     private final ManagedIdentityStore identities;
     private final IotHubDevices devices;
+    private final AzureDirectory directory;
 
     @Inject
     public IotHubArmService(StorageFactory storageFactory, GlobalNameRegistry names, CloudDefaults defaults,
-                            ManagedIdentityStore identities, IotHubDevices devices) {
+                            ManagedIdentityStore identities, IotHubDevices devices, AzureDirectory directory) {
         this.hubs = ArmResourceStore.create(storageFactory, STORE, IotHubModels.IOT_HUBS, IotHubResource.class,
                 IotHubResource::id, key -> false);
         this.names = names;
         this.defaults = defaults;
         this.identities = identities;
         this.devices = devices;
+        this.directory = directory;
     }
 
     /** Serves one request under {@code /providers/Microsoft.Devices/}. */
@@ -249,7 +252,7 @@ public class IotHubArmService {
      * the az CLI. The two lists come in one page, without a {@code nextLink}.
      */
     private Object hubView(AzureRequest req, String view, IotHubResource hub) {
-        IotHubDevices.Counts counts = devices.counts(cloudName(req), hub.name());
+        IotHubDevices.Counts counts = devices.counts(registry(req, hub));
         return switch (view) {
             case "skus" -> Map.of("value", validSkus(hub.sku()));
             case "quotametrics" -> Map.of("value",
@@ -687,11 +690,23 @@ public class IotHubArmService {
         devices.clear();
     }
 
-    /** The hub that owns {@code name} in the request's cloud: hub names are global, so there is at most one. */
+    /**
+     * The hub named {@code name} in the request's cloud. Hub names are one namespace across the clouds, so there is
+     * at most one hub of the name anywhere; one in another cloud is not found, since its registry answers only on its
+     * own cloud's host name ({@code .azure-devices.us} for a US Government hub).
+     */
     public Optional<IotHubResource> findByName(AzureRequest req, String name) {
-        return names.owner(cloud(req), CloudSuffix.IOTHUB, name)
+        CloudProfile cloud = cloud(req);
+        return names.owner(cloud, CloudSuffix.IOTHUB, name)
+                .filter(owner -> directory.cloudOfTenant(directory.tenantOfSubscription(owner.subscriptionId()))
+                        .name().equalsIgnoreCase(cloud.name()))
                 .flatMap(hubs::get)
                 .map(ArmResourceStore.Stored::value);
+    }
+
+    /** The device registry of {@code hub}, in the cloud the request addresses. */
+    static IotHubDevices.Registry registry(AzureRequest req, IotHubResource hub) {
+        return new IotHubDevices.Registry(cloudName(req), hub.name(), hub.incarnation());
     }
 
     /** The name of the cloud a request addresses, which the device registries are kept by. */

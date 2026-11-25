@@ -140,7 +140,7 @@ public class IotHubDataPlane {
             return error(401, "IotHubUnauthorizedAccess", refusal.get());
         }
 
-        Context context = new Context(IotHubArmService.cloudName(req), hub.get().name());
+        Context context = new Context(IotHubArmService.registry(req, hub.get()), hub.get().id());
         try {
             if (query) {
                 return query(req, context);
@@ -154,7 +154,7 @@ public class IotHubDataPlane {
             String deviceId = segments.get(1);
             return switch (method) {
                 case "PUT" -> createOrUpdate(req, context, deviceId);
-                case "GET" -> devices.get(context.cloud(), context.hub(), deviceId)
+                case "GET" -> devices.get(context.registry(), deviceId)
                         .map(device -> json(200, deviceToWire(device)))
                         .orElseGet(() -> deviceNotFound(deviceId));
                 case "DELETE" -> delete(req, context, deviceId);
@@ -167,8 +167,32 @@ public class IotHubDataPlane {
         }
     }
 
-    /** The cloud and the hub a request addresses. */
-    private record Context(String cloud, String hub) {
+    /**
+     * The registry a request addresses, and the hub that authorized it.
+     *
+     * @param registry the hub's registry
+     * @param hubId    the ARM id of the hub whose policy signed the request
+     */
+    private record Context(IotHubDevices.Registry registry, String hubId) {
+
+        String hub() {
+            return registry.hub();
+        }
+    }
+
+    /**
+     * Whether the hub that authorized the request still holds its name, checked under the registry's lock: a request
+     * authorized by a hub that was deleted since, and perhaps replaced under the name, changes nothing.
+     */
+    private boolean stillCurrent(AzureRequest req, Context context) {
+        return arm.findByName(req, context.hub())
+                .filter(hub -> hub.id().equalsIgnoreCase(context.hubId())
+                        && hub.incarnation() == context.registry().incarnation())
+                .isPresent();
+    }
+
+    private static Response hubGone(Context context) {
+        return error(404, "IotHubNotFound", "IoT hub '" + context.hub() + "' does not exist.");
     }
 
     // ── Devices ──────────────────────────────────────────────────────────────
@@ -189,10 +213,10 @@ public class IotHubDataPlane {
         Device written;
         synchronized (devices.writeLock()) {
             // Checked under the lock the hub's delete takes to clear its devices, so no device outlives its hub.
-            if (arm.findByName(req, context.hub()).isEmpty()) {
-                return error(404, "IotHubNotFound", "IoT hub '" + context.hub() + "' does not exist.");
+            if (!stillCurrent(req, context)) {
+                return hubGone(context);
             }
-            Optional<Device> existing = devices.get(context.cloud(), context.hub(), deviceId);
+            Optional<Device> existing = devices.get(context.registry(), deviceId);
             if (ifMatch == null && existing.isPresent()) {
                 return error(409, "DeviceAlreadyExists", "A device with ID '" + deviceId
                         + "' is already registered.");
@@ -204,7 +228,7 @@ public class IotHubDataPlane {
                 return preconditionFailed(deviceId);
             }
             written = device(deviceId, body, existing);
-            devices.put(context.cloud(), context.hub(), written);
+            devices.put(context.registry(), written);
         }
         LOG.debugv("IoT Hub: wrote device {0} of hub {1}", deviceId, context.hub());
         return json(200, deviceToWire(written));
@@ -214,14 +238,17 @@ public class IotHubDataPlane {
     private Response delete(AzureRequest req, Context context, String deviceId) {
         String ifMatch = ifMatch(req);
         synchronized (devices.writeLock()) {
-            Optional<Device> existing = devices.get(context.cloud(), context.hub(), deviceId);
+            if (!stillCurrent(req, context)) {
+                return hubGone(context);
+            }
+            Optional<Device> existing = devices.get(context.registry(), deviceId);
             if (existing.isEmpty()) {
                 return deviceNotFound(deviceId);
             }
             if (ifMatch != null && !"*".equals(ifMatch) && !ifMatch.equals(existing.get().etag())) {
                 return preconditionFailed(deviceId);
             }
-            devices.delete(context.cloud(), context.hub(), deviceId);
+            devices.delete(context.registry(), deviceId);
         }
         return Response.noContent().build();
     }
@@ -249,12 +276,12 @@ public class IotHubDataPlane {
         List<Map<String, Object>> rotated = new ArrayList<>();
         List<Map<String, Object>> errors = new ArrayList<>();
         synchronized (devices.writeLock()) {
-            if (arm.findByName(req, context.hub()).isEmpty()) {
-                return error(404, "IotHubNotFound", "IoT hub '" + context.hub() + "' does not exist.");
+            if (!stillCurrent(req, context)) {
+                return hubGone(context);
             }
             for (Object entry : sentDevices) {
                 String deviceId = (String) ((Map<String, Object>) entry).get("id");
-                Optional<Device> existing = devices.get(context.cloud(), context.hub(), deviceId);
+                Optional<Device> existing = devices.get(context.registry(), deviceId);
                 if (existing.isEmpty() || !SAS.equals(existing.get().authType())) {
                     Map<String, Object> failure = new LinkedHashMap<>();
                     failure.put("id", deviceId);
@@ -272,7 +299,7 @@ public class IotHubDataPlane {
                         primary ? IotHubKeys.newKey(random) : device.primaryKey(),
                         secondary ? IotHubKeys.newKey(random) : device.secondaryKey(), device.primaryThumbprint(),
                         device.secondaryThumbprint(), device.iotEdge(), device.deviceScope(), device.parentScopes());
-                devices.put(context.cloud(), context.hub(), renewed);
+                devices.put(context.registry(), renewed);
                 Map<String, Object> keys = new LinkedHashMap<>();
                 keys.put("id", deviceId);
                 keys.put("primaryKey", renewed.primaryKey());
@@ -290,7 +317,7 @@ public class IotHubDataPlane {
     /** {@code GET /devices}: the hub's identities, at most {@code top} of them (1000 when none is given). */
     private Response listDevices(AzureRequest req, Context context) {
         int top = pageSize(req.queryParams().get("top"), MAX_PAGE);
-        List<Map<String, Object>> page = devices.list(context.cloud(), context.hub()).stream()
+        List<Map<String, Object>> page = devices.list(context.registry()).stream()
                 .limit(top)
                 .map(IotHubDataPlane::deviceToWire)
                 .toList();
@@ -418,7 +445,7 @@ public class IotHubDataPlane {
             return error(400, "SqlQueryInvalid", "floci-az serves only the queries '" + ALL_DEVICES + "' and '"
                     + EDGE_DEVICES + "'.");
         }
-        List<Device> matching = devices.list(context.cloud(), context.hub()).stream()
+        List<Device> matching = devices.list(context.registry()).stream()
                 .filter(device -> !edgeOnly || device.iotEdge())
                 .toList();
         int pageSize = pageSize(header(req, "x-ms-max-item-count"), DEFAULT_PAGE);

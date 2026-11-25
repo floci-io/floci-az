@@ -24,9 +24,11 @@ import java.util.stream.Collectors;
  * The identity registries of the hubs: each hub's devices, kept apart from every other hub's.
  *
  * <p>The devices share the {@code iothub} backend with the ARM resources, so they follow its storage mode. Their keys
- * are {@code dev}, the cloud, the hub and the device ID, separated by null bytes; no ARM id starts that way. The cloud
- * and the hub match ignoring case, as Azure matches host names, and the device ID as sent: Azure's IDs are
- * case-sensitive.
+ * are {@code dev}, the cloud, the hub, the hub's incarnation and the device ID, separated by null bytes; no ARM id
+ * starts that way. The cloud and the hub match ignoring case, as Azure matches host names, and the device ID as sent:
+ * Azure's IDs are case-sensitive. The incarnation ties a device to the hub that registered it: a hub created again
+ * under the name has another, so it never sees a device its predecessor left, even one a restart kept from the
+ * predecessor's cleanup.
  */
 @ApplicationScoped
 public class IotHubDevices {
@@ -48,6 +50,16 @@ public class IotHubDevices {
     public record Counts(int total, int enabled, int disabled) {
     }
 
+    /**
+     * One hub's registry: the hub as one incarnation of its name.
+     *
+     * @param cloud       the cloud the hub lives in
+     * @param hub         the hub name
+     * @param incarnation the hub's incarnation, chosen when it was created
+     */
+    public record Registry(String cloud, String hub, int incarnation) {
+    }
+
     private final StorageBackend<String, StoredObject> storage;
     /** Guards a read of a device followed by its write, so the ETag conditions and the write are one step. */
     private final Object writeLock = new Object();
@@ -62,14 +74,14 @@ public class IotHubDevices {
         return writeLock;
     }
 
-    /** The device {@code deviceId} of {@code hub}. */
-    public Optional<Device> get(String cloud, String hub, String deviceId) {
-        return storage.get(key(cloud, hub, deviceId)).map(IotHubDevices::decode);
+    /** The device {@code deviceId} of {@code registry}. */
+    public Optional<Device> get(Registry registry, String deviceId) {
+        return storage.get(key(registry, deviceId)).map(IotHubDevices::decode);
     }
 
-    /** Stores {@code device} in {@code hub}, replacing the one with its ID. */
-    void put(String cloud, String hub, Device device) {
-        String key = key(cloud, hub, device.deviceId());
+    /** Stores {@code device} in {@code registry}, replacing the one with its ID. */
+    void put(Registry registry, Device device) {
+        String key = key(registry, device.deviceId());
         try {
             storage.put(key, new StoredObject(key, MAPPER.writeValueAsBytes(device), Map.of(), Instant.now(),
                     device.etag()));
@@ -78,30 +90,33 @@ public class IotHubDevices {
         }
     }
 
-    /** Removes the device {@code deviceId} of {@code hub}. */
-    void delete(String cloud, String hub, String deviceId) {
-        storage.delete(key(cloud, hub, deviceId));
+    /** Removes the device {@code deviceId} of {@code registry}. */
+    void delete(Registry registry, String deviceId) {
+        storage.delete(key(registry, deviceId));
     }
 
-    /** The devices of {@code hub}, by device ID, in ordinal order so that paging is stable. */
-    public List<Device> list(String cloud, String hub) {
-        String prefix = prefix(cloud, hub);
+    /** The devices of {@code registry}, by device ID, in ordinal order so that paging is stable. */
+    public List<Device> list(Registry registry) {
+        String prefix = prefix(registry);
         return storage.scan(key -> key.startsWith(prefix)).stream()
                 .map(IotHubDevices::decode)
                 .sorted(Comparator.comparing(Device::deviceId))
                 .toList();
     }
 
-    /** How many devices {@code hub} holds, by status. */
-    public Counts counts(String cloud, String hub) {
-        List<Device> devices = list(cloud, hub);
+    /** How many devices {@code registry} holds, by status. */
+    public Counts counts(Registry registry) {
+        List<Device> devices = list(registry);
         int enabled = (int) devices.stream().filter(Device::enabled).count();
         return new Counts(devices.size(), enabled, devices.size() - enabled);
     }
 
-    /** Forgets the devices of {@code hub} in {@code cloud}: its ARM resource was deleted. */
+    /**
+     * Forgets the devices of every hub named {@code hub} in {@code cloud}: the hub was deleted. Any incarnation's go,
+     * so the devices an earlier hub of the name left behind go with them.
+     */
     public void deleteAll(String cloud, String hub) {
-        deleteKeysStartingWith(prefix(cloud, hub));
+        deleteKeysStartingWith(namePrefix(cloud, hub));
     }
 
     /** Forgets every device: {@code POST /_admin/reset}. */
@@ -121,12 +136,16 @@ public class IotHubDevices {
         }
     }
 
-    private static String prefix(String cloud, String hub) {
+    private static String namePrefix(String cloud, String hub) {
         return KEY_PREFIX + cloud.toLowerCase(Locale.ROOT) + SEP + hub.toLowerCase(Locale.ROOT) + SEP;
     }
 
-    private static String key(String cloud, String hub, String deviceId) {
-        return prefix(cloud, hub) + deviceId;
+    private static String prefix(Registry registry) {
+        return namePrefix(registry.cloud(), registry.hub()) + registry.incarnation() + SEP;
+    }
+
+    private static String key(Registry registry, String deviceId) {
+        return prefix(registry) + deviceId;
     }
 
     private static Device decode(StoredObject stored) {
