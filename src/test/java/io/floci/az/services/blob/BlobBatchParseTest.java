@@ -26,7 +26,7 @@ class BlobBatchParseTest {
         byte[] body = body(part("Content-ID: 1", "DELETE /" + ACCOUNT + "/" + CONTAINER + "/blob HTTP/1.1"));
 
         for (String contentType : new String[] {null, "", "   "}) {
-            Response response = rejected(() -> BlobBatch.parse(contentType, body, ACCOUNT, CONTAINER));
+            Response response = rejected(() -> BlobBatch.parse(contentType, body, ACCOUNT, CONTAINER, true));
             assertEquals(400, response.getStatus());
             assertEquals("MissingRequiredHeader", response.getHeaderString("x-ms-error-code"));
             assertTrue(((String) response.getEntity()).contains("<HeaderName>Content-Type</HeaderName>"),
@@ -39,7 +39,7 @@ class BlobBatchParseTest {
         byte[] body = body(part("Content-Type: application/http",
                 "DELETE /" + ACCOUNT + "/" + CONTAINER + "/blob HTTP/1.1"));
 
-        Response response = rejected(() -> BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER));
+        Response response = rejected(() -> BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER, true));
 
         assertEquals(400, response.getStatus());
         assertEquals("InvalidInput", response.getHeaderString("x-ms-error-code"));
@@ -50,7 +50,7 @@ class BlobBatchParseTest {
         byte[] body = body(part("Content-ID: 7", "DELETE /" + ACCOUNT + "/" + CONTAINER
                 + "/dir/blob%20name.txt?x-ms-delete-snapshots=include&snapshot=2020-01-01T00%3A00%3A00Z HTTP/1.1"));
 
-        List<BlobBatch.SubRequest> subRequests = BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER);
+        List<BlobBatch.SubRequest> subRequests = BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER, true);
 
         assertEquals(1, subRequests.size());
         BlobBatch.SubRequest subRequest = subRequests.getFirst();
@@ -67,7 +67,28 @@ class BlobBatchParseTest {
         byte[] body = body(part("Content-ID: 1",
                 "DELETE /otheraccount/" + CONTAINER + "/blob HTTP/1.1"));
 
-        Response response = rejected(() -> BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER));
+        Response response = rejected(() -> BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER, true));
+
+        assertEquals(400, response.getStatus());
+        assertEquals("InvalidInput", response.getHeaderString("x-ms-error-code"));
+    }
+
+    @Test
+    void aSubRequestWithoutACompleteRequestLineIsInvalidInput() {
+        byte[] body = body(part("Content-ID: 1", "DELETE /" + ACCOUNT + "/" + CONTAINER + "/blob"));
+
+        Response response = rejected(() -> BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER, true));
+
+        assertEquals(400, response.getStatus());
+        assertEquals("InvalidInput", response.getHeaderString("x-ms-error-code"));
+    }
+
+    @Test
+    void aHostAddressedBatchRejectsASubRequestThatRepeatsTheAccount() {
+        byte[] body = body(part("Content-ID: 1",
+                "DELETE /" + ACCOUNT + "/" + CONTAINER + "/blob HTTP/1.1"));
+
+        Response response = rejected(() -> BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER, false));
 
         assertEquals(400, response.getStatus());
         assertEquals("InvalidInput", response.getHeaderString("x-ms-error-code"));

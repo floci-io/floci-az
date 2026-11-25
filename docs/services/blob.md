@@ -99,8 +99,10 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   every part with `403 AuthorizationPermissionMismatch` while the batch itself stays `202`. Delete Blob is the
   only sub-request operation: Set Blob Tier and Set Blob Expiry are not implemented, so a batch of them
   answers `501 NotImplemented` instead of per-object successes that change nothing. At most 256 sub-requests,
-  each addressed inside the batch's container (or account); an unusable `Content-Type`, a sub-request
-  addressed elsewhere, and an over-long batch are rejected whole with the Storage error shape —
+  each addressed inside the batch's container (or account) in the endpoint's own form: the target names the
+  account (`/{account}/{container}/{blob}`) on the path-addressed endpoint and drops it (`/{container}/{blob}`)
+  on the host-addressed one, which is what the SDKs derive from each blob URL. An unusable `Content-Type`, a
+  sub-request addressed elsewhere, and an over-long batch are rejected whole with the Storage error shape —
   `MissingRequiredHeader`, `InvalidHeaderValue`, `InvalidInput` or `ExceedsMaxBatchRequestCount`
 - **ARM containers and queues**: `.../blobServices/default/containers/{name}` and
   `.../queueServices/default/queues/{name}` answer from the data plane's own containers and queues, so a

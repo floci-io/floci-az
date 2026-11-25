@@ -2861,7 +2861,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         List<BlobBatch.SubRequest> subRequests;
         try {
             subRequests = BlobBatch.parse(request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE),
-                    request.bodyStream().readAllBytes(), request.accountName(), containerName);
+                    request.bodyStream().readAllBytes(), request.accountName(), containerName,
+                    pathAddressed(request));
         } catch (IOException e) {
             return new AzureErrorResponse("InvalidInput", "One of the request inputs is not valid.")
                     .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
@@ -2874,6 +2875,24 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             parts.add(new BlobBatch.Part(subRequest.contentId(), batchDelete(request, subRequest)));
         }
         return BlobBatch.accepted(parts);
+    }
+
+    /**
+     * Whether the caller addressed this account by path ({@code /{account}/{container}/{blob}}) rather than by
+     * host ({@code /{container}/{blob}}, as {@code {account}.blob.core.windows.net} does). A sub-request repeats
+     * the batch endpoint's own addressing, because the SDKs take each sub-request's target from the path of the
+     * blob URL they were given, not from the account.
+     */
+    private static boolean pathAddressed(AzureRequest request) {
+        String rawPath = request.rawPath();
+        if (rawPath == null) {
+            return false;
+        }
+        String account = request.accountName();
+        // The account is the path's own first segment, alone at the account's root and followed by the rest of
+        // the URL otherwise. Host addressing puts the container there instead, so the path never starts with it.
+        return rawPath.equalsIgnoreCase(account)
+                || rawPath.regionMatches(true, 0, account + "/", 0, account.length() + 1);
     }
 
     /**

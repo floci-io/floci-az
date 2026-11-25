@@ -234,6 +234,65 @@ class BlobBatchTest {
                 .then().statusCode(400).header("x-ms-error-code", "InvalidInput");
     }
 
+    /**
+     * Host-addressed endpoints ({@code {account}.blob.core.windows.net}, and the emulator's
+     * {@code {account}.blob.localhost}) carry the account in the host, so an SDK's sub-request targets drop it:
+     * {@code DELETE /{container}/{blob}}. Gated on {@code Host}, so the account is not in the path.
+     */
+    @Test
+    void hostAddressedBatchDeletesWithTargetsThatOmitTheAccount() {
+        createContainer(CONTAINER);
+        uploadBlob(CONTAINER, "a.txt");
+
+        String boundary = "batch_host";
+        Response response = given()
+                .header("Host", ACCOUNT + ".blob.core.windows.net")
+                .header("Content-Type", "multipart/mixed; boundary=" + boundary)
+                .body(bytes(batch(boundary,
+                        part(boundary, 1, "DELETE", "/" + CONTAINER + "/a.txt"))))
+                .when().post("/{container}?restype=container&comp=batch", CONTAINER);
+
+        assertBatchAccepted(response, 1);
+        assertThat(subResponses(response), everyItem(startsWith("HTTP/1.1 202 Accepted")));
+        assertBlobMissing(CONTAINER, "a.txt");
+    }
+
+    @Test
+    void batchAcceptsAQuotedBoundary() {
+        createContainer(CONTAINER);
+        uploadBlob(CONTAINER, "a.txt");
+
+        String boundary = "batch_quoted";
+        Response response = given()
+                .header("Content-Type", "multipart/mixed; boundary=\"" + boundary + "\"")
+                .body(bytes(batch(boundary, deletePart(boundary, 1, CONTAINER, "a.txt"))))
+                .when().post("/{account}/{container}?restype=container&comp=batch", ACCOUNT, CONTAINER);
+
+        assertBatchAccepted(response, 1);
+        assertBlobMissing(CONTAINER, "a.txt");
+    }
+
+    /**
+     * A blob name that contains the boundary text must not be read as a delimiter: cutting the target short
+     * there would delete the blob its prefix names, which is not the blob the caller asked for.
+     */
+    @Test
+    void aBlobNameContainingTheBoundaryIsNotReadAsADelimiter() {
+        createContainer(CONTAINER);
+        String boundary = "batch_trap";
+        String trapped = "victim--" + boundary + "--suffix";
+        uploadBlob(CONTAINER, "victim");
+        uploadBlob(CONTAINER, trapped);
+
+        Response response = submitInContainer(CONTAINER, Map.of(), boundary,
+                batch(boundary, deletePart(boundary, 1, CONTAINER, trapped)));
+
+        assertBatchAccepted(response, 1);
+        assertThat(subResponses(response), everyItem(startsWith("HTTP/1.1 202 Accepted")));
+        assertBlobMissing(CONTAINER, trapped);
+        given().when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "victim").then().statusCode(200);
+    }
+
     private static void createContainer(String container) {
         given().put("/{account}/{container}?restype=container", ACCOUNT, container).then().statusCode(201);
     }

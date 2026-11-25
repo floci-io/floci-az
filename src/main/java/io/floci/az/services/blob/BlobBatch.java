@@ -21,9 +21,10 @@ import java.util.regex.Pattern;
  * over one container, or {@code POST /?restype=service&comp=batch} over the account.
  *
  * <p>The request body is {@code multipart/mixed}: each part carries {@code Content-Type: application/http}
- * and a {@code Content-ID}, then an embedded HTTP request addressed at a blob —
- * {@code DELETE /{account}/{container}/{blob}?{query} HTTP/1.1} followed by that request's headers. The
- * response is one {@code 202 Accepted} whose body answers every sub-request in turn: each part echoes its
+ * and a {@code Content-ID}, then an embedded HTTP request addressed at a blob, followed by that request's
+ * headers: {@code DELETE /{account}/{container}/{blob}?{query} HTTP/1.1} on the path-addressed endpoint, and
+ * {@code DELETE /{container}/{blob}?{query} HTTP/1.1} on the host-addressed one. The response is one
+ * {@code 202 Accepted} whose body answers every sub-request in turn: each part echoes its
  * {@code Content-ID} and carries the sub-response's own status line, headers and error body. Azure clients
  * read the per-part status and {@code x-ms-error-code}, not the batch's own 202, so a batch of deletes
  * reports each blob's outcome — including a missing blob's {@code 404 BlobNotFound} — on its own part.
@@ -68,20 +69,26 @@ final class BlobBatch {
     /**
      * Parses a batch body into its sub-requests. {@code container} is the batch's own container at container
      * scope, and null at service scope, where sub-requests may name any container of the account.
+     * {@code pathAddressed} says how this endpoint addresses a blob, because a sub-request's target repeats
+     * the batch endpoint's own addressing: {@code /{account}/{container}/{blob}} by path, and
+     * {@code /{container}/{blob}} by host, which is what {@code {account}.blob.core.windows.net} does and what
+     * the SDKs derive from each blob URL's path.
      *
      * @throws BlobBatchException when the request is not a usable batch: an unusable {@code Content-Type},
      *         a part that is not an addressed Blob Delete, a sub-request outside the batch's scope, or an
      *         unsupported operation
      */
-    static List<SubRequest> parse(String contentType, byte[] body, String account, String container) {
-        String delimiter = "--" + boundary(contentType);
-        // The part before the first delimiter is the preamble, and the one that starts with "--" is the
-        // closing delimiter together with any epilogue: neither is a sub-request.
-        String[] parts = new String(body, StandardCharsets.UTF_8).split(Pattern.quote(delimiter), -1);
+    static List<SubRequest> parse(String contentType, byte[] body, String account, String container,
+                                  boolean pathAddressed) {
+        String delimiter = LINE_ENDING + "--" + boundary(contentType);
+        // Delimiters are whole lines, as RFC 2046 defines them. Matching the boundary text anywhere would cut
+        // a target short at a blob name that happens to contain it, and delete the blob its prefix names.
+        String[] parts = (LINE_ENDING + new String(body, StandardCharsets.UTF_8))
+                .split(Pattern.quote(delimiter), -1);
 
         List<SubRequest> subRequests = new ArrayList<>();
         for (int i = 1; i < parts.length && !parts[i].startsWith("--"); i++) {
-            subRequests.add(parsePart(parts[i], account, container));
+            subRequests.add(parsePart(parts[i], account, container, pathAddressed));
             if (subRequests.size() > MAX_SUB_REQUESTS) {
                 throw new BlobBatchException(400, "ExceedsMaxBatchRequestCount",
                         "The batch operation exceeds maximum number of allowed subrequests.", Map.of());
@@ -128,7 +135,8 @@ final class BlobBatch {
 
     /**
      * The batch boundary: the {@code boundary} parameter of the {@code Content-Type} header. The parameter
-     * name matches case-insensitively and its value may be padded with spaces, because SDKs emit both.
+     * name matches case-insensitively, its value may be padded with spaces, and it may be quoted, because MIME
+     * quoting is how a boundary carrying a special character is written.
      */
     private static String boundary(String contentType) {
         if (contentType == null || contentType.isBlank()) {
@@ -146,6 +154,9 @@ final class BlobBatch {
                 throw invalidInput();
             }
             boundary = trimmed.substring(BOUNDARY_PARAMETER.length()).trim();
+            if (boundary.length() > 1 && boundary.startsWith("\"") && boundary.endsWith("\"")) {
+                boundary = boundary.substring(1, boundary.length() - 1);
+            }
         }
         if (boundary == null || boundary.isEmpty()) {
             throw new BlobBatchException(400, "InvalidHeaderValue",
@@ -155,7 +166,7 @@ final class BlobBatch {
         return boundary;
     }
 
-    private static SubRequest parsePart(String part, String account, String container) {
+    private static SubRequest parsePart(String part, String account, String container, boolean pathAddressed) {
         // A part opens with the delimiter's line ending, then its own headers (setting the Content-ID),
         // a blank line, and finally the embedded HTTP request and that request's headers.
         String[] lines = part.stripLeading().split(LINE_PATTERN, -1);
@@ -173,7 +184,8 @@ final class BlobBatch {
         }
 
         String[] request = lines[line].trim().split("\\s+");
-        if (request.length < 2) {
+        // A complete request line, so a target cut short by a broken part is never run as a delete.
+        if (request.length != 3 || !request[2].startsWith("HTTP/")) {
             throw invalidInput();
         }
         if (!"DELETE".equalsIgnoreCase(request[0])) {
@@ -186,12 +198,12 @@ final class BlobBatch {
             String[] header = header(lines[line]);
             headers.put(header[0].toLowerCase(Locale.ROOT), header[1]);
         }
-        return addressed(contentId, request[1], account, container, headers);
+        return addressed(contentId, request[1], account, container, pathAddressed, headers);
     }
 
     /** The blob a sub-request's request target names, once it is known to lie inside the batch's scope. */
     private static SubRequest addressed(int contentId, String target, String account, String container,
-                                        Map<String, String> headers) {
+                                        boolean pathAddressed, Map<String, String> headers) {
         URI uri;
         try {
             uri = new URI(target.startsWith("/") ? target : "/" + target);
@@ -204,15 +216,27 @@ final class BlobBatch {
         }
         // The blob name keeps its own slashes: only the account, container and blob are split apart.
         String[] segments = (path.startsWith("/") ? path.substring(1) : path).split("/", 3);
-        if (segments.length < 3 || segments[0].isEmpty() || segments[1].isEmpty() || segments[2].isEmpty()) {
+        int nameOffset = 0;
+        if (pathAddressed) {
+            // A path-addressed endpoint repeats the account in every sub-request target, so the target must
+            // name it, and the container follows.
+            if (segments.length < 3 || !segments[0].equals(account)) {
+                throw invalidInput();
+            }
+            nameOffset = 1;
+        }
+        if (segments.length < nameOffset + 2
+                || segments[nameOffset].isEmpty() || segments[nameOffset + 1].isEmpty()) {
             throw invalidInput();
         }
-        // Azure answers a sub-request addressed outside the batch with 400, and so does this: a batch is
-        // one container's (or one account's) work, and a delete must not reach past what was signed.
-        if (!segments[0].equals(account) || (container != null && !segments[1].equals(container))) {
+        String targetContainer = segments[nameOffset];
+        // Azure answers a sub-request addressed outside the batch with 400, and so does this: a batch is one
+        // container's (or one account's) work, and a delete must not reach past what was signed.
+        if (container != null && !container.equals(targetContainer)) {
             throw invalidInput();
         }
-        return new SubRequest(contentId, segments[1], segments[2], queryParameters(uri.getRawQuery()), headers);
+        return new SubRequest(contentId, targetContainer, segments[nameOffset + 1],
+                queryParameters(uri.getRawQuery()), headers);
     }
 
     private static Integer contentId(String value) {
