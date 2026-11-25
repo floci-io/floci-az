@@ -986,7 +986,8 @@ public class DeploymentEngine {
         if (value instanceof ObjectNode object) {
             boolean innerChild = isInnerScope(object) && object.path("properties").has("template");
             ObjectNode copy = JsonNodeFactory.instance.objectNode();
-            object.properties().forEach(field -> copy.set(field.getKey(),
+            object.properties().forEach(field -> copy.set(
+                withParentReferences(JsonNodeFactory.instance.textNode(field.getKey()), plan).asText(),
                 innerChild && field.getKey().equals("properties")
                     ? withParentReferencesAroundTemplate((ObjectNode) field.getValue(), plan)
                     : withParentReferences(field.getValue(), plan)));
@@ -1058,14 +1059,14 @@ public class DeploymentEngine {
             .orElse(null);
     }
 
-    /** {@code value} with every string that would read as an expression escaped, so it stays a literal. */
+    /** {@code value} with every string and property name that would read as an expression escaped, so it stays a literal. */
     private static JsonNode escaped(JsonNode value) {
         if (value.isTextual() && value.asText().startsWith("[")) {
             return JsonNodeFactory.instance.textNode("[" + value.asText());
         }
         if (value instanceof ObjectNode object) {
             ObjectNode copy = JsonNodeFactory.instance.objectNode();
-            object.properties().forEach(field -> copy.set(field.getKey(), escaped(field.getValue())));
+            object.properties().forEach(field -> copy.set(escapedKey(field.getKey()), escaped(field.getValue())));
             return copy;
         }
         if (value instanceof ArrayNode array) {
@@ -1074,6 +1075,11 @@ public class DeploymentEngine {
             return copy;
         }
         return value;
+    }
+
+    /** A literal property name that would read as an expression, escaped: the child evaluates its keys too. */
+    private static String escapedKey(String key) {
+        return key.startsWith("[") ? "[" + key : key;
     }
 
     private static Operation resourceOperation(DependencyGraph.Node node, String apiVersion, String state,

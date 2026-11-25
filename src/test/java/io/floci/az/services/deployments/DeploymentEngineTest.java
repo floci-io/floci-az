@@ -623,4 +623,63 @@ class DeploymentEngineTest {
         assertEquals(".azurecr.us", suffixes.get("acrLoginServer").asText());
         assertEquals("core.usgovcloudapi.net", suffixes.get("storage").asText());
     }
+
+    @Test
+    void aReferenceInAPropertyLoopsKeyOrdersTheResourceItNamesFirst() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request("""
+            {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Web/sites", "apiVersion": "2022-03-01", "name": "app", "location": "eastus",
+               "properties": {"copy": [{"name": "slots", "count": 1, "input": {
+                 "[reference('sa1').provisioningState]": "[copyIndex('slots')]"}}]}},
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa1",
+               "location": "eastus"}]}}
+            """));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        List<String> puts = sent.stream().filter(request -> request.method().equals("PUT")).map(Sent::path).toList();
+        assertEquals(List.of(SA_ID, RG_ID + "/providers/Microsoft.Web/sites/app"), puts);
+        JsonNode app = sent.stream().filter(request -> request.path().endsWith("/sites/app")).findFirst()
+            .orElseThrow().body();
+        assertEquals("[{\"Succeeded\":0}]", app.path("properties").path("slots").toString());
+    }
+
+    @Test
+    void anOuterNestedTemplatesKeyThatReferencesTheParentNamesItById() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request("""
+            {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "module",
+               "properties": {"mode": "Incremental", "template": {
+                 "resources": [{"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                                "name": "child", "location": "eastus",
+                                "tags": {"[reference('sa1').provisioningState]": "of-sa1"}}]}}},
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa1",
+               "location": "eastus"}]}}
+            """));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        List<String> puts = sent.stream().filter(request -> request.method().equals("PUT")).map(Sent::path).toList();
+        assertEquals(List.of(SA_ID, RG_ID + "/providers/Microsoft.Resources/deployments/module"), puts,
+            "a reference in a key of an outer template orders the parent's resource first");
+        JsonNode tags = sent.get(1).body().path("properties").path("template").path("resources").get(0).path("tags");
+        String key = tags.fieldNames().next();
+        assertTrue(key.contains(SA_ID), "the parent's name is rewritten to its id in the key: " + key);
+    }
+
+    @Test
+    void anOuterNestedDeploymentEscapesTheParentsLiteralKeys() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request("""
+            {"mode": "Incremental", "parameters": {"settings": {"value": {"[add(1, 2)]": "literal"}}}, "template": {
+              "parameters": {"settings": {"type": "object"}},
+              "resources": [
+                {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "outer",
+                 "properties": {"mode": "Incremental", "template": {
+                   "outputs": {"settings": {"type": "object", "value": "[parameters('settings')]"}}}}}]}}
+            """));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        JsonNode settings = sent.getFirst().body().path("properties").path("template").path("parameters")
+            .path("settings").path("defaultValue");
+        assertEquals("literal", settings.path("[[add(1, 2)]").asText(),
+            "a supplied key that reads as an expression is escaped, so the child keeps it literal: " + settings);
+    }
 }
