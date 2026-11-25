@@ -216,6 +216,12 @@ Services that use sidecar containers (Event Hubs, Service Bus, SQL, PostgreSQL, 
 ./mvnw clean package -DskipTests
 ```
 
+A local `./mvnw test` runs the whole suite. CI splits it: `.github/ci/partition.sh` assigns the classes to
+three shards, keeping every class of one `@TestProfile` on the same shard, and the `*DockerTest` classes, which
+start real sidecar containers, run in a fourth `docker` shard. The `CI summary` job checks that every class ran in
+exactly one shard. Each distinct test profile costs about 4 s on every run (Quarkus builds its app during test
+discovery, then starts it), so reuse an existing profile rather than adding one with the same overrides.
+
 ### Focused tests
 
 ```bash
