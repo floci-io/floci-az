@@ -15,7 +15,9 @@ import java.util.function.UnaryOperator;
  * restrictions Azure documents, each refused with {@code InvalidTemplate}:
  *
  * <ul>
- *   <li>it reads only its own parameters, never the template's, and never {@code variables()};</li>
+ *   <li>it reads only its own parameters, never the template's, and never {@code variables()}, except in a
+ *   {@code languageVersion} 2.0 template, where it reads the template's variables (what Bicep 0.30 and later emit for
+ *   a {@code func} that uses a {@code var});</li>
  *   <li>it calls no other user-defined function;</li>
  *   <li>it uses neither {@code reference()} nor a {@code list*} function;</li>
  *   <li>its parameters have no default values.</li>
@@ -31,21 +33,26 @@ final class UserFunctions {
                     boolean outputNullable, JsonNode outputValue) {
     }
 
-    static final UserFunctions NONE = new UserFunctions(Map.of());
+    static final UserFunctions NONE = new UserFunctions(Map.of(), false);
 
     private final Map<String, Function> functions;
+    private final boolean readsVariables;
 
-    private UserFunctions(Map<String, Function> functions) {
+    private UserFunctions(Map<String, Function> functions, boolean readsVariables) {
         this.functions = functions;
+        this.readsVariables = readsVariables;
     }
 
     /** Reads the {@code functions} section; a missing or empty one declares nothing. */
     static UserFunctions parse(JsonNode declared) {
-        return parse(declared, UnaryOperator.identity());
+        return parse(declared, UnaryOperator.identity(), false);
     }
 
-    /** As {@link #parse(JsonNode)}, with {@code types} resolving a user-defined type where one is declared. */
-    static UserFunctions parse(JsonNode declared, UnaryOperator<JsonNode> types) {
+    /**
+     * As {@link #parse(JsonNode)}, with {@code types} resolving a user-defined type where one is declared, and
+     * {@code readsVariables} set for a {@code languageVersion} 2.0 template, whose functions may read its variables.
+     */
+    static UserFunctions parse(JsonNode declared, UnaryOperator<JsonNode> types, boolean readsVariables) {
         if (declared == null || declared.isMissingNode() || declared.isNull()) {
             return NONE;
         }
@@ -68,7 +75,7 @@ final class UserFunctions {
                 }
             }
         }
-        return new UserFunctions(functions);
+        return new UserFunctions(functions, readsVariables);
     }
 
     /** Calls {@code name} with {@code arguments}, its scope functions answering as {@code outer} does. */
@@ -94,7 +101,7 @@ final class UserFunctions {
             values.put(parameter.name().toLowerCase(Locale.ROOT), value);
         }
         JsonNode output = ExpressionEvaluator.evaluateValue(function.outputValue(),
-            new FunctionScope(function, values, outer));
+            new FunctionScope(function, values, outer, readsVariables));
         if (!(function.outputNullable() && output.isNull()) && !ParameterValues.fits(function.outputType(), output)) {
             throw TemplateException.invalid("The output of the template function '" + function.name()
                 + "' is not valid. Expected a value of type '" + function.outputType() + "'.");
@@ -134,9 +141,12 @@ final class UserFunctions {
             output.get("value"));
     }
 
-    /** What a user-defined function's output expression can read: its own parameters and the scope functions. */
-    private record FunctionScope(Function function, Map<String, JsonNode> values, TemplateScope outer)
-            implements TemplateScope {
+    /**
+     * What a user-defined function's output expression can read: its own parameters and the scope functions, and the
+     * declaring template's variables when {@code readsVariables} is set.
+     */
+    private record FunctionScope(Function function, Map<String, JsonNode> values, TemplateScope outer,
+                                 boolean readsVariables) implements TemplateScope {
 
         @Override
         public JsonNode parameter(String name) {
@@ -150,7 +160,10 @@ final class UserFunctions {
 
         @Override
         public JsonNode variable(String name) {
-            throw restricted("can't access variables");
+            if (readsVariables) {
+                return outer.variable(name);
+            }
+            throw restricted("can't access variables outside a 'languageVersion' 2.0 template");
         }
 
         @Override
