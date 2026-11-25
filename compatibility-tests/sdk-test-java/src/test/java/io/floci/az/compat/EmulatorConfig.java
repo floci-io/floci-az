@@ -612,6 +612,31 @@ public final class EmulatorConfig {
         }
     }
 
+    /**
+     * Updates a queue the way {@code ServiceBusAdministrationClient.updateQueue} does: a PUT of the full
+     * {@code QueueDescription} with {@code If-Match: *}, on the namespaced path {@link #ensureServiceBusQueue}
+     * creates it on. Returns the HTTP status.
+     */
+    static int updateServiceBusQueue(String queueName, String descriptionElements) throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-servicebus/" + SERVICEBUS_NAMESPACE + "/queues/" + queueName;
+        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                + "<QueueDescription xmlns=\"http://schemas.microsoft.com/netservices/2010/10/servicebus/connect\">"
+                + descriptionElements + "</QueueDescription></content></entry>";
+        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("PUT");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(30_000);
+        conn.setRequestProperty("Content-Type", "application/atom+xml;charset=utf-8");
+        conn.setRequestProperty("If-Match", "*");
+        conn.setRequestProperty("Content-Length", String.valueOf(bodyBytes.length));
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(bodyBytes);
+        }
+        return conn.getResponseCode();
+    }
+
     /** Creates a topic via the floci-az management API. */
     static void ensureServiceBusTopic(String topicName) throws Exception {
         String url = BASE + "/" + ACCOUNT + "-servicebus/" + SERVICEBUS_NAMESPACE
