@@ -1490,13 +1490,19 @@ public class DeploymentEngine {
     private record EnvironmentSuffix(String armName, String metadataName, boolean leadingDot) {
     }
 
-    private static ObjectNode armSuffixes(JsonNode metadataSuffixes) {
+    /**
+     * A suffix the cloud leaves empty (Front Door in the US Government and China clouds) stays an empty string, so
+     * {@code empty(environment().suffixes.azureFrontDoorEndpointSuffix)} still evaluates; only a non-empty host suffix
+     * gets the dot.
+     */
+    static ObjectNode armSuffixes(JsonNode metadataSuffixes) {
         ObjectNode suffixes = JsonNodeFactory.instance.objectNode();
         for (EnvironmentSuffix suffix : ARM_SUFFIXES) {
             JsonNode value = metadataSuffixes.path(suffix.metadataName());
-            if (value.isTextual() && !value.asText().isEmpty()) {
+            if (value.isTextual()) {
                 String text = value.asText();
-                suffixes.put(suffix.armName(), suffix.leadingDot() && !text.startsWith(".") ? "." + text : text);
+                boolean dotted = suffix.leadingDot() && !text.isEmpty() && !text.startsWith(".");
+                suffixes.put(suffix.armName(), dotted ? "." + text : text);
             }
         }
         return suffixes;

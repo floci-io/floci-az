@@ -606,4 +606,21 @@ class DeploymentEngineTest {
         assertEquals(List.of(SA_ID, RG_ID + "/providers/Microsoft.Resources/deployments/module"), puts,
             "an outer template is evaluated in the parent, so its reference to sa1 orders sa1 first");
     }
+
+    @Test
+    void aSuffixTheCloudLeavesEmptyStaysAnEmptyStringWithoutADot() throws Exception {
+        JsonNode usGovernment = MAPPER.readTree("""
+            {"acrLoginServer": "azurecr.us", "azureFrontDoorEndpointSuffix": "",
+             "keyVaultDns": "vault.usgovcloudapi.net", "sqlServerHostname": "database.usgovcloudapi.net",
+             "storage": "core.usgovcloudapi.net"}
+            """);
+
+        ObjectNode suffixes = DeploymentEngine.armSuffixes(usGovernment);
+
+        assertTrue(suffixes.has("azureFrontDoorEndpointSuffix"));
+        assertEquals("", suffixes.get("azureFrontDoorEndpointSuffix").asText());
+        assertEquals(".vault.usgovcloudapi.net", suffixes.get("keyvaultDns").asText());
+        assertEquals(".azurecr.us", suffixes.get("acrLoginServer").asText());
+        assertEquals("core.usgovcloudapi.net", suffixes.get("storage").asText());
+    }
 }
