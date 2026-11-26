@@ -97,7 +97,7 @@ public class AksClusterManager {
                     .withName(containerName)
                     .withLabels(ContainerStorageHelper.resourceIdentityLabels("aks", cluster.getName(),
                             cluster.getSubscriptionId(), cluster.getResourceGroup(), cluster.getLocation()))
-                    .withCmd(k3sServerArgs())
+                    .withCmd(k3sServerArgs(containerName))
                     .withEnv("K3S_KUBECONFIG_MODE", "644")
                     .withPortBinding(K3S_API_SERVER_PORT, hostPort)
                     .withNamedVolume(volumeName, "/var/lib/rancher/k3s")
@@ -316,10 +316,13 @@ public class AksClusterManager {
 
     /**
      * k3s server arguments. The API certificate must be valid for every host the cluster is
-     * addressed by: {@code localhost} always, plus the Docker daemon's host in published mode.
+     * addressed by: {@code localhost} always, the container's name (the kubeconfig server when
+     * floci-az runs in a container, for clients on the same Docker network), plus the Docker
+     * daemon's host in published mode.
      */
-    List<String> k3sServerArgs() {
-        List<String> args = new ArrayList<>(List.of("server", "--disable=traefik", "--tls-san=localhost"));
+    List<String> k3sServerArgs(String containerName) {
+        List<String> args = new ArrayList<>(List.of("server", "--disable=traefik", "--tls-san=localhost",
+                "--tls-san=" + containerName));
         if (lifecycleManager.publishedEndpoints() && !"localhost".equals(lifecycleManager.daemonAddress())) {
             // a SAN takes the bare address, not the bracketed URL form of an IPv6 literal
             args.add("--tls-san=" + lifecycleManager.daemonAddress());
