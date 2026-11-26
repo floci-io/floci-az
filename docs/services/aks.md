@@ -95,11 +95,13 @@ In real mode the kubeconfig points to the live k3s API server. In mocked mode it
 
 Where that API server is depends on how floci-az runs, as for every sidecar (see `FLOCI_AZ_DOCKER_ENDPOINT_MODE` in the [Docker Compose configuration](../configuration/docker-compose.md)):
 
-| floci-az runs | Endpoint mode | Kubeconfig `server` and `properties.fqdn` | Works from |
+| floci-az runs | Endpoint mode | Kubeconfig `server` | Works from |
 |---|---|---|---|
 | on the host | `auto` (default) | `https://localhost:<published port>` | the host |
-| in a container | `auto` (default) | `https://<k3s container name>:6443` | containers on the same Docker network |
+| in a container | `auto` (default) | `https://<k3s container name>:6443` | containers on the same user-defined Docker network |
 | in a container | `published` | `https://<Docker daemon host>:<published port>`, `localhost` with a local socket | the host |
+
+`properties.fqdn` names the same address without the `https://` scheme, as `host:port`.
 
 So when floci-az runs in Docker and `kubectl`, Terraform's `kubernetes` or `helm` provider, or any other client runs on the host, start floci-az with `-e FLOCI_AZ_DOCKER_ENDPOINT_MODE=published`. floci-az still reaches k3s over the container network, so the cluster becomes ready as usual.
 
