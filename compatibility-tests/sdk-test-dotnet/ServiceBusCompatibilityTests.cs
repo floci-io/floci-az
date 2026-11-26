@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using Azure.Messaging.ServiceBus;
@@ -899,7 +900,8 @@ public sealed class ServiceBusCompatibilityTests
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/atom+xml"));
         request.Content = new StringContent(content, Encoding.UTF8, "application/atom+xml");
         HttpResponseMessage response = await http.SendAsync(request, cancellationToken);
-        await Assert.That(response.IsSuccessStatusCode)
+        // 409 means the entity already exists, which is what an Ensure call wants
+        await Assert.That(response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Conflict)
             .IsTrue()
             .Because($"{entityType} creation failed: {(int)response.StatusCode} " +
                      await response.Content.ReadAsStringAsync(cancellationToken));

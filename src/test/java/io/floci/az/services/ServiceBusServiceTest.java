@@ -459,15 +459,56 @@ public class ServiceBusServiceTest {
     }
 
     @Test
-    void puttingAnExistingQueueWithoutIfMatchLeavesItUnchanged() {
+    void creatingAQueueThatExistsAnswers409AndLeavesItUnchanged() {
         given().body(queueDescription("PT30S", 3))
                 .when().put(BASE + "/recreate-queue")
                 .then().statusCode(201);
 
         given().body(queueDescription("PT50S", 7))
                 .when().put(BASE + "/recreate-queue")
+                .then().statusCode(409)
+                .body(containsString("<Code>409</Code>"))
+                .body(containsString("The messaging entity &apos;recreate-queue&apos; already exists."));
+
+        given().when().get(BASE + "/recreate-queue")
                 .then().statusCode(200)
                 .body(containsString("<MaxDeliveryCount>3</MaxDeliveryCount>"));
+    }
+
+    @Test
+    void creatingAQueueThatExistsOnTheNamespacePathAnswers409() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/default/queues/recreate-legacy-queue")
+                .then().statusCode(201);
+
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/default/queues/recreate-legacy-queue")
+                .then().statusCode(409);
+    }
+
+    @Test
+    void creatingATopicThatExistsAnswers409() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/recreate-topic")
+                .then().statusCode(201);
+
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/recreate-topic")
+                .then().statusCode(409)
+                .body(containsString("The messaging entity &apos;recreate-topic&apos; already exists."));
+    }
+
+    @Test
+    void creatingASubscriptionThatExistsAnswers409() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/recreate-sub-topic")
+                .then().statusCode(201);
+        given().when().put(BASE + "/recreate-sub-topic/subscriptions/sub1")
+                .then().statusCode(201);
+
+        given().when().put(BASE + "/recreate-sub-topic/subscriptions/sub1")
+                .then().statusCode(409)
+                .body(containsString("The messaging entity &apos;recreate-sub-topic/Subscriptions/sub1&apos; already exists."));
     }
 
     @Test

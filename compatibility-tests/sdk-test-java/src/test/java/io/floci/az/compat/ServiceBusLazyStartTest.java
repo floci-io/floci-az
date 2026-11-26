@@ -113,11 +113,9 @@ class ServiceBusLazyStartTest {
 
     @Test
     @Order(4)
-    @DisplayName("idempotent entity creation returns 200 (already exists)")
-    void entityCreation_idempotent() throws Exception {
-        // Second PUT to the same queue name should return 200 (entity already exists)
-        // This verifies createQueueViaSpecPath returns 200 on repeat — the underlying
-        // HTTP call throws if status is not 200 or 201
-        EmulatorConfig.createQueueViaSpecPath(queueName, false);
+    @DisplayName("creating the same queue again answers 409 (already exists)")
+    void entityCreation_existingQueueConflicts() throws Exception {
+        // A PUT without If-Match on an existing queue is a create, which Azure rejects with 409
+        assertEquals(409, EmulatorConfig.createQueueViaSpecPath(queueName, false));
     }
 }
