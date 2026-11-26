@@ -93,6 +93,16 @@ kubectl --kubeconfig ~/.kube/my-cluster.yaml get nodes
 
 In real mode the kubeconfig points to the live k3s API server. In mocked mode it points to `https://localhost:6443` with `insecure-skip-tls-verify: true`.
 
+Where that API server is depends on how floci-az runs, as for every sidecar (see `FLOCI_AZ_DOCKER_ENDPOINT_MODE` in the [Docker Compose configuration](../configuration/docker-compose.md)):
+
+| floci-az runs | Endpoint mode | Kubeconfig `server` and `properties.fqdn` | Works from |
+|---|---|---|---|
+| on the host | `auto` (default) | `https://localhost:<published port>` | the host |
+| in a container | `auto` (default) | `https://<k3s container name>:6443` | containers on the same Docker network |
+| in a container | `published` | `https://<Docker daemon host>:<published port>`, `localhost` with a local socket | the host |
+
+So when floci-az runs in Docker and `kubectl`, Terraform's `kubernetes` or `helm` provider, or any other client runs on the host, start floci-az with `-e FLOCI_AZ_DOCKER_ENDPOINT_MODE=published`. floci-az still reaches k3s over the container network, so the cluster becomes ready as usual.
+
 In real mode the credential operations answer `409 OperationNotAllowed` until the cluster reaches `Succeeded` and its kubeconfig has been extracted from k3s (for example while it is `Creating`, or after it `Failed`), rather than returning a kubeconfig that cannot reach a server.
 
 ### 4: Delete the cluster
