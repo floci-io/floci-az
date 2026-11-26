@@ -246,6 +246,8 @@ API's `Device` and the field list on Learn's identity registry page:
   `--key-type swap` sends the identity back with its keys swapped
 - **Generated values**: `generationId` is fixed when the device is created, and the `etag` changes on
   every write. An IoT Edge device gets its own `deviceScope`, `ms-azure-iot-edge://{id}-{generationId}`.
+  `parentScopes` follows Learn's identity registry table: an edge device always has it, `[]` without a
+  parent, and any other device has it only when it has a parent.
   `connectionState` is `Disconnected` and the activity times are `0001-01-01T00:00:00Z`, since nothing
   connects yet
 - **Queries**: `POST /devices/query` answers the two queries `device-identity list` sends,

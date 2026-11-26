@@ -27,6 +27,7 @@ import static io.floci.az.services.iothub.IotHubTestClient.owner;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.not;
@@ -89,7 +90,8 @@ class IotHubDevicesTest {
             .body("authentication.symmetricKey.secondaryKey", matchesPattern(BASE64_32))
             .body("authentication.x509Thumbprint.primaryThumbprint", nullValue())
             .body("capabilities.iotEdge", equalTo(false))
-            .body("parentScopes", hasSize(0));
+            // A leaf without a parent has no parentScopes at all (Learn's identity registry table).
+            .body("$", not(hasKey("parentScopes")));
 
         owner("devhub-create").when().get("/devices/esp32-1" + SERVICE_API).then().statusCode(200)
             .body("deviceId", equalTo("esp32-1"))
@@ -260,8 +262,22 @@ class IotHubDevicesTest {
         Response edge = create("devhub-edge", "gateway", true);
         edge.then().statusCode(200)
             .body("capabilities.iotEdge", equalTo(true))
-            .body("deviceScope", startsWith("ms-azure-iot-edge://gateway-"));
+            .body("deviceScope", startsWith("ms-azure-iot-edge://gateway-"))
+            .body("parentScopes", hasSize(0));
         String scope = edge.path("deviceScope");
+
+        // A leaf with a parent carries its scope, in the device and in its twin; one without has no key in either.
+        owner("devhub-edge").body("{\"deviceId\": \"child\", \"deviceScope\": \"" + scope + "\", "
+                + "\"parentScopes\": [\"" + scope + "\"]}")
+            .when().put("/devices/child" + SERVICE_API).then().statusCode(200)
+            .body("parentScopes", contains(scope));
+        create("devhub-edge", "orphan").then().statusCode(200);
+        Response twins = owner("devhub-edge").body("{\"query\": \"select * from devices\"}")
+            .when().post("/devices/query" + SERVICE_API);
+        twins.then().statusCode(200)
+            .body("find { it.deviceId == 'gateway' }.parentScopes", hasSize(0))
+            .body("find { it.deviceId == 'child' }.parentScopes", contains(scope))
+            .body("find { it.deviceId == 'orphan' }", not(hasKey("parentScopes")));
         owner("devhub-edge").header("If-Match", "\"*\"")
             .body("{\"deviceId\": \"gateway\", \"status\": \"disabled\", \"capabilities\": {\"iotEdge\": true}}")
             .when().put("/devices/gateway" + SERVICE_API).then().statusCode(200)

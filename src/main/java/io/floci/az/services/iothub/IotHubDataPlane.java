@@ -191,6 +191,17 @@ public class IotHubDataPlane {
                 .isPresent();
     }
 
+    /**
+     * Adds {@code parentScopes} as Learn's identity registry table describes it: an edge device always has it, empty
+     * when it has no parent, and a non-edge device has it only when it has a parent. The az CLI tells the two cases
+     * apart: a device without the key does not support parents at all.
+     */
+    private static void putParentScopes(Map<String, Object> wire, Device device) {
+        if (device.iotEdge() || !device.parentScopes().isEmpty()) {
+            wire.put("parentScopes", device.parentScopes());
+        }
+    }
+
     private static Response hubGone(Context context) {
         return error(404, "IotHubNotFound", "IoT hub '" + context.hub() + "' does not exist.");
     }
@@ -518,7 +529,7 @@ public class IotHubDataPlane {
         if (device.deviceScope() != null) {
             body.put("deviceScope", device.deviceScope());
         }
-        body.put("parentScopes", device.parentScopes());
+        putParentScopes(body, device);
         return body;
     }
 
@@ -562,7 +573,7 @@ public class IotHubDataPlane {
         if (device.deviceScope() != null) {
             twin.put("deviceScope", device.deviceScope());
         }
-        twin.put("parentScopes", device.parentScopes());
+        putParentScopes(twin, device);
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("desired", emptyProperties(device.statusUpdatedTime()));
         properties.put("reported", emptyProperties(device.statusUpdatedTime()));
