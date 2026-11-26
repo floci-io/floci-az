@@ -317,6 +317,26 @@ public class ServiceBusRulesTest {
     }
 
     @Test
+    void aRuleIsReachedThroughAnyCasingOfItsName() {
+        createTopicAndSubscription("rules-topic-case", "sub1");
+        given().body(correlationRuleBody("Keep-Me", "red"))
+                .when().put(rulesPath("rules-topic-case", "sub1") + "/Keep-Me").then().statusCode(201);
+
+        given().when().get(rulesPath("RULES-TOPIC-CASE", "SUB1") + "/keep-me")
+                .then().statusCode(200)
+                .body(containsString("Keep-Me"));
+        given().body(correlationRuleBody("KEEP-ME", "blue"))
+                .when().put(rulesPath("rules-topic-case", "sub1") + "/KEEP-ME").then().statusCode(200);
+        given().when().get(rulesPath("rules-topic-case", "sub1"))
+                .then().statusCode(200)
+                .body(containsString("Keep-Me"))
+                .body(not(containsString("KEEP-ME")));
+
+        given().when().delete(rulesPath("rules-topic-case", "sub1") + "/keep-me").then().statusCode(200);
+        given().when().get(rulesPath("rules-topic-case", "sub1") + "/Keep-Me").then().statusCode(404);
+    }
+
+    @Test
     void updatingRuleCanChangeFilterType() {
         createTopicAndSubscription("rules-topic-retype", "sub1");
         String rules = rulesPath("rules-topic-retype", "sub1");

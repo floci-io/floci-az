@@ -156,7 +156,9 @@ class ServiceBusHandlerUpdateOrderingTest {
         when(store.get(anyString())).thenAnswer(call -> {
             String requestedKey = call.getArgument(0);
             Optional<StoredObject> snapshot = Optional.ofNullable(stored.get(requestedKey));
-            if (key.equals(requestedKey) && firstRead.compareAndSet(true, false)) {
+            // Block the update's existence check, which runs under the handler's lock; the name resolution in routing
+            // reads the same key before taking it
+            if (key.equals(requestedKey) && Thread.holdsLock(handler) && firstRead.compareAndSet(true, false)) {
                 readingSubscription.countDown();
                 assertTrue(releaseRead.await(5, TimeUnit.SECONDS));
             }

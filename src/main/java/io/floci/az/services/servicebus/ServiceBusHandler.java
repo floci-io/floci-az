@@ -259,9 +259,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         }
 
         return switch (req.method()) {
-            case "GET"          -> handleSpecEntityGet(account, ns, entityName);
+            case "GET"          -> handleSpecEntityGet(account, ns, storedQueueOrTopicName(account, ns, entityName));
             case "PUT", "POST"  -> handleSpecEntityPut(req, account, ns, entityName);
-            case "DELETE"       -> handleSpecEntityDelete(account, ns, entityName);
+            case "DELETE"       -> handleSpecEntityDelete(account, ns, storedQueueOrTopicName(account, ns, entityName));
             default             -> Response.status(405).build();
         };
     }
@@ -283,10 +283,13 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return notFoundAtom(entityName + " not found");
     }
 
-    private Response handleSpecEntityPut(AzureRequest req, String account, String ns, String entityName) {
+    private Response handleSpecEntityPut(AzureRequest req, String account, String ns, String requestedName) {
         String body = readBody(req);
         boolean isQueue = body.isEmpty() || body.contains("QueueDescription");
         boolean isTopic = !isQueue && body.contains("TopicDescription");
+        String entityName = isTopic
+                ? storedName(topicPrefix(account, ns), requestedName)
+                : storedName(queuePrefix(account, ns), requestedName);
         boolean requiresSession = body.contains("<RequiresSession>true</RequiresSession>");
         ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection;
         ServiceBusEntityXml.MessageLifetimeSettings lifetime;
@@ -337,10 +340,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (ns == null) {
             return notFoundAtom("No running namespace for subscriptions");
         }
+        String storedTopic = storedName(topicPrefix(account, ns), topicName);
         if (subRest.isEmpty()) {
-            return handleListSubscriptions(account, ns, topicName);
+            return handleListSubscriptions(account, ns, storedTopic);
         }
-        Response response = handleSubscriptionSubPath(req, account, ns, topicName, subRest);
+        Response response = handleSubscriptionSubPath(req, account, ns, storedTopic, subRest);
         return response != null ? response
                 : notFoundAtom("Path not found: " + topicName + "/subscriptions/" + subRest);
     }
@@ -354,9 +358,10 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                                 String topicName, String subRest) {
         int slash = subRest.indexOf('/');
         if (slash < 0) {
-            return handleSubscriptionCrud(req, account, namespace, topicName, subRest);
+            return handleSubscriptionCrud(req, account, namespace, topicName,
+                    storedName(subPrefix(account, namespace, topicName), subRest));
         }
-        String subName = subRest.substring(0, slash);
+        String subName = storedName(subPrefix(account, namespace, topicName), subRest.substring(0, slash));
         String tail = subRest.substring(slash + 1);
         if ("rules".equalsIgnoreCase(tail)) {
             return "GET".equals(req.method())
@@ -365,7 +370,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         }
         if (tail.regionMatches(true, 0, "rules/", 0, "rules/".length())) {
             return handleRuleCrud(req, account, namespace, topicName, subName,
-                    tail.substring("rules/".length()));
+                    storedName(rulePrefix(account, namespace, topicName, subName), tail.substring("rules/".length())));
         }
         return null;
     }
@@ -467,7 +472,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             return handleListQueues(account, namespace);
         }
         if (entityPath.startsWith("queues/")) {
-            String queueName = entityPath.substring("queues/".length());
+            String queueName = storedName(queuePrefix(account, namespace), entityPath.substring("queues/".length()));
             return handleQueueCrud(req, account, namespace, queueName);
         }
         if ("topics".equals(entityPath)) {
@@ -477,9 +482,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             String rest = entityPath.substring("topics/".length());
             int slash = rest.indexOf('/');
             if (slash < 0) {
-                return handleTopicCrud(req, account, namespace, rest);
+                return handleTopicCrud(req, account, namespace, storedName(topicPrefix(account, namespace), rest));
             }
-            String topicName = rest.substring(0, slash);
+            String topicName = storedName(topicPrefix(account, namespace), rest.substring(0, slash));
             String sub = rest.substring(slash + 1);
             if ("subscriptions".equalsIgnoreCase(sub)) {
                 return handleListSubscriptions(account, namespace, topicName);
@@ -1593,6 +1598,34 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
      */
     private List<StoredObject> scanDirectChildren(String prefix) {
         return store.scan(k -> k.startsWith(prefix) && k.indexOf('/', prefix.length()) < 0);
+    }
+
+    /**
+     * Service Bus matches queue, topic, subscription and rule names ignoring case and keeps the spelling an entity was
+     * created with. Answers the stored spelling of {@code requested} under {@code prefix}: an exact match first (as the
+     * AMQP resolver from #761 does), then the entity stored under any other casing, else the name as sent, which is
+     * then a create.
+     */
+    private String storedName(String prefix, String requested) {
+        if (store.get(prefix + requested).isPresent()) {
+            return requested;
+        }
+        for (StoredObject object : scanDirectChildren(prefix)) {
+            String stored = object.key().substring(prefix.length());
+            if (stored.equalsIgnoreCase(requested)) {
+                return stored;
+            }
+        }
+        return requested;
+    }
+
+    /** The single-segment Atom path names a queue or a topic; a GET or DELETE looks at queues first, as before. */
+    private String storedQueueOrTopicName(String account, String namespace, String requested) {
+        String queue = storedName(queuePrefix(account, namespace), requested);
+        if (store.get(queueKey(account, namespace, queue)).isPresent()) {
+            return queue;
+        }
+        return storedName(topicPrefix(account, namespace), requested);
     }
 
     static String rulePrefix(String account, String namespace, String topicName, String subName) {

@@ -36,8 +36,10 @@ increment the count. Completed messages remain removed. This follows Azure's
 As in Azure, the data plane compares entity paths ignoring case. A queue created as `orders`
 accepts senders and receivers on `ORDERS` or `Orders`, and the same holds for topics,
 subscriptions (`Events/subscriptions/WORKER`), dead-letter queues and entity management nodes.
-The broker keeps the spelling the entity was created with. The Atom management API still matches
-the entity name in the request path exactly.
+The broker keeps the spelling the entity was created with. The Atom management API and the ARM plane
+match names the same way: a `GET`, update or delete of `ORDERS` reaches `orders`, a create of `ORDERS`
+answers `409` instead of adding a second queue, and responses carry the created spelling. Rule names
+follow the same rule.
 
 ## Management plane
 

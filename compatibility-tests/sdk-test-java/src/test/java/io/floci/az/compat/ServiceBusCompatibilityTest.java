@@ -637,6 +637,24 @@ class ServiceBusCompatibilityTest {
     }
 
     @Test
+    @DisplayName("administration client reaches a queue and a subscription through any casing of their names")
+    void administrationClientMatchesEntityNamesIgnoringCase() {
+        String queue = uniqueName("case-queue");
+        String topic = uniqueName("case-topic");
+        ServiceBusAdministrationClient admin = EmulatorConfig.serviceBusAdministrationClient();
+        admin.createQueue(queue, new CreateQueueOptions().setMaxDeliveryCount(3));
+        admin.createTopic(topic);
+        admin.createSubscription(topic, "case-sub");
+
+        assertEquals(queue, admin.getQueue(queue.toUpperCase()).getName(), "A get answers the created spelling");
+        assertThrows(ResourceExistsException.class, () -> admin.createQueue(queue.toUpperCase()));
+        assertEquals(1, admin.listQueues().stream().filter(q -> q.getName().equalsIgnoreCase(queue)).count(),
+                "Another casing must not create a second queue");
+        assertEquals("case-sub", admin.getSubscription(topic.toUpperCase(), "CASE-SUB").getSubscriptionName());
+        assertThrows(ResourceExistsException.class, () -> admin.createSubscription(topic, "Case-Sub"));
+    }
+
+    @Test
     @DisplayName("message properties round-trip correctly")
     void messageProperties() throws Exception {
         String queue = uniqueQueue();

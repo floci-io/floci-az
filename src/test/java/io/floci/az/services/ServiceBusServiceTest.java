@@ -487,6 +487,57 @@ public class ServiceBusServiceTest {
     }
 
     @Test
+    void aQueueIsReachedThroughAnyCasingOfItsName() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/case-queue")
+                .then().statusCode(201);
+
+        given().when().get(BASE + "/CASE-Queue")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-queue</title>"));
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/CASE-QUEUE")
+                .then().statusCode(409);
+        given().header("If-Match", "*").body(queueDescription("PT50S", 7))
+                .when().put(BASE + "/default/queues/Case-Queue")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-queue</title>"))
+                .body(containsString("<MaxDeliveryCount>7</MaxDeliveryCount>"));
+        given().when().get(BASE + "/$Resources/queues")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-queue</title>"))
+                .body(not(containsString("CASE-QUEUE")))
+                .body(not(containsString("Case-Queue")));
+
+        given().when().delete(BASE + "/CASE-QUEUE").then().statusCode(200);
+        given().when().get(BASE + "/case-queue").then().statusCode(404);
+    }
+
+    @Test
+    void aTopicAndItsSubscriptionAreReachedThroughAnyCasing() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/case-topic")
+                .then().statusCode(201);
+        given().when().put(BASE + "/CASE-TOPIC/subscriptions/case-sub")
+                .then().statusCode(201)
+                .body(containsString("<title type=\"text\">case-sub</title>"));
+
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/Case-Topic")
+                .then().statusCode(409);
+        given().when().get(BASE + "/case-topic/subscriptions/CASE-SUB")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-sub</title>"));
+        given().when().put(BASE + "/default/topics/CASE-topic/subscriptions/Case-Sub")
+                .then().statusCode(409);
+        given().when().get(BASE + "/case-topic/subscriptions")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-sub</title>"))
+                .body(not(containsString("CASE-SUB")))
+                .body(not(containsString("Case-Sub")));
+    }
+
+    @Test
     void creatingATopicThatExistsAnswers409() {
         given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
                 .when().put(BASE + "/recreate-topic")
