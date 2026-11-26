@@ -325,6 +325,10 @@ class ServiceBusArmServiceTest {
         put(ns("sbns-subupdate") + "/topics/events", "{\"properties\": {}}").then().statusCode(200);
         put(ns("sbns-subupdate") + "/topics/events/subscriptions/audit",
                 "{\"properties\": {\"maxDeliveryCount\": 3}}").then().statusCode(200);
+        String rules = ns("sbns-subupdate") + "/topics/events/subscriptions/audit/rules";
+        put(rules + "/high", "{\"properties\": {\"filterType\": \"SqlFilter\","
+                + " \"sqlFilter\": {\"sqlExpression\": \"priority > 5\"}}}").then().statusCode(200);
+        given().delete(rules + "/$Default" + API).then().statusCode(200);
 
         put(ns("sbns-subupdate") + "/topics/events",
                 "{\"properties\": {\"defaultMessageTimeToLive\": \"PT2H\"}}").then().statusCode(200)
@@ -337,8 +341,11 @@ class ServiceBusArmServiceTest {
 
         given().get(ns("sbns-subupdate") + "/topics/events/subscriptions/audit" + API).then().statusCode(200)
                 .body("properties.maxDeliveryCount", equalTo(9));
-        given().get(ns("sbns-subupdate") + "/topics/events/subscriptions/audit/rules" + API).then().statusCode(200)
-                .body("value.name", hasItem("$Default"));
+        // The update keeps the subscription's own rules: a reset would bring $Default back and drop "high".
+        given().get(rules + API).then().statusCode(200)
+                .body("value.name", equalTo(List.of("high")));
+        given().get(rules + "/high" + API).then().statusCode(200)
+                .body("properties.sqlFilter.sqlExpression", equalTo("priority > 5"));
     }
 
     @Test
