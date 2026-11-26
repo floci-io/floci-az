@@ -392,10 +392,19 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         return cosmosResponse(coll, Response.Status.CREATED, etag, "dbs/" + dbId);
     }
 
+    /**
+     * Reads a container by name or by resource id (the SDKs follow the {@code _rid} links the gateway hands
+     * out). The owner path names the database, as on create and replace: the Java SDK builds the container's
+     * alt link from it, and its change feed processor fails without one.
+     */
     private Response getContainer(AzureRequest req, String dbId, String collId) {
-        Optional<StoredObject> found = store.get(collKey(req.accountName(), dbId, collId));
-        if (found.isEmpty()) return notFound(collId);
-        return cosmosResponse(parseData(found.get()), Response.Status.OK, found.get().etag());
+        Optional<StoredObject> found = findContainer(req.accountName(), dbId, collId);
+        Optional<String> databaseName = findDatabaseName(req.accountName(), dbId);
+        if (found.isEmpty() || databaseName.isEmpty()) {
+            return notFound(collId);
+        }
+        return cosmosResponse(parseData(found.get()), Response.Status.OK, found.get().etag(),
+                "dbs/" + databaseName.get());
     }
 
     /**
@@ -672,7 +681,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     private Response getDocument(AzureRequest req, String dbId, String collId, String docId) {
         StoredObject obj = findDoc(req, dbId, collId, docId);
         if (obj == null) return notFound(docId);
-        return cosmosResponse(parseData(obj), Response.Status.OK, obj.etag());
+        return cosmosResponse(parseData(obj), Response.Status.OK, obj.etag(), "dbs/" + dbId + "/colls/" + collId);
     }
 
     private Response replaceDocument(AzureRequest req, String dbId, String collId, String docId) {
@@ -708,7 +717,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("_attachments", "attachments/");
 
         store.put(docKey, stored(docKey, body, now, etag));
-        return cosmosResponse(body, Response.Status.OK, etag);
+        return cosmosResponse(body, Response.Status.OK, etag, "dbs/" + dbId + "/colls/" + collId);
     }
 
     /**
@@ -1019,7 +1028,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     private Response getScript(AzureRequest req, String dbId, String collId, CosmosScriptKind kind, String id) {
         Optional<StoredObject> found = store.get(scriptKey(req.accountName(), dbId, collId, kind, id));
         if (found.isEmpty()) return notFound(id);
-        return cosmosResponse(parseData(found.get()), Response.Status.OK, found.get().etag());
+        return cosmosResponse(parseData(found.get()), Response.Status.OK, found.get().etag(),
+                "dbs/" + dbId + "/colls/" + collId);
     }
 
     private Response replaceScript(AzureRequest req, String dbId, String collId, CosmosScriptKind kind, String id) {
@@ -1770,8 +1780,9 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
      *     <li>For a container response: {@code "dbs/{dbId}"}</li>
      *     <li>For a document response: {@code "dbs/{dbId}/colls/{collId}"}</li>
      *   </ul>
-     *   Pass {@code null} for responses that do not need it (e.g. reads,
-     *   deletes, lists).
+     *   Reads carry it too, as Azure's do: the SDK sets the alt link of every
+     *   resource it reads from it. Pass {@code null} only for responses that
+     *   need none (a database, a delete, a list).
      */
     private Response cosmosResponse(Map<String, Object> body, Response.Status status, String etag, String altContentPath) {
         try {
