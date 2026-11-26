@@ -53,7 +53,10 @@ public class BlobModels {
         @JacksonXmlProperty(localName = "Etag") String Etag,
         @JacksonXmlProperty(localName = "Content-Length") Long ContentLength,
         @JacksonXmlProperty(localName = "Content-Type") String ContentType,
-        @JacksonXmlProperty(localName = "BlobType") String BlobType
+        @JacksonXmlProperty(localName = "BlobType") String BlobType,
+        @JacksonXmlProperty(localName = "AccessTier") String AccessTier,
+        @JacksonXmlProperty(localName = "AccessTierInferred") Boolean AccessTierInferred,
+        @JacksonXmlProperty(localName = "AccessTierChangeTime") String AccessTierChangeTime
     ) {}
 
     /** One entry in a GetBlockList response. */

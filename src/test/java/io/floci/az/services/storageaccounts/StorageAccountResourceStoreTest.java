@@ -5,6 +5,7 @@ import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.blob.BlobServiceHandler;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +35,9 @@ class StorageAccountResourceStoreTest {
     @Inject
     StorageAccountArmService storageAccountArmService;
 
+    @Inject
+    BlobServiceHandler blobHandler;
+
     @BeforeEach
     void reset() {
         given().post("/_admin/reset").then().statusCode(204);
@@ -42,6 +46,23 @@ class StorageAccountResourceStoreTest {
     private static String account(String sub, String rg, String name) {
         return "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Storage/storageAccounts/"
             + name;
+    }
+
+    @Test
+    void restoresAccountAccessTierToBlobDataPlane() {
+        String path = account("sub-tier", "rg", "restoredsa");
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{\"accessTier\":\"Cool\"}}")
+            .put(path + API).then().statusCode(200);
+        given().put("/restoredsa/container?restype=container").then().statusCode(201);
+        given().header("x-ms-blob-type", "BlockBlob").body("data")
+            .put("/restoredsa/container/blob").then().statusCode(201);
+
+        blobHandler.removeAccountAccessTier("restoredsa");
+        given().head("/restoredsa/container/blob").then().header("x-ms-access-tier", "Hot");
+        storageAccountArmService.restoreHierarchicalNamespaces(null);
+        given().head("/restoredsa/container/blob").then().header("x-ms-access-tier", "Cool")
+            .header("x-ms-access-tier-inferred", "true");
     }
 
     @Test

@@ -156,15 +156,13 @@ public class StorageAccountArmService
         return String.valueOf(document.get("id"));
     }
 
-    /**
-     * The Blob data plane keeps each account's hierarchical-namespace switch in memory; an account that survived a
-     * restart sets it again, so its DFS endpoint answers as its {@code isHnsEnabled} says.
-     */
+    /** Restore data-plane account settings from persisted ARM accounts. */
     void restoreHierarchicalNamespaces(@Observes StartupEvent event) {
         for (Stored<Map<String, Object>> stored : accounts.all()) {
             Map<String, Object> properties = ArmJson.cast(stored.value().get("properties"));
             blobHandler.setHierarchicalNamespaceEnabled(stored.id().name(),
                 Boolean.TRUE.equals(properties.get("isHnsEnabled")));
+            syncAccessTier(stored.id().name(), properties);
         }
     }
 
@@ -438,13 +436,16 @@ public class StorageAccountArmService
                         : config.services().blob().hierarchicalNamespaceAccounts().contains(account);
         String accountId = existing.map(StorageAccountArmService::idOf).orElse(id.id());
         Map<String, Object> written = accounts.createOrUpdate(id,
-                ignored -> document(accountId, account, body, hnsEnabled, defaults.defaultLocation(req.scope()))).stored().value();
+                ignored -> document(accountId, account, body, existingProperties, hnsEnabled,
+                        defaults.defaultLocation(req.scope()))).stored().value();
         blobHandler.setHierarchicalNamespaceEnabled(account, hnsEnabled);
+        syncAccessTier(account, ArmJson.cast(written.get("properties")));
         LOG.infov("ARM: created storage account {0}", account);
         return Response.ok(written).build();
     }
 
     private static Map<String, Object> document(String id, String account, Map<String, Object> body,
+                                                Map<String, Object> existingProperties,
                                                 boolean hnsEnabled, String defaultLocation) {
         String location = ArmJson.string(body, "location", defaultLocation);
         // Return domain-based storage endpoints so the azurerm provider can parse the account name. No port, so
@@ -467,7 +468,7 @@ public class StorageAccountArmService
         properties.put("supportsHttpsTrafficOnly", false);
         // azurerm rejects an access tier on the kinds that do not have one.
         if (Set.of("StorageV2", "BlobStorage", "FileStorage").contains(kind)) {
-            properties.put("accessTier", "Hot");
+            properties.put("accessTier", existingProperties.getOrDefault("accessTier", "Hot"));
         }
         putWritable(properties, requested, READ_ONLY_PROPERTIES);
         properties.put("encryption", encryption(ArmJson.cast(requested.get("encryption"))));
@@ -515,9 +516,15 @@ public class StorageAccountArmService
      * updatable property the body names replaces the stored one, {@code encryption} filled in as a PUT fills it.
      * {@code identity}, {@code zones} and {@code placement} are not modelled, as on the PUT.
      */
-    private Response update(AzureRequest req, ArmResourceId id) {
+    private synchronized Response update(AzureRequest req, ArmResourceId id) {
         Map<String, Object> body = ArmJson.parseBodyLenient(req);
-        return accounts.update(id, resource -> patched(resource, body))
+        Object tier = ArmJson.cast(body.get("properties")).get("accessTier");
+        if (!validAccessTier(tier)) {
+            return ArmErrors.error(400, "InvalidValuesForRequestParameters", "Invalid storage account access tier.");
+        }
+        Optional<Stored<Map<String, Object>>> updated = accounts.update(id, resource -> patched(resource, body));
+        updated.ifPresent(stored -> syncAccessTier(stored.id().name(), ArmJson.cast(stored.value().get("properties"))));
+        return updated
                 .map(stored -> Response.ok(stored.value()).build())
                 .orElseGet(() -> armNotFound("storageAccounts/" + id.name()));
     }
@@ -542,6 +549,19 @@ public class StorageAccountArmService
         });
         updated.put("properties", properties);
         return updated;
+    }
+
+    private static boolean validAccessTier(Object tier) {
+        return tier == null || tier instanceof String value && Set.of("Hot", "Cool", "Cold", "Premium", "Smart").contains(value);
+    }
+
+    private void syncAccessTier(String account, Map<String, Object> properties) {
+        Object tier = properties.get("accessTier");
+        if (tier instanceof String value) {
+            blobHandler.setAccountAccessTier(account, value);
+        } else {
+            blobHandler.removeAccountAccessTier(account);
+        }
     }
 
     /** {@code resource} with {@code tags} in place of its own, right after its location. */
@@ -570,8 +590,11 @@ public class StorageAccountArmService
 
     /** {@code StorageAccounts_Delete}: 200 whether or not there was an account. Its policy and service go with it. */
     private synchronized Response delete(ArmResourceId id) {
-        accounts.delete(id).ifPresent(stored ->
-                blobHandler.removeHierarchicalNamespaceOverride(String.valueOf(stored.value().get("name"))));
+        accounts.delete(id).ifPresent(stored -> {
+            String account = String.valueOf(stored.value().get("name"));
+            blobHandler.removeHierarchicalNamespaceOverride(account);
+            blobHandler.removeAccountAccessTier(account);
+        });
         managementPolicies.delete(childId(id.id() + "/managementPolicies/default"));
         blobServices.delete(childId(id.id() + "/blobServices/default"));
         return Response.ok().build();

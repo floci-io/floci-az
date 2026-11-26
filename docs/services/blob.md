@@ -17,6 +17,12 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 - **Blobs**: Put (upload), Get (download), Delete, List within a container; overwrite semantics
 - **Block blobs**: staged block upload (`?comp=block`) followed by commit (`?comp=blocklist`) for
   large payloads, in addition to single-request `Put Blob`
+- **Block blob access tiers**: Put Blob, Put Blob From URL, Copy Blob and Put Block List accept
+  `Hot`, `Cool` and `Cold` via `x-ms-access-tier`; Set Blob Tier (`?comp=tier`) updates the tier
+  without changing the content, ETag or last-modified time. Explicit tiers appear in List Blobs and
+  Get Blob properties. When no tier was set, listings mark it as inferred without an `AccessTier`
+  element, and Get Blob properties reports the effective account tier as inferred. The default is
+  `Hot`; an ARM storage account's `properties.accessTier` overrides it
 - **Data Lake Storage Gen2 endpoint alias**: the `{account}.dfs.core.windows.net` host maps to the
   Blob backend so ADLS SDK path clients can create, read, write, and delete paths through the same
   local data store
@@ -192,6 +198,9 @@ floci-az:
 
 ## Intentional deviations
 
+- **Access tiers**: Archive and Smart tiers, archive rehydration, premium page blob tiers and
+  setting a tier on a blob version are not implemented. An upload requesting Archive now returns
+  `501` instead of accepting and ignoring the tier. Tier behavior is not gated by `x-ms-version`.
 - **Shared Key signatures are accepted but not cryptographically verified**: the emulator is a
   local dev target; any well-formed `Authorization` header (or the Azurite key) is honored.
 - **ADLS large-operation behavior is simplified** - directory rename and recursive delete complete
@@ -228,8 +237,8 @@ floci-az:
 - **Blob snapshots are modeled.** They capture immutable blob state and support creation, reads,
   and deletion. Listing snapshots with `include=snapshots` on List Blobs is not modeled. Deleting a
   base blob with snapshots requires `x-ms-delete-snapshots: include` or `only`; mutations other than
-  deletion directed at a snapshot return `SnapshotsPresent`. Blob versioning and tiering are not
-  modeled.
+  deletion, tag updates and tier changes directed at a snapshot return `SnapshotsPresent`. Blob
+  versioning is not modeled.
 - **Blob leases and ADLS Path leases** share the emulator's in-memory lease state and support
   acquire/renew/change/release/break. Lease state is intentionally process-local and is lost when
   the emulator restarts.

@@ -67,6 +67,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private static final String SNAPSHOT_PREFIX = "__snapshot__:";
     private static final String USER_METADATA_PREFIX = "UserMeta:";
     private static final String CREATION_TIME_KEY = "CreationTime";
+    private static final String ACCESS_TIER_KEY = "AccessTier";
+    private static final String ACCESS_TIER_CHANGE_TIME_KEY = "AccessTierChangeTime";
     private static final String CUSTOMER_PROVIDED_KEY_SHA256 = "CustomerProvidedKeySha256";
     private static final String DATALAKE_APPEND_PREFIX = "__abfs_append__:";
     private static final String DATALAKE_OWNER = DataLakePathOperations.DEFAULT_OWNER;
@@ -103,6 +105,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private final EmulatorConfig config;
     private final Map<String, Boolean> hierarchicalNamespaceOverrides = new ConcurrentHashMap<>();
+    private final Map<String, String> accountAccessTiers = new ConcurrentHashMap<>();
 
     private final UserDelegationKeyService userDelegationKeyService;
     private final StorageSasAuthorization sasAuthorization;
@@ -331,6 +334,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     } else {
                         response = notImplemented();
                     }
+                } else if ("PUT".equalsIgnoreCase(method) && "tier".equals(comp)) {
+                    response = setBlobTier(request, containerName, blobName);
                 } else if (request.queryParams().containsKey("snapshot") && !"GET".equalsIgnoreCase(method)
                         && !"HEAD".equalsIgnoreCase(method) && !"DELETE".equalsIgnoreCase(method)) {
                     response = snapshotIsImmutable();
@@ -663,6 +668,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 Map<String, String> metadata = new HashMap<>();
                 String blobType = request.headers().getHeaderString("x-ms-blob-type");
                 metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
+                Response tierFailure = applyAccessTier(request, metadata, existing, false);
+                if (tierFailure != null) {
+                    return tierFailure;
+                }
                 addBlobHttpProperties(request, metadata);
                 String dataLakeResourceType = request.queryParams().get("resource");
                 if ("file".equals(dataLakeResourceType) || "directory".equals(dataLakeResourceType)) {
@@ -785,6 +794,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
             Map<String, String> metadata = new HashMap<>();
             metadata.put("BlobType", "BlockBlob");
+            Response tierFailure = applyAccessTier(request, metadata, existing, false);
+            if (tierFailure != null) {
+                return tierFailure;
+            }
             boolean copyProperties = !"false".equalsIgnoreCase(
                     request.headers().getHeaderString("x-ms-copy-source-blob-properties"));
             Map<String, String> sourceProperties = copyProperties ? source.metadata() : Map.of();
@@ -926,6 +939,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     destMeta.put(key, value);
                 }
             });
+            destMeta.remove(ACCESS_TIER_KEY);
+            destMeta.remove(ACCESS_TIER_CHANGE_TIME_KEY);
+            Response tierFailure = applyAccessTier(request, destMeta, existing, false);
+            if (tierFailure != null) {
+                return tierFailure;
+            }
             Map<String, String> requestMeta = readUserMetadata(request);
             if (requestMeta.isEmpty()) {
                 // No user metadata on request — copy from source
@@ -1295,6 +1314,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 // properties. Hadoop supplies x-ms-permissions/x-ms-umask on create; when it does
                 // not, preserve the existing POSIX mode/ACL rather than resetting them to defaults.
                 Map<String, String> currentMetadata = existing.get().metadata();
+                if (!directory && !"AppendBlob".equalsIgnoreCase(request.queryParams().get("blobType"))
+                        && "BlockBlob".equalsIgnoreCase(currentMetadata.getOrDefault("BlobType", "BlockBlob"))) {
+                    copyIfPresent(currentMetadata, metadata, ACCESS_TIER_KEY);
+                    copyIfPresent(currentMetadata, metadata, ACCESS_TIER_CHANGE_TIME_KEY);
+                }
                 copyIfPresent(currentMetadata, metadata, DATALAKE_PROPERTIES_KEY);
                 copyIfPresent(currentMetadata, metadata, DATALAKE_OWNER_KEY);
                 copyIfPresent(currentMetadata, metadata, DATALAKE_GROUP_KEY);
@@ -2600,6 +2624,19 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (tagCount > 0) {
             rb.header("x-ms-tag-count", tagCount);
         }
+        if ("BlockBlob".equalsIgnoreCase(so.metadata().getOrDefault("BlobType", "BlockBlob"))) {
+            String tier = so.metadata().get(ACCESS_TIER_KEY);
+            if (tier == null) {
+                rb.header("x-ms-access-tier", accountAccessTier(request.accountName()));
+                rb.header("x-ms-access-tier-inferred", "true");
+            } else {
+                rb.header("x-ms-access-tier", tier);
+                String changed = so.metadata().get(ACCESS_TIER_CHANGE_TIME_KEY);
+                if (changed != null) {
+                    rb.header("x-ms-access-tier-change-time", RFC1123_DATE_TIME.format(Instant.parse(changed)));
+                }
+            }
+        }
         for (String header : BLOB_HTTP_PROPERTY_HEADERS.values()) {
             String value = so.metadata().get(header);
             if (value != null && !(isRangeRequest && "Content-MD5".equals(header))) {
@@ -2982,6 +3019,96 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 : snapshotKey(request.accountName(), containerName, blobName, snapshot);
     }
 
+    private Response setBlobTier(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeWrite(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (request.headers().getHeaderString(BlobTagQuery.IF_TAGS_HEADER) != null) {
+            Response tagsAuthFailure = authorizeTags(request, containerName, blobName);
+            if (tagsAuthFailure != null) {
+                return tagsAuthFailure;
+            }
+        }
+        if (request.queryParams().containsKey("versionid")) {
+            return notImplemented();
+        }
+        return leaseService.exclusively(() -> {
+            String key = blobKey(request, containerName, blobName);
+            Optional<StoredObject> object = store.get(key);
+            if (object.isEmpty()) {
+                return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            Response conditionFailure = validateIfTags(request, object);
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+            if (!request.queryParams().containsKey("snapshot")) {
+                Response leaseFailure = leaseService.validateWrite(request, key);
+                if (leaseFailure != null) {
+                    return leaseFailure;
+                }
+            }
+            StoredObject blob = object.get();
+            Map<String, String> metadata = new HashMap<>(blob.metadata());
+            Response tierFailure = applyAccessTier(request, metadata, object, true);
+            if (tierFailure != null) {
+                return tierFailure;
+            }
+            store.put(key, new StoredObject(blob.key(), blob.data(), metadata, blob.lastModified(), blob.etag()));
+            return Response.ok().build();
+        });
+    }
+
+    private Response applyAccessTier(AzureRequest request, Map<String, String> metadata,
+                                     Optional<StoredObject> existing, boolean required) {
+        String tier = request.headers().getHeaderString("x-ms-access-tier");
+        if (tier == null) {
+            if (required) {
+                return new AzureErrorResponse("MissingRequiredHeader",
+                        "An HTTP header that's mandatory for this request is not specified.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            if ("BlockBlob".equalsIgnoreCase(metadata.getOrDefault("BlobType", "BlockBlob"))) {
+                existing.filter(blob -> "BlockBlob".equalsIgnoreCase(
+                        blob.metadata().getOrDefault("BlobType", "BlockBlob"))).ifPresent(blob -> {
+                    copyIfPresent(blob.metadata(), metadata, ACCESS_TIER_KEY);
+                    copyIfPresent(blob.metadata(), metadata, ACCESS_TIER_CHANGE_TIME_KEY);
+                });
+            }
+            return null;
+        }
+        String canonical = switch (tier.toLowerCase(Locale.ROOT)) {
+            case "hot" -> "Hot";
+            case "cool" -> "Cool";
+            case "cold" -> "Cold";
+            case "archive" -> "Archive";
+            case "smart" -> "Smart";
+            default -> null;
+        };
+        if (canonical == null) {
+            return invalidHeaderValue();
+        }
+        if (!"BlockBlob".equalsIgnoreCase(metadata.getOrDefault("BlobType", "BlockBlob"))) {
+            return new AzureErrorResponse("AccessTierNotSupportedForBlobType",
+                    "The access tier is not supported for this blob type.")
+                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+        if ("Archive".equals(canonical) || "Smart".equals(canonical)) {
+            return notImplemented();
+        }
+        String oldTier = existing.map(StoredObject::metadata).map(values -> values.get(ACCESS_TIER_KEY))
+                .orElse(null);
+        if (canonical.equals(oldTier)) {
+            existing.ifPresent(blob -> copyIfPresent(blob.metadata(), metadata, ACCESS_TIER_CHANGE_TIME_KEY));
+        } else {
+            metadata.put(ACCESS_TIER_CHANGE_TIME_KEY, Instant.now().toString());
+        }
+        metadata.put(ACCESS_TIER_KEY, canonical);
+        return null;
+    }
+
     private Response getBlobMetadata(AzureRequest request, String containerName, String blobName) {
         Response authFailure = authorizeRead(request, containerName, blobName);
         if (authFailure != null) {
@@ -3347,7 +3474,13 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     unquote(so.etag()),
                     (long) so.data().length,
                     usableContentType(so.metadata().get("Content-Type")),
-                    so.metadata().getOrDefault("BlobType", "BlockBlob")
+                    so.metadata().getOrDefault("BlobType", "BlockBlob"),
+                    so.metadata().get(ACCESS_TIER_KEY),
+                    "BlockBlob".equalsIgnoreCase(so.metadata().getOrDefault("BlobType", "BlockBlob"))
+                            && !so.metadata().containsKey(ACCESS_TIER_KEY) ? true : null,
+                    so.metadata().containsKey(ACCESS_TIER_CHANGE_TIME_KEY)
+                            ? RFC1123_DATE_TIME.format(Instant.parse(so.metadata().get(ACCESS_TIER_CHANGE_TIME_KEY)))
+                            : null
             ), includes(request.queryParams().get("include"), "metadata") ? userMetadata(so.metadata()) : null));
         });
         blobs.sort(Comparator.comparing(BlobModels.BlobItem::Name));
@@ -3410,6 +3543,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .elem("Content-Length", properties.ContentLength())
                 .elem("Content-Type", properties.ContentType())
                 .elem("BlobType", properties.BlobType())
+                .elem("AccessTier", properties.AccessTier())
+                .elem("AccessTierInferred", properties.AccessTierInferred() == null
+                        ? null : properties.AccessTierInferred().toString())
+                .elem("AccessTierChangeTime", properties.AccessTierChangeTime())
                 .end("Properties");
         if (blob.Metadata() != null && !blob.Metadata().isEmpty()) {
             xml.start("Metadata");
@@ -3882,6 +4019,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 Map<String, String> metadata = new HashMap<>();
                 String blobType = request.headers().getHeaderString("x-ms-blob-type");
                 metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
+                Response tierFailure = applyAccessTier(request, metadata, existing, false);
+                if (tierFailure != null) {
+                    return tierFailure;
+                }
                 addBlobHttpProperties(request, metadata);
                 metadata.put("Name", blobName);
                 metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
@@ -4218,6 +4359,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             store.clear();
             leaseService.clear();
             hierarchicalNamespaceOverrides.clear();
+            accountAccessTiers.clear();
         });
     }
 
@@ -4309,6 +4451,18 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     public void removeHierarchicalNamespaceOverride(String accountName) {
         hierarchicalNamespaceOverrides.remove(accountName);
+    }
+
+    public void setAccountAccessTier(String accountName, String tier) {
+        accountAccessTiers.put(accountName.toLowerCase(Locale.ROOT), tier);
+    }
+
+    public void removeAccountAccessTier(String accountName) {
+        accountAccessTiers.remove(accountName.toLowerCase(Locale.ROOT));
+    }
+
+    private String accountAccessTier(String accountName) {
+        return accountAccessTiers.getOrDefault(accountName.toLowerCase(Locale.ROOT), "Hot");
     }
 
     private boolean isHierarchicalNamespaceEnabled(String accountName) {
