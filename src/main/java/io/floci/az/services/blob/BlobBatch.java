@@ -27,11 +27,11 @@ import java.util.regex.Pattern;
  * {@code 202 Accepted} whose body answers every sub-request in turn: each part echoes its
  * {@code Content-ID} and carries the sub-response's own status line, headers and error body. Azure clients
  * read the per-part status and {@code x-ms-error-code}, not the batch's own 202, so a batch of deletes
- * reports each blob's outcome — including a missing blob's {@code 404 BlobNotFound} — on its own part.
+ * reports each blob's outcome, including a missing blob's {@code 404 BlobNotFound}, on its own part.
  *
  * <p>Only Blob Delete is implemented. {@code Set Blob Tier} and {@code Set Blob Expiry} are the other
  * sub-request operations Azure defines, and neither operation exists in this emulator, so a batch of them
- * is answered {@code 501 NotImplemented} rather than with a per-part success that changes nothing.
+ * carries a single {@code 501 NotImplemented} error part rather than per-part successes that change nothing.
  */
 final class BlobBatch {
 
@@ -47,7 +47,7 @@ final class BlobBatch {
     }
 
     /**
-     * One sub-request: the Blob Delete it asks for, plus the request headers and query of the operation —
+     * One sub-request: the Blob Delete it asks for, plus the request headers and query of the operation,
      * conditions ({@code If-Match}, {@code x-ms-if-tags}), {@code x-ms-delete-snapshots} and the blob's SAS
      * all travel there, and the cancel semantics of the delete are the standalone operation's.
      */
@@ -62,8 +62,8 @@ final class BlobBatch {
         }
     }
 
-    /** One sub-response: the {@code Content-ID} it answers and the response the handler produced for it. */
-    record Part(int contentId, Response response) {
+    /** One sub-response: its optional {@code Content-ID} and the response the handler produced for it. */
+    record Part(Integer contentId, Response response) {
     }
 
     /**
@@ -80,11 +80,12 @@ final class BlobBatch {
      */
     static List<SubRequest> parse(String contentType, byte[] body, String account, String container,
                                   boolean pathAddressed) {
-        String delimiter = LINE_ENDING + "--" + boundary(contentType);
+        String delimiter = LINE_ENDING + "--" + Pattern.quote(boundary(contentType))
+                + "(?=(?:--)?[ \\t]*(?:\\r\\n|$))";
         // Delimiters are whole lines, as RFC 2046 defines them. Matching the boundary text anywhere would cut
         // a target short at a blob name that happens to contain it, and delete the blob its prefix names.
-        String[] parts = (LINE_ENDING + new String(body, StandardCharsets.UTF_8))
-                .split(Pattern.quote(delimiter), -1);
+        String[] parts = Pattern.compile(delimiter)
+                .split(LINE_ENDING + new String(body, StandardCharsets.UTF_8), -1);
 
         List<SubRequest> subRequests = new ArrayList<>();
         for (int i = 1; i < parts.length && !parts[i].startsWith("--"); i++) {
@@ -111,7 +112,9 @@ final class BlobBatch {
             Response response = part.response();
             body.append("--").append(boundary).append(LINE_ENDING);
             body.append("Content-Type: application/http").append(LINE_ENDING);
-            body.append("Content-ID: ").append(part.contentId()).append(LINE_ENDING);
+            if (part.contentId() != null) {
+                body.append("Content-ID: ").append(part.contentId()).append(LINE_ENDING);
+            }
             body.append(LINE_ENDING);
             body.append("HTTP/1.1 ").append(response.getStatus()).append(' ')
                     .append(reasonPhrase(response.getStatus())).append(LINE_ENDING);
@@ -282,9 +285,8 @@ final class BlobBatch {
     }
 
     /**
-     * A rejected batch, answered with the Storage error envelope. A batch is rejected whole — unlike a
-     * sub-request, whose failure is one part of an otherwise successful response — so the caller sees a
-     * plain error response instead of a multipart body.
+     * A rejected batch, answered with the Storage error envelope. A batch is rejected whole, unlike a
+     * sub-request whose failure is one part of an otherwise successful response.
      */
     static final class BlobBatchException extends RuntimeException {
 
@@ -297,6 +299,10 @@ final class BlobBatch {
             this.status = status;
             this.code = code;
             this.details = new LinkedHashMap<>(details);
+        }
+
+        boolean requiresDirectResponse() {
+            return "MissingRequiredHeader".equals(code);
         }
 
         Response toResponse() {

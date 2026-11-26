@@ -2854,8 +2854,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
      * caller deleting a prefix sees which objects went and which were already gone.
      *
      * <p>Only Blob Delete is a sub-request operation: Set Blob Tier and Set Blob Expiry are not implemented
-     * anywhere in this emulator, so a batch of them is answered {@code 501 NotImplemented} rather than with
-     * per-object successes that change nothing.
+     * anywhere in this emulator, so a batch of them carries a single {@code 501 NotImplemented} error part
+     * rather than per-object successes that change nothing.
      */
     private Response submitBatch(AzureRequest request, String containerName) {
         List<BlobBatch.SubRequest> subRequests;
@@ -2867,7 +2867,17 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return new AzureErrorResponse("InvalidInput", "One of the request inputs is not valid.")
                     .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
         } catch (BlobBatch.BlobBatchException e) {
-            return e.toResponse();
+            if (e.requiresDirectResponse()) {
+                return e.toResponse();
+            }
+            Response.ResponseBuilder errorPart = Response.fromResponse(e.toResponse())
+                    .header("x-ms-request-id", UUID.randomUUID().toString())
+                    .header("Date", RFC1123_DATE_TIME.format(Instant.now()));
+            String version = request.headers().getHeaderString("x-ms-version");
+            if (version != null) {
+                errorPart.header("x-ms-version", version);
+            }
+            return BlobBatch.accepted(List.of(new BlobBatch.Part(null, errorPart.build())));
         }
 
         List<BlobBatch.Part> parts = new ArrayList<>(subRequests.size());

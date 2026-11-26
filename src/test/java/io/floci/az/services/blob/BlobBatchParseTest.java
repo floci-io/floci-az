@@ -26,7 +26,10 @@ class BlobBatchParseTest {
         byte[] body = body(part("Content-ID: 1", "DELETE /" + ACCOUNT + "/" + CONTAINER + "/blob HTTP/1.1"));
 
         for (String contentType : new String[] {null, "", "   "}) {
-            Response response = rejected(() -> BlobBatch.parse(contentType, body, ACCOUNT, CONTAINER, true));
+            BlobBatch.BlobBatchException exception = assertThrows(BlobBatch.BlobBatchException.class,
+                    () -> BlobBatch.parse(contentType, body, ACCOUNT, CONTAINER, true));
+            assertTrue(exception.requiresDirectResponse());
+            Response response = exception.toResponse();
             assertEquals(400, response.getStatus());
             assertEquals("MissingRequiredHeader", response.getHeaderString("x-ms-error-code"));
             assertTrue(((String) response.getEntity()).contains("<HeaderName>Content-Type</HeaderName>"),
@@ -105,6 +108,23 @@ class BlobBatchParseTest {
         assertEquals(CONTAINER, subRequests.getFirst().container());
         // The whole name, not its first segment: the blob is "dir/file.txt", never "dir".
         assertEquals("dir/file.txt", subRequests.getFirst().blob());
+    }
+
+    @Test
+    void aBoundaryPrefixOnItsOwnLineIsNotTreatedAsADelimiter() {
+        String first = part("Content-ID: 1",
+                "DELETE /" + ACCOUNT + "/" + CONTAINER + "/first HTTP/1.1");
+        String boundaryPrefix = "--batch_1-suffix\r\n";
+        String second = part("Content-ID: 2",
+                "DELETE /" + ACCOUNT + "/" + CONTAINER + "/second HTTP/1.1");
+        byte[] body = (first + boundaryPrefix + second + "--batch_1--\r\n")
+                .getBytes(StandardCharsets.UTF_8);
+
+        List<BlobBatch.SubRequest> subRequests = BlobBatch.parse(CONTENT_TYPE, body, ACCOUNT, CONTAINER, true);
+
+        assertEquals(2, subRequests.size());
+        assertEquals("first", subRequests.getFirst().blob());
+        assertEquals("second", subRequests.getLast().blob());
     }
 
     private static Response rejected(Runnable parse) {

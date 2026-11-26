@@ -22,17 +22,18 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.startsWith;
 
 /**
  * Blob Batch: {@code POST /{container}?restype=container&comp=batch} and its service-scoped form
  * {@code POST /?restype=service&comp=batch}.
  *
- * <p>The batch itself always answers {@code 202 Accepted} with a {@code multipart/mixed} body: what each
- * object's outcome was lives on that object's own part, so a caller deleting a prefix learns which objects
- * went and which were already gone. These tests pin both halves — the per-part statuses and the batch-level
- * rejections — and check the store afterwards, since a per-part {@code 202} that deleted nothing would read
- * the same from the response alone.
+ * <p>A valid batch answers {@code 202 Accepted} with a {@code multipart/mixed} body: what each object's
+ * outcome was lives on that object's own part, so a caller deleting a prefix learns which objects went and
+ * which were already gone. These tests pin both halves: the per-part statuses and the batch-level rejections,
+ * and check the store afterwards, since a per-part {@code 202} that deleted nothing would read the same from
+ * the response alone.
  */
 @QuarkusTest
 class BlobBatchTest {
@@ -144,9 +145,9 @@ class BlobBatchTest {
         uploadBlob("batch-other", "a.txt");
 
         String boundary = "batch_scope";
-        submitInContainer(CONTAINER, Map.of(), boundary, batch(boundary,
-                deletePart(boundary, 1, "batch-other", "a.txt")))
-                .then().statusCode(400).header("x-ms-error-code", "InvalidInput");
+        Response response = submitInContainer(CONTAINER, Map.of(), boundary, batch(boundary,
+                deletePart(boundary, 1, "batch-other", "a.txt")));
+        assertBatchErrorPart(response, 400, "InvalidInput");
 
         // A batch is one container's work: the rejected request changed nothing.
         given().when().get("/{account}/{container}/{blob}", ACCOUNT, "batch-other", "a.txt")
@@ -185,10 +186,10 @@ class BlobBatchTest {
         uploadBlob(CONTAINER, "a.txt");
 
         String boundary = "batch_tier";
-        submitInContainer(CONTAINER, Map.of(), boundary, batch(boundary,
+        Response response = submitInContainer(CONTAINER, Map.of(), boundary, batch(boundary,
                 part(boundary, 1, "PUT", "/" + ACCOUNT + "/" + CONTAINER + "/a.txt?comp=tier",
-                        "x-ms-access-tier: Archive")))
-                .then().statusCode(501).header("x-ms-error-code", "NotImplemented");
+                        "x-ms-access-tier: Archive")));
+        assertBatchErrorPart(response, 501, "NotImplemented");
 
         // Set Blob Tier is not implemented here, so the batch must not report a success it did not make.
         given().when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "a.txt").then().statusCode(200);
@@ -203,8 +204,8 @@ class BlobBatchTest {
             body.append(deletePart(boundary, contentId, CONTAINER, "blob-" + contentId));
         }
 
-        submitInContainer(CONTAINER, Map.of(), boundary, body + "--" + boundary + "--\r\n")
-                .then().statusCode(400).header("x-ms-error-code", "ExceedsMaxBatchRequestCount");
+        Response response = submitInContainer(CONTAINER, Map.of(), boundary, body + "--" + boundary + "--\r\n");
+        assertBatchErrorPart(response, 400, "ExceedsMaxBatchRequestCount");
     }
 
     @ParameterizedTest(name = "a Content-Type of \"{0}\" is {1}")
@@ -217,11 +218,11 @@ class BlobBatchTest {
         createContainer(CONTAINER);
         String boundary = "batch_bad_content_type";
 
-        given()
+        Response response = given()
                 .header("Content-Type", contentType)
                 .body(bytes(batch(boundary, deletePart(boundary, 1, CONTAINER, "a.txt"))))
-                .when().post("/{account}/{container}?restype=container&comp=batch", ACCOUNT, CONTAINER)
-                .then().statusCode(400).header("x-ms-error-code", errorCode);
+                .when().post("/{account}/{container}?restype=container&comp=batch", ACCOUNT, CONTAINER);
+        assertBatchErrorPart(response, 400, errorCode);
     }
 
     @Test
@@ -229,9 +230,9 @@ class BlobBatchTest {
         createContainer(CONTAINER);
         String boundary = "batch_wrong_boundary";
 
-        submitInContainer(CONTAINER, Map.of(), boundary,
-                batch("some_other_boundary", deletePart("some_other_boundary", 1, CONTAINER, "a.txt")))
-                .then().statusCode(400).header("x-ms-error-code", "InvalidInput");
+        Response response = submitInContainer(CONTAINER, Map.of(), boundary,
+                batch("some_other_boundary", deletePart("some_other_boundary", 1, CONTAINER, "a.txt")));
+        assertBatchErrorPart(response, 400, "InvalidInput");
     }
 
     /**
@@ -348,9 +349,22 @@ class BlobBatchTest {
         assertThat(subResponses(response), hasSize(expectedParts));
     }
 
+    private static void assertBatchErrorPart(Response response, int status, String errorCode) {
+        response.then()
+                .statusCode(202)
+                .contentType(startsWith("multipart/mixed; boundary=batchresponse_"));
+        String body = response.asString();
+        assertThat(body, containsString("Content-Type: application/http\r\n\r\nHTTP/1.1 " + status));
+        assertThat(body, containsString("x-ms-error-code: " + errorCode));
+        assertThat(body, containsString("<Code>" + errorCode + "</Code>"));
+        assertThat(body, containsString("x-ms-request-id: "));
+        assertThat(body, containsString("Date: "));
+        assertThat(body, not(containsString("Content-ID:")));
+    }
+
     /**
      * The sub-responses of a batch response, in order: for each part, everything from its own status line
-     * to the next part — so the last one keeps the closing delimiter, which no assertion depends on.
+     * to the next part, so the last one keeps the closing delimiter, which no assertion depends on.
      */
     private static List<String> subResponses(Response response) {
         String raw = response.asString();
