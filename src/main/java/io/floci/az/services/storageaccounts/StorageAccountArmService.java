@@ -14,6 +14,7 @@ import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.StoreIndexSource;
+import io.floci.az.core.auth.StorageAccountKeys;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
@@ -39,7 +40,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import static io.floci.az.core.auth.StorageSasAuthorization.DEFAULT_STORAGE_ACCOUNT_KEY;
 
 /**
  * Microsoft.Storage's management plane: storage accounts, ARM shells over the Blob, Queue and Table data planes, which
@@ -89,6 +89,7 @@ public class StorageAccountArmService
     /** The account sub-paths this service serves; every other one is a 404. */
     private enum Child {
         LIST_KEYS("listKeys"),
+        REGENERATE_KEY("regenerateKey"),
         MANAGEMENT_POLICY("managementPolicies/default"),
         BLOB_SERVICE("blobServices/default"),
         BLOB_CONTAINER("blobServices/default/containers/[^/]+"),
@@ -114,12 +115,14 @@ public class StorageAccountArmService
     private final QueueServiceHandler queueHandler;
 
     private final CloudDefaults defaults;
+    private final StorageAccountKeys keys;
 
     @Inject
     public StorageAccountArmService(StorageFactory storageFactory, GlobalNameRegistry names, EmulatorConfig config,
                                     BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
-                                    CloudDefaults defaults) {
+                                    CloudDefaults defaults, StorageAccountKeys keys) {
         this.defaults = defaults;
+        this.keys = keys;
         // Typed, so the account's child documents can share the backend: accounts were only ever written under
         // canonical account ids, which the typed store still owns.
         this.accounts = ArmResourceStore.create(storageFactory, STORE, ACCOUNT_TYPE, documentType(),
@@ -236,6 +239,7 @@ public class StorageAccountArmService
         }
         return switch (child) {
             case LIST_KEYS -> listKeys(account);
+            case REGENERATE_KEY -> regenerateKey(req, accountId(sub, rg, account), account);
             case MANAGEMENT_POLICY -> handleManagementPolicy(req, path, method, accountId(sub, rg, account));
             case BLOB_CONTAINER -> handleBlobContainer(req, path, method);
             case QUEUE -> handleQueueResource(path, method);
@@ -540,17 +544,39 @@ public class StorageAccountArmService
                 blobHandler.removeHierarchicalNamespaceOverride(String.valueOf(stored.value().get("name"))));
         managementPolicies.delete(childId(id.id() + "/managementPolicies/default"));
         blobServices.delete(childId(id.id() + "/blobServices/default"));
+        keys.forget(id.name());
         return Response.ok().build();
     }
 
+    /** StorageAccounts_ListKeys: the two keys the data plane verifies this account's requests with. */
     private Response listKeys(String account) {
-        // The key the Storage data plane verifies this account's Shared Key SAS with, so a SAS
-        // built from either listed key is accepted.
-        String key = config.auth().storageAccountKeys().getOrDefault(account, DEFAULT_STORAGE_ACCOUNT_KEY);
-        return Response.ok(Map.of("keys", List.of(
-                Map.of("keyName", "key1", "value", key, "permissions", "Full"),
-                Map.of("keyName", "key2", "value", key, "permissions", "Full")
-        ))).build();
+        return keysResult(keys.keys(account));
+    }
+
+    /**
+     * StorageAccounts_RegenerateKey: a new value for the {@code keyName} the body names, the other key untouched,
+     * answered with both keys as {@code listKeys} answers them.
+     */
+    private Response regenerateKey(AzureRequest req, ArmResourceId accountId, String account) {
+        if (!"POST".equals(req.method())) {
+            return Response.status(405).build();
+        }
+        if (accounts.get(accountId).isEmpty()) {
+            return armNotFound("storageAccounts/" + account);
+        }
+        // A malformed body throws, which ArmHandler answers as 400 InvalidRequestContent.
+        Object keyName = ArmJson.parseBodyStrict(req).get("keyName");
+        return keys.regenerate(account, keyName instanceof String name ? name : "")
+                .map(StorageAccountArmService::keysResult)
+                .orElseGet(() -> invalidContent("keyName must be key1 or key2."));
+    }
+
+    /** A StorageAccountListKeysResult: each key with its value, its permissions and when it was created. */
+    private static Response keysResult(List<StorageAccountKeys.AccountKey> accountKeys) {
+        return Response.ok(Map.of("keys", accountKeys.stream()
+                .map(key -> Map.of("creationTime", key.creationTime().toString(), "keyName", key.keyName(),
+                        "value", key.value(), "permissions", "Full"))
+                .toList())).build();
     }
 
     // ── Blob Container (via ARM) ──────────────────────────────────────────────

@@ -300,6 +300,13 @@ class CompatModeGoldenTest {
             Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})?");
         private static final Pattern HTTP_DATE =
             Pattern.compile("[A-Z][a-z]{2}, \\d{2} [A-Z][a-z]{2} \\d{4} \\d{2}:\\d{2}:\\d{2} GMT");
+        /**
+         * A 512-bit storage account key, base64: {@code key2} is random per account. The development key, which
+         * every account's {@code key1} defaults to, is kept.
+         */
+        private static final Pattern ACCOUNT_KEY = Pattern.compile("^[A-Za-z0-9+/]{86}==$");
+        private static final String DEVELOPMENT_KEY =
+            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
         private static final Pattern JWT =
             Pattern.compile("^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$");
 
@@ -350,6 +357,9 @@ class CompatModeGoldenTest {
                 String value = node.asText();
                 if (JWT.matcher(value).matches() && value.startsWith("eyJ")) {
                     return token(value);
+                }
+                if (ACCOUNT_KEY.matcher(value).matches() && !DEVELOPMENT_KEY.equals(value)) {
+                    return new TextNode("<random-account-key>");
                 }
                 if (fieldName != null && VOLATILE_FIELDS.contains(fieldName.toLowerCase(Locale.ROOT))) {
                     return new TextNode("<" + fieldName.toLowerCase(Locale.ROOT) + ">");

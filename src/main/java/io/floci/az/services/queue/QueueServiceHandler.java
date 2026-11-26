@@ -11,6 +11,7 @@ import io.floci.az.core.SignedIdentifiers;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;
+import io.floci.az.core.auth.AuthenticationFailed;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -35,6 +36,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
@@ -115,7 +117,9 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
         LOGGER.infof("QueueService handling: %s %s", method, path);
 
         Response response;
-        if (path.isEmpty() || path.equals("/")) {
+        if (request.authContext() != null && !request.authContext().isValid()) {
+            response = AuthenticationFailed.xml(request.authContext().failureDetail());
+        } else if (path.isEmpty() || path.equals("/")) {
             if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
                 response = listQueues(request);
             } else if ("service".equals(query.get("restype")) && "properties".equals(query.get("comp"))) {
@@ -177,8 +181,12 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
             }
         }
 
+        // An AuthenticationFailed carries the request id its message names.
+        String requestId = Objects.requireNonNullElseGet(
+                response.getHeaderString("x-ms-request-id"), () -> UUID.randomUUID().toString());
         return Response.fromResponse(response)
-                .header("x-ms-request-id", UUID.randomUUID().toString())
+                .header("x-ms-request-id", null)
+                .header("x-ms-request-id", requestId)
                 .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
                 .header("Date", RFC1123_DATE_TIME.format(Instant.now()))
                 .build();

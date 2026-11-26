@@ -12,6 +12,7 @@ import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.SignedIdentifiers;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
+import io.floci.az.core.auth.AuthenticationFailed;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -100,6 +101,13 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
         Map<String, String> query = request.queryParams();
 
         LOGGER.infof("TableService handling: %s %s", method, path);
+
+        if (request.authContext() != null && !request.authContext().isValid()) {
+            return Response.fromResponse(AuthenticationFailed.odata())
+                    .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
+                    .header("DataServiceVersion", "3.0;")
+                    .build();
+        }
 
         // Feature 6: $batch routing
         if ("$batch".equals(path) && "POST".equalsIgnoreCase(method)) {
