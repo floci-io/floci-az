@@ -73,7 +73,9 @@ class CosmosScriptsTest {
         String rid = created.path("_rid");
 
         given().when().get(COLL + "/sprocs/hello")
-                .then().statusCode(200).body("id", is("hello")).body("_rid", is(rid));
+                .then().statusCode(200)
+                .header("x-ms-alt-content-path", is("dbs/" + DB + "/colls/items"))
+                .body("id", is("hello")).body("_rid", is(rid));
 
         given().when().get(COLL + "/sprocs")
                 .then().statusCode(200)
