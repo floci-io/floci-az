@@ -632,6 +632,27 @@ class DeploymentsHandlerTest {
             .body("error.message", containsString("can't access variables"));
     }
 
+    /** What Bicep 0.30 and later emit for {@code func prefix(env string) string => prefixByEnv[env]}. */
+    private static final String FUNCTION_READING_VARIABLES_DEPLOYMENT = """
+        {"properties": {"mode": "Incremental", "template": {
+          "languageVersion": "2.0",
+          "variables": {"prefixByEnv": {"dev": "contoso-dev"}},
+          "functions": [{"namespace": "__bicep", "members": {"prefix": {
+            "parameters": [{"type": "string", "name": "env"}],
+            "output": {"type": "string", "value": "[variables('prefixByEnv')[parameters('env')]]"}}}}],
+          "resources": {},
+          "outputs": {"name": {"type": "string", "value": "[__bicep.prefix('dev')]"}}}}}
+        """;
+
+    @Test
+    void aUserDefinedFunctionReadsTheTemplatesVariablesInALanguageVersion2Template() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("udf-vars", FUNCTION_READING_VARIABLES_DEPLOYMENT)),
+            () -> given().when().get(DEPLOYMENTS + "/udf-vars" + API).asString());
+
+        given().when().get(DEPLOYMENTS + "/udf-vars" + API).then().statusCode(200)
+            .body("properties.outputs.name.value", equalTo("contoso-dev"));
+    }
+
     private static final String TENANT_DEPLOYMENTS = "/providers/Microsoft.Resources/deployments";
 
     /** A tenant template that creates a resource group in a subscription through a nested deployment. */

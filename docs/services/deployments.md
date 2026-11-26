@@ -258,8 +258,9 @@ expression over its own parameters, checked against their declared types, and it
 output's type. The scope functions (`resourceGroup()`, `subscription()`, `tenant()`, `deployment()`,
 `environment()`) answer for the deployment. The restrictions Azure documents are each `400 InvalidTemplate`: a
 function reads only its own parameters, never the template's or `variables()`, calls no other user-defined
-function, uses neither `reference()` nor a `list*` function, and declares no parameter defaults. An outer-scope
-nested deployment calls its parent's functions.
+function, uses neither `reference()` nor a `list*` function, and declares no parameter defaults. In a
+`languageVersion` 2.0 template a function may also read the template's variables, which is what Bicep 0.30 and later
+emit for a `func` that uses a `var`. An outer-scope nested deployment calls its parent's functions.
 
 ## Symbolic names (`languageVersion` 2.0)
 

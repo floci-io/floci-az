@@ -132,7 +132,7 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
             objectOrEmpty(object.path("variables"), "variables"),
             resources.isObject() ? symbolicResources((ObjectNode) resources) : resources(resources),
             outputs(objectOrEmpty(object.path("outputs"), "outputs"), symbolic, types),
-            UserFunctions.parse(object.path("functions"), types), symbolic);
+            UserFunctions.parse(object.path("functions"), types, symbolic), symbolic);
     }
 
     /**
