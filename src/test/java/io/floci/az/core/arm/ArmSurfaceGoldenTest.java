@@ -29,6 +29,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.ApiManagement/service/policies                                       RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         Microsoft.ApiManagement/service/products                                       RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         Microsoft.ApiManagement/service/products/apis                                  RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
+        Microsoft.ApiManagement/service/products/policies                              RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         Microsoft.ApiManagement/service/subscriptions                                  RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         Microsoft.App/containerApps                                                    RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.App/containerApps/revisions                                          RESOURCE_GROUP  OPTIONAL  FILTER

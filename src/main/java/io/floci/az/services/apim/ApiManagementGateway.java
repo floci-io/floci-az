@@ -60,9 +60,9 @@ public class ApiManagementGateway {
         }
         String apiId = String.valueOf(match.api().get("name"));
 
-        Response subscriptionFailure = validateSubscriptionKey(request, scope, apiId);
-        if (subscriptionFailure != null) {
-            return subscriptionFailure;
+        SubscriptionCheck subscription = validateSubscriptionKey(request, scope, apiId);
+        if (subscription.failure() != null) {
+            return subscription.failure();
         }
 
         Optional<Map<String, Object>> operation = matchedOperationResource(scope,
@@ -70,7 +70,7 @@ public class ApiManagementGateway {
         if (operation.isEmpty() && hasOperations(scope, apiId)) {
             return notFound("No API operation matched: " + gatewayPath);
         }
-        PolicyContext policy = applyPolicies(scope, apiId,
+        PolicyContext policy = applyPolicies(scope, subscription.productId(), apiId,
                 operation.map(o -> String.valueOf(o.get("name"))).orElse(null),
                 match.suffix(), request.queryParams());
         if (policy.returnStatusCode() != null) {
@@ -113,44 +113,66 @@ public class ApiManagementGateway {
                 .anyMatch(o -> ApiManagementService.same(apiId, o.get("_api")));
     }
 
-    private Response validateSubscriptionKey(AzureRequest request, String scope, String apiId) {
+    /**
+     * The outcome of the subscription-key check: a refusal, or the product the request came in through (the product
+     * of the subscription whose key it sent), whose policy then applies. An API in no product needs no key and comes
+     * in through no product.
+     */
+    private record SubscriptionCheck(Response failure, String productId) {
+
+        static final SubscriptionCheck OPEN = new SubscriptionCheck(null, null);
+    }
+
+    private SubscriptionCheck validateSubscriptionKey(AzureRequest request, String scope, String apiId) {
         List<String> requiredProducts = store.productApis().entrySet().stream()
                 .filter(e -> e.getValue().endsWith(("/apis/" + apiId).toLowerCase(Locale.ROOT)))
                 .filter(e -> e.getKey().startsWith(scope + "products/"))
                 .map(e -> productIdFromProductApiKey(e.getKey()))
                 .toList();
         if (requiredProducts.isEmpty()) {
-            return null;
+            return SubscriptionCheck.OPEN;
         }
 
         String key = firstNonBlank(firstHeader(request, "Ocp-Apim-Subscription-Key"),
                 request.queryParams() == null ? null : request.queryParams().get("subscription-key"));
         if (key == null) {
-            return unauthorized("Subscription key is required.");
+            return new SubscriptionCheck(unauthorized("Subscription key is required."), null);
         }
-        boolean valid = inService(store.subscriptions(), scope)
+        return inService(store.subscriptions(), scope)
                 .map(s -> cast(s.get("properties")))
                 .filter(p -> "active".equalsIgnoreCase(String.valueOf(p.getOrDefault("state", "active"))))
-                .filter(p -> subscriptionScopeMatches(requiredProducts, stringValue(p.get("scope"))))
-                .anyMatch(p -> key.equals(p.get("primaryKey")) || key.equals(p.get("secondaryKey")));
-        return valid ? null : unauthorized("Subscription key is invalid.");
+                .filter(p -> key.equals(p.get("primaryKey")) || key.equals(p.get("secondaryKey")))
+                .map(p -> subscribedProduct(requiredProducts, stringValue(p.get("scope"))))
+                .flatMap(Optional::stream)
+                .findFirst()
+                .map(productId -> new SubscriptionCheck(null, productId))
+                .orElseGet(() -> new SubscriptionCheck(unauthorized("Subscription key is invalid."), null));
     }
 
-    private static boolean subscriptionScopeMatches(List<String> productIds, String scope) {
+    /** The product among {@code productIds} that a subscription's {@code scope} names, if it names one. */
+    private static Optional<String> subscribedProduct(List<String> productIds, String scope) {
         if (scope == null || scope.isBlank()) {
-            return false;
+            return Optional.empty();
         }
-        return productIds.stream().anyMatch(productId -> scope.toLowerCase(Locale.ROOT).endsWith("/products/" + productId));
+        String lower = scope.toLowerCase(Locale.ROOT);
+        return productIds.stream().filter(productId -> lower.endsWith("/products/" + productId)).findFirst();
     }
 
-    private PolicyContext applyPolicies(String scope, String apiId, String operationId, String suffix,
-                                        Map<String, String> requestQueryParams) {
+    /**
+     * Applies the policies of each scope a request passes through, outermost first: the service, the product it came
+     * in through (none for an API in no product), the API and the operation.
+     */
+    private PolicyContext applyPolicies(String scope, String productId, String apiId, String operationId,
+                                        String suffix, Map<String, String> requestQueryParams) {
         Map<String, String> queryParams = new LinkedHashMap<>();
         if (requestQueryParams != null) {
             queryParams.putAll(requestQueryParams);
         }
         PolicyContext context = new PolicyContext(scope, null, suffix, new LinkedHashMap<>(), queryParams);
         applyPolicy(context, findPolicyByScopeService(scope));
+        if (productId != null) {
+            applyPolicy(context, findPolicyByScopeProduct(scope, productId));
+        }
         applyPolicy(context, findPolicyByScopeApi(scope, apiId));
         if (operationId != null) {
             applyPolicy(context, findPolicyByScopeOperation(scope, apiId, operationId));
@@ -321,6 +343,14 @@ public class ApiManagementGateway {
 
     private Optional<Map<String, Object>> findPolicyByScopeService(String scope) {
         String marker = scope + "policies/";
+        return store.policies().entrySet().stream()
+                .filter(e -> e.getKey().startsWith(marker))
+                .map(Map.Entry::getValue)
+                .findFirst();
+    }
+
+    private Optional<Map<String, Object>> findPolicyByScopeProduct(String scope, String productId) {
+        String marker = scope + ("products/" + productId + "/policies/").toLowerCase(Locale.ROOT);
         return store.policies().entrySet().stream()
                 .filter(e -> e.getKey().startsWith(marker))
                 .map(Map.Entry::getValue)

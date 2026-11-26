@@ -650,7 +650,8 @@ public class ApiManagementService implements GlobalNameSource {
         String key = policyKey(parentKey, policyId);
         return switch (method) {
             case "PUT" -> createOrUpdatePolicy(request, parentKey, parentId, type, policyId, key);
-            case "GET" -> getResource(key, policies, "policies/" + policyId);
+            case "GET" -> getPolicy(key, policyId, true);
+            case "HEAD" -> getPolicy(key, policyId, false);
             case "DELETE" -> {
                 policies.remove(key);
                 yield Response.ok().build();
@@ -672,8 +673,21 @@ public class ApiManagementService implements GlobalNameSource {
         resource.put("name", policyId);
         resource.put("type", type);
         resource.put("properties", properties);
-        policies.put(key, resource);
-        return Response.ok(stripInternal(resource)).build();
+        String etag = "\"" + UUID.randomUUID() + "\"";
+        resource.put("_etag", etag);
+        boolean created = policies.put(key, resource) == null;
+        return Response.status(created ? Response.Status.CREATED : Response.Status.OK)
+                .entity(stripInternal(resource)).header("ETag", etag).build();
+    }
+
+    /** {@code *Policy_Get} answers the policy with its ETag; {@code *Policy_GetEntityTag} (HEAD) the ETag alone. */
+    private Response getPolicy(String key, String policyId, boolean withBody) {
+        Map<String, Object> policy = policies.get(key);
+        if (policy == null) {
+            return notFound("policies/" + policyId);
+        }
+        Response.ResponseBuilder ok = withBody ? Response.ok(stripInternal(policy)) : Response.ok();
+        return ok.header("ETag", policy.get("_etag")).build();
     }
 
     private Response handleProducts(AzureRequest request, String method, String sub, String rg,
@@ -689,10 +703,20 @@ public class ApiManagementService implements GlobalNameSource {
                 case "DELETE" -> {
                     products.remove(productKey(sub, rg, serviceName, productId));
                     productApis.keySet().removeIf(k -> k.startsWith(productKey(sub, rg, serviceName, productId) + "/apis/"));
+                    policies.keySet().removeIf(k -> k.startsWith(productKey(sub, rg, serviceName, productId) + "/policies/"));
                     yield Response.ok().build();
                 }
                 default -> Response.status(405).build();
             };
+        }
+        if (parts.length >= 5 && "policies".equals(parts[4])) {
+            if (products.get(productKey(sub, rg, serviceName, productId)) == null) {
+                return notFound("products/" + productId);
+            }
+            return handlePolicy(request, method, productKey(sub, rg, serviceName, productId),
+                    "/subscriptions/" + sub + "/resourceGroups/" + rg
+                            + "/providers/Microsoft.ApiManagement/service/" + serviceName + "/products/" + productId,
+                    "Microsoft.ApiManagement/service/products/policies", parts);
         }
         if (parts.length >= 5 && "apis".equals(parts[4])) {
             if (parts.length == 5) {
@@ -963,6 +987,7 @@ public class ApiManagementService implements GlobalNameSource {
         copy.remove("_service");
         copy.remove("_api");
         copy.remove("_parent");
+        copy.remove("_etag");
         if ("Microsoft.ApiManagement/service/namedValues".equals(copy.get("type"))) {
             Map<String, Object> properties = new LinkedHashMap<>(cast(copy.get("properties")));
             if (Boolean.parseBoolean(String.valueOf(properties.getOrDefault("secret", false)))) {

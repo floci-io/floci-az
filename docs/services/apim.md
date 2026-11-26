@@ -18,7 +18,7 @@ in-process.
   `checkNameAvailability`.
 - **API** resources: create, get, list, delete.
 - **Operation** resources: create, get, list, delete.
-- **Policy** resources at service, API, and operation scope.
+- **Policy** resources at service, product, API, and operation scope. The gateway applies them in that order; a product policy applies to a request made with a subscription key of that product, and goes when the product is deleted.
 - **Product** resources and product-to-API links.
 - **Subscription** resources with gateway subscription-key enforcement.
 - **Named values**, including secret named values whose `properties.value` is not exposed in ARM responses.

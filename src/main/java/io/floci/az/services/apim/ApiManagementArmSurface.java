@@ -48,6 +48,7 @@ public class ApiManagementArmSurface implements ArmSurfaceProvider {
             ArmResourceType.child(NAMESPACE, "service/policies"),
             ArmResourceType.child(NAMESPACE, "service/products"),
             ArmResourceType.child(NAMESPACE, "service/products/apis"),
+            ArmResourceType.child(NAMESPACE, "service/products/policies"),
             ArmResourceType.child(NAMESPACE, "service/subscriptions"))));
 
     @Override
