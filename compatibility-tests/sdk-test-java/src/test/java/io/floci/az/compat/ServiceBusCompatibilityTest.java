@@ -78,6 +78,42 @@ class ServiceBusCompatibilityTest {
 
     @Test
     @Timeout(40)
+    @DisplayName("an updated queue's lock duration and max delivery count apply to the next delivery")
+    void updatedQueueSettingsApplyToTheNextDelivery() throws Exception {
+        String queue = uniqueName("update");
+        EmulatorConfig.ensureServiceBusQueue(queue,
+                "<LockDuration>PT60S</LockDuration><MaxDeliveryCount>5</MaxDeliveryCount>");
+        assertEquals(200, EmulatorConfig.updateServiceBusQueue(queue,
+                "<LockDuration>PT6S</LockDuration><MaxDeliveryCount>1</MaxDeliveryCount>"));
+
+        send(queue, "updated");
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage message = receiver.receiveMessages(1, RECV_TIMEOUT).stream()
+                    .findFirst().orElseThrow();
+            OffsetDateTime now = OffsetDateTime.now();
+            assertTrue(message.getLockedUntil().isBefore(now.plusSeconds(20)),
+                    "lock follows the updated PT6S, not PT60S: " + message.getLockedUntil());
+            assertTrue(message.getLockedUntil().isAfter(now.plusSeconds(3)),
+                    "lock is not shorter than the PT6S asked for: " + message.getLockedUntil());
+            // One delivery allowed: abandoning it dead-letters the message.
+            receiver.abandon(message);
+        }
+        try (ServiceBusReceiverClient deadLetters = EmulatorConfig.serviceBusClientBuilder()
+                .receiver()
+                .queueName(queue)
+                .subQueue(SubQueue.DEAD_LETTER_QUEUE)
+                .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .buildClient()) {
+            ServiceBusReceivedMessage deadLetter = deadLetters.receiveMessages(1, RECV_TIMEOUT).stream()
+                    .findFirst().orElse(null);
+            assertNotNull(deadLetter, "max delivery count 1 sends the abandoned message to the DLQ");
+            assertEquals("updated", deadLetter.getBody().toString());
+            deadLetters.complete(deadLetter);
+        }
+    }
+
+    @Test
+    @Timeout(40)
     @DisplayName("closing a receiver keeps its unsettled message locked until the lock expires")
     void closedReceiverKeepsMessageLockedUntilDeadline() throws Exception {
         String queue = uniqueName("close-lock");
