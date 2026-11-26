@@ -40,7 +40,7 @@ final class CopyLoops {
                         result.set(name(loop), loop(loop, scope));
                     }
                 } else {
-                    result.set(field.getKey(), evaluate(field.getValue(), scope));
+                    result.set(ExpressionEvaluator.evaluateKey(field.getKey(), scope), evaluate(field.getValue(), scope));
                 }
             }
             return result;

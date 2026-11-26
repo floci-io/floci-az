@@ -23,6 +23,7 @@ import static org.hamcrest.Matchers.emptyOrNullString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.not;
@@ -343,6 +344,32 @@ class DeploymentsHandlerTest {
                 equalTo("azuredatalakeanalytics.net"))
             .body("properties.outputs.suffixes.value.azureFrontDoorEndpointSuffix", equalTo("azurefd.net"))
             .body("properties.outputs.suffixes.value.size()", equalTo(7));
+    }
+
+    /** The issue's shapes: a user-assigned identity keyed by its resource id, and a tag key built from a parameter. */
+    private static final String EXPRESSION_KEY_DEPLOYMENT = """
+        {"properties": {"mode": "Incremental", "template": {
+          "parameters": {"suffix": {"type": "string", "defaultValue": "repro"}},
+          "resources": [
+            {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+             "name": "id-contoso", "location": "westeurope"},
+            {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+             "name": "keyexprsa0001", "location": "westeurope", "kind": "StorageV2", "sku": {"name": "Standard_LRS"},
+             "dependsOn": ["[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'id-contoso')]"],
+             "identity": {"type": "UserAssigned", "userAssignedIdentities": {
+               "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'id-contoso'))]": {}}},
+             "tags": {"[format('team-{0}', parameters('suffix'))]": "contoso"}}]}}}
+        """;
+
+    @Test
+    void propertyNamesThatAreExpressionsAreEvaluated() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("keyexpr", EXPRESSION_KEY_DEPLOYMENT)),
+            () -> given().when().get(DEPLOYMENTS + "/keyexpr" + API).asString());
+
+        given().when().get(RG + "/providers/Microsoft.Storage/storageAccounts/keyexprsa0001?api-version=2023-01-01")
+            .then().statusCode(200)
+            .body("tags.team-repro", equalTo("contoso"))
+            .body("tags", not(hasKey("[format('team-{0}', parameters('suffix'))]")));
     }
 
     private static final String SUB_DEPLOYMENTS = "/subscriptions/" + SUB + "/providers/Microsoft.Resources/deployments";

@@ -104,10 +104,22 @@ public final class DependencyGraph {
     }
 
     private static void collect(JsonNode value, List<Expression> references) {
-        if (value.isTextual() && ExpressionParser.isExpression(value.asText())) {
-            walk(ExpressionParser.parse(value.asText()), references);
-        } else if (value.isContainerNode()) {
+        if (value.isTextual()) {
+            collectText(value.asText(), references);
+        } else if (value.isObject()) {
+            // A property name can be an expression too, so a reference() in a key is a dependency as well.
+            value.properties().forEach(field -> {
+                collectText(field.getKey(), references);
+                collect(field.getValue(), references);
+            });
+        } else if (value.isArray()) {
             value.forEach(child -> collect(child, references));
+        }
+    }
+
+    private static void collectText(String text, List<Expression> references) {
+        if (ExpressionParser.isExpression(text)) {
+            walk(ExpressionParser.parse(text), references);
         }
     }
 

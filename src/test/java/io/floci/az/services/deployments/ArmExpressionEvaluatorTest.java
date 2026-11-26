@@ -304,6 +304,26 @@ class ArmExpressionEvaluatorTest {
     }
 
     @Test
+    void evaluateValueEvaluatesPropertyNamesThatAreExpressions() {
+        JsonNode template = json("{\"tags\":{\"[format('team-{0}', 'repro')]\":\"contoso\","
+            + "\"[[literal]\":\"kept\",\"plain\":\"text\"},"
+            + "\"userAssignedIdentities\":{\"[concat(parameters('prefix'), '-id')]\":{}}}");
+
+        JsonNode result = ExpressionEvaluator.evaluateValue(template, new FakeScope());
+
+        assertEquals(json("{\"tags\":{\"team-repro\":\"contoso\",\"[literal]\":\"kept\",\"plain\":\"text\"},"
+            + "\"userAssignedIdentities\":{\"app-id\":{}}}"), result);
+    }
+
+    @Test
+    void aPropertyNameThatIsNotAStringIsAnInvalidTemplate() {
+        TemplateException error = assertThrows(TemplateException.class,
+            () -> ExpressionEvaluator.evaluateValue(json("{\"[add(1, 2)]\":\"x\"}"), new FakeScope()));
+
+        assertEquals(TemplateException.INVALID_TEMPLATE, error.code(), error.getMessage());
+    }
+
+    @Test
     void uniqueStringAndGuidAreDeterministicAndShapedAsAzures() {
         JsonNode unique = eval("[uniqueString(resourceGroup().id)]");
         JsonNode guid = eval("[guid(resourceGroup().id, 'a')]");

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import io.floci.az.core.ArmRouter;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.ArmResourceId;
@@ -680,6 +681,8 @@ public class DeploymentEngine {
                         collectLoopReferences(loop, scope, dependsOn);
                     }
                 } else {
+                    // A property name can be an expression too, and a reference() in it orders the resource as well.
+                    collectReferences(TextNode.valueOf(field.getKey()), scope, dependsOn);
                     collectReferences(field.getValue(), scope, dependsOn);
                 }
             }
@@ -706,7 +709,7 @@ public class DeploymentEngine {
      */
     private static void collectOuterReferences(JsonNode body, TemplateScope scope, List<DependencyGraph.Node> nodes,
                                                Set<String> dependsOn) {
-        for (Expression argument : DependencyGraph.implicitReferences(body)) {
+        for (Expression argument : DependencyGraph.implicitReferences(withoutInnerTemplates(body))) {
             JsonNode evaluated;
             try {
                 evaluated = ExpressionEvaluator.evaluate(argument, scope);
@@ -720,6 +723,33 @@ public class DeploymentEngine {
                 dependsOn.add(evaluated.asText());
             }
         }
+    }
+
+    /**
+     * {@code value} without the templates of the {@code inner}-scope nested deployments inside it: those evaluate
+     * their own expressions, so their names are their own and never the parent's, as in {@code withParentReferences}.
+     */
+    private static JsonNode withoutInnerTemplates(JsonNode value) {
+        if (value instanceof ObjectNode object) {
+            boolean innerChild = isInnerScope(object) && object.path("properties").has("template");
+            ObjectNode copy = JsonNodeFactory.instance.objectNode();
+            object.properties().forEach(field -> {
+                if (innerChild && field.getKey().equals("properties")) {
+                    ObjectNode properties = ((ObjectNode) field.getValue()).deepCopy();
+                    properties.remove("template");
+                    copy.set(field.getKey(), withoutInnerTemplates(properties));
+                } else {
+                    copy.set(field.getKey(), withoutInnerTemplates(field.getValue()));
+                }
+            });
+            return copy;
+        }
+        if (value instanceof ArrayNode array) {
+            ArrayNode copy = JsonNodeFactory.instance.arrayNode();
+            array.forEach(item -> copy.add(withoutInnerTemplates(item)));
+            return copy;
+        }
+        return value;
     }
 
     /** True for a nested deployment whose template evaluates its own expressions ({@code scope: inner}). */
@@ -983,7 +1013,8 @@ public class DeploymentEngine {
         if (value instanceof ObjectNode object) {
             boolean innerChild = isInnerScope(object) && object.path("properties").has("template");
             ObjectNode copy = JsonNodeFactory.instance.objectNode();
-            object.properties().forEach(field -> copy.set(field.getKey(),
+            object.properties().forEach(field -> copy.set(
+                withParentReferences(JsonNodeFactory.instance.textNode(field.getKey()), plan).asText(),
                 innerChild && field.getKey().equals("properties")
                     ? withParentReferencesAroundTemplate((ObjectNode) field.getValue(), plan)
                     : withParentReferences(field.getValue(), plan)));
@@ -1055,14 +1086,14 @@ public class DeploymentEngine {
             .orElse(null);
     }
 
-    /** {@code value} with every string that would read as an expression escaped, so it stays a literal. */
+    /** {@code value} with every string and property name that would read as an expression escaped, so it stays a literal. */
     private static JsonNode escaped(JsonNode value) {
         if (value.isTextual() && value.asText().startsWith("[")) {
             return JsonNodeFactory.instance.textNode("[" + value.asText());
         }
         if (value instanceof ObjectNode object) {
             ObjectNode copy = JsonNodeFactory.instance.objectNode();
-            object.properties().forEach(field -> copy.set(field.getKey(), escaped(field.getValue())));
+            object.properties().forEach(field -> copy.set(escapedKey(field.getKey()), escaped(field.getValue())));
             return copy;
         }
         if (value instanceof ArrayNode array) {
@@ -1071,6 +1102,11 @@ public class DeploymentEngine {
             return copy;
         }
         return value;
+    }
+
+    /** A literal property name that would read as an expression, escaped: the child evaluates its keys too. */
+    private static String escapedKey(String key) {
+        return key.startsWith("[") ? "[" + key : key;
     }
 
     private static Operation resourceOperation(DependencyGraph.Node node, String apiVersion, String state,
