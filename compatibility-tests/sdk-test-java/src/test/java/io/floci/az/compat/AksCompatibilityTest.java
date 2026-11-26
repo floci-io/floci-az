@@ -139,8 +139,8 @@ class AksCompatibilityTest {
     @Test
     @Order(4)
     void listAdminAndUserCredentialsReturnKubeconfigs() {
-        assertKubeconfig(clusters.listClusterAdminCredentials(RESOURCE_GROUP, CLUSTER));
-        assertKubeconfig(clusters.listClusterUserCredentials(RESOURCE_GROUP, CLUSTER));
+        assertKubeconfig(clusters.listClusterAdminCredentials(RESOURCE_GROUP, CLUSTER), "clusterAdmin");
+        assertKubeconfig(clusters.listClusterUserCredentials(RESOURCE_GROUP, CLUSTER), "clusterUser");
 
         byte[] fluentKubeconfig = manager.kubernetesClusters()
                 .getByResourceGroup(RESOURCE_GROUP, CLUSTER)
@@ -188,9 +188,11 @@ class AksCompatibilityTest {
         assertEquals(404, missing.getResponse().getStatusCode());
     }
 
-    private static void assertKubeconfig(CredentialResultsInner credentials) {
+    /** azurerm keeps only the kubeconfig whose name it asked for: clusterAdmin, or clusterUser for kube_config. */
+    private static void assertKubeconfig(CredentialResultsInner credentials, String expectedName) {
         assertEquals(1, credentials.kubeconfigs().size());
         CredentialResult kubeconfig = credentials.kubeconfigs().getFirst();
+        assertEquals(expectedName, kubeconfig.name());
         String yaml = new String(kubeconfig.value(), StandardCharsets.UTF_8);
         assertTrue(yaml.contains("apiVersion: v1"), yaml);
         assertTrue(yaml.contains("kind: Config"), yaml);

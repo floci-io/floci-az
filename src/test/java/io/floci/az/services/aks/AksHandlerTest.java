@@ -306,6 +306,25 @@ class AksHandlerTest {
             .body("kubeconfigs[0].value", notNullValue());
     }
 
+    @Test
+    @DisplayName("listClusterUserCredential names its kubeconfig clusterUser, the name azurerm reads kube_config from")
+    void listUserCredentialIsNamedClusterUser() {
+        given()
+            .contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{}}")
+            .put(BASE + "/managedClusters/user-cred-cluster?api-version=2024-04-01")
+            .then().statusCode(201);
+
+        given()
+            .contentType("application/json")
+            .when().post(BASE + "/managedClusters/user-cred-cluster/listClusterUserCredential"
+                         + "?api-version=2024-04-01")
+            .then().statusCode(200)
+            .body("kubeconfigs", hasSize(1))
+            .body("kubeconfigs[0].name", equalTo("clusterUser"))
+            .body("kubeconfigs[0].value", notNullValue());
+    }
+
     // ── Agent pool list ────────────────────────────────────────────────────────
 
     @Test

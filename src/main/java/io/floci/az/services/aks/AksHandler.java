@@ -198,7 +198,8 @@ public class AksHandler implements AzureServiceHandler, Resettable, StoreIndexSo
             String clusterName = segment(tail, 1);
             String sub = extractSubscriptionId(fullPath);
             String rg = extractResourceGroup(fullPath);
-            return handleListCredentials(sub, rg, clusterName);
+            String credentialName = tail.endsWith("listClusterUserCredential") ? "clusterUser" : "clusterAdmin";
+            return handleListCredentials(sub, rg, clusterName, credentialName);
         }
 
         // ── Agent pool list ─────────────────────────────────────────────────
@@ -413,7 +414,12 @@ public class AksHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         return Response.ok(Map.of("value", items)).type("application/json").build();
     }
 
-    private Response handleListCredentials(String sub, String rg, String clusterName) {
+    /**
+     * Answers {@code listClusterAdminCredential} and {@code listClusterUserCredential}. The two differ in the
+     * kubeconfig's name, {@code clusterAdmin} or {@code clusterUser}, and azurerm keeps only the entry with the name it
+     * asked for, so a user credential named {@code clusterAdmin} leaves {@code kube_config} empty.
+     */
+    private Response handleListCredentials(String sub, String rg, String clusterName, String credentialName) {
         Optional<ManagedCluster> found = getCluster(clusterId(sub, rg, clusterName));
         if (found.isEmpty()) {
             return notFound("Managed cluster '" + clusterName + "' not found.");
@@ -428,7 +434,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("kubeconfigs", List.of(Map.of(
-                "name", "clusterAdmin",
+                "name", credentialName,
                 "value", kubeconfig)));
         return Response.ok(result).type("application/json").build();
     }

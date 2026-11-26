@@ -11,7 +11,7 @@ Compatible with the `azure-mgmt-containerservice` SDK, the `az aks` CLI, Terrafo
 
 - **Clusters**: CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags
 - **Agent pools**: List, Get, CreateOrUpdate, Delete
-- **Credentials**: `listClusterAdminCredential`, `listClusterUserCredential` return a base64-encoded kubeconfig
+- **Credentials**: `listClusterAdminCredential` and `listClusterUserCredential` return a base64-encoded kubeconfig, named `clusterAdmin` and `clusterUser` as in Azure (azurerm reads `kube_config` from the `clusterUser` entry)
 - **Real k3s mode**: a privileged k3s container starts per cluster; kubeconfig with real CA is extracted and returned
 - **Mocked mode**: clusters transition immediately to `Succeeded` with a synthetic kubeconfig; no Docker required
 - **instanceId-based naming**: each cluster gets an 8-char UUID prefix, preventing container name collisions across resource groups
