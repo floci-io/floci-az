@@ -402,4 +402,43 @@ class ArmStorageAccountTest {
         given().contentType("application/json").body("{\"tags\":{}}")
             .when().patch(base + "missingacct?api-version=2023-01-01").then().statusCode(404);
     }
+
+    @Test
+    void aPatchMergesTheSkuAndTheUpdatablePropertiesItNames() {
+        String account = "/subscriptions/sub-patch/resourceGroups/rg-patch/providers/Microsoft.Storage/"
+                + "storageAccounts/patchacct?api-version=2025-08-01";
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"kind\":\"StorageV2\",\"sku\":{\"name\":\"Standard_LRS\"},"
+                    + "\"tags\":{\"env\":\"test\"},"
+                    + "\"properties\":{\"minimumTlsVersion\":\"TLS1_0\",\"allowBlobPublicAccess\":true}}")
+            .when().put(account).then().statusCode(200);
+
+        given().contentType("application/json")
+            .body("{\"sku\":{\"name\":\"Premium_LRS\"},"
+                    + "\"properties\":{\"minimumTlsVersion\":\"TLS1_2\",\"isHnsEnabled\":true,"
+                    + "\"provisioningState\":\"Failed\","
+                    + "\"encryption\":{\"services\":{\"queue\":{\"keyType\":\"Service\"}}}}}")
+            .when().patch(account).then().statusCode(200)
+            .body("sku.name", equalTo("Premium_LRS"))
+            .body("sku.tier", equalTo("Premium"))
+            .body("tags.env", equalTo("test"))
+            .body("properties.minimumTlsVersion", equalTo("TLS1_2"))
+            .body("properties.allowBlobPublicAccess", equalTo(true))
+            .body("properties.isHnsEnabled", equalTo(false))
+            .body("properties.provisioningState", equalTo("Succeeded"))
+            .body("properties.encryption.services.queue.keyType", equalTo("Service"))
+            .body("properties.encryption.services.blob.enabled", equalTo(true))
+            .body("properties.primaryEndpoints.blob", equalTo("http://patchacct.blob.core.windows.net/"));
+
+        given().when().get(account).then().statusCode(200)
+            .body("kind", equalTo("StorageV2"))
+            .body("sku.name", equalTo("Premium_LRS"))
+            .body("properties.minimumTlsVersion", equalTo("TLS1_2"));
+
+        given().contentType("application/json").body("{\"tags\":{\"team\":\"data\"}}")
+            .when().patch(account).then().statusCode(200)
+            .body("tags.team", equalTo("data"))
+            .body("properties.minimumTlsVersion", equalTo("TLS1_2"))
+            .body("sku.name", equalTo("Premium_LRS"));
+    }
 }

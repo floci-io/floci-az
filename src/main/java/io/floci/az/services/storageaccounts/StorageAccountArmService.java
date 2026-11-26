@@ -77,6 +77,19 @@ public class StorageAccountArmService
             "isSkuConversionBlocked", "accountMigrationInProgress", "storageAccountSkuConversionStatus");
 
     /**
+     * The properties {@code StorageAccountPropertiesUpdateParameters} declares at 2025-08-01, the version azurerm pins:
+     * the ones a {@code StorageAccounts_Update} PATCH may change. Anything else in its {@code properties} is ignored.
+     */
+    private static final Set<String> UPDATABLE_PROPERTIES = Set.of(
+            "accessTier", "allowBlobPublicAccess", "allowCrossTenantReplication", "allowSharedKeyAccess",
+            "allowSharedKeyAccessForServices", "allowedCopyScope", "azureFilesIdentityBasedAuthentication",
+            "customDomain", "dataCollaborationPolicyProperties", "defaultToOAuthAuthentication", "dnsEndpointType",
+            "dualStackEndpointPreference", "enableExtendedGroups", "encryption", "geoPriorityReplicationStatus",
+            "immutableStorageWithVersioning", "isLocalUserEnabled", "isSftpEnabled", "keyPolicy",
+            "largeFileSharesState", "minimumTlsVersion", "networkAcls", "publicNetworkAccess", "routingPreference",
+            "sasPolicy", "supportsHttpsTrafficOnly");
+
+    /**
      * A resource group's account collection, query stripped. The namespace matches in any casing, as clients
      * disagree on it; the type and child segments in the casing {@link ArmPaths#resourceName} reads the account
      * name with.
@@ -497,17 +510,38 @@ public class StorageAccountArmService
     }
 
     /**
-     * {@code StorageAccounts_Update}: the {@code tags} the body names replace the account's, as azurerm updates them;
-     * nothing else in the body is applied yet.
+     * {@code StorageAccounts_Update}: what the body names is merged onto the account and the rest is kept, as the
+     * spec's examples answer it. {@code tags} replace the account's; {@code sku} and {@code kind} replace theirs; each
+     * updatable property the body names replaces the stored one, {@code encryption} filled in as a PUT fills it.
+     * {@code identity}, {@code zones} and {@code placement} are not modelled, as on the PUT.
      */
     private Response update(AzureRequest req, ArmResourceId id) {
-        Map<String, Object> tags = tags(ArmJson.parseBodyLenient(req).get("tags"));
-        Optional<Stored<Map<String, Object>>> updated = tags == null
-                ? accounts.get(id)
-                : accounts.update(id, resource -> withTags(resource, tags));
-        return updated
+        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        return accounts.update(id, resource -> patched(resource, body))
                 .map(stored -> Response.ok(stored.value()).build())
                 .orElseGet(() -> armNotFound("storageAccounts/" + id.name()));
+    }
+
+    private static Map<String, Object> patched(Map<String, Object> resource, Map<String, Object> body) {
+        Map<String, Object> tags = tags(body.get("tags"));
+        Map<String, Object> updated = tags == null ? new LinkedHashMap<>(resource) : withTags(resource, tags);
+        String skuName = ArmJson.string(ArmJson.cast(body.get("sku")), "name", null);
+        if (skuName != null) {
+            updated.put("sku", Map.of("name", skuName, "tier", skuName.startsWith("Premium") ? "Premium" : "Standard"));
+        }
+        String kind = ArmJson.string(body, "kind", null);
+        if (kind != null) {
+            updated.put("kind", kind);
+        }
+        Map<String, Object> requested = ArmJson.cast(body.get("properties"));
+        Map<String, Object> properties = new LinkedHashMap<>(ArmJson.cast(resource.get("properties")));
+        requested.forEach((name, value) -> {
+            if (value != null && UPDATABLE_PROPERTIES.contains(name)) {
+                properties.put(name, name.equals("encryption") ? encryption(ArmJson.cast(value)) : value);
+            }
+        });
+        updated.put("properties", properties);
+        return updated;
     }
 
     /** {@code resource} with {@code tags} in place of its own, right after its location. */
