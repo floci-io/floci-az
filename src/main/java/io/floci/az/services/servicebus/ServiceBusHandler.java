@@ -1028,9 +1028,10 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     /**
      * A create (a PUT without {@code If-Match}) of an entity that already exists answers 409, which every SDK maps to
      * MessagingEntityAlreadyExists from the status alone. Only the Atom requests go through here: the topology loader
-     * and the ARM plane call the create methods directly and keep their 200 for an existing entity.
+     * and the ARM plane call the create methods directly and keep their 200 for an existing entity. The check and the
+     * create run under the handler's lock, the one the create methods take, so two concurrent creates cannot both pass.
      */
-    private Response createUnlessExists(String key, String entityPath, Supplier<Response> create) {
+    private synchronized Response createUnlessExists(String key, String entityPath, Supplier<Response> create) {
         if (store.get(key).isPresent()) {
             return errorAtom(409, "The messaging entity '" + entityPath + "' already exists.");
         }
