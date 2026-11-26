@@ -18,11 +18,14 @@ import static org.mockito.Mockito.lenient;
 
 /**
  * The k3s API certificate must be valid for every host the cluster is addressed by. In published
- * endpoint mode that includes the Docker daemon's host, or kubectl fails TLS verification.
+ * endpoint mode that includes the Docker daemon's host, and in every mode the container's name, which
+ * is the kubeconfig server when floci-az runs in a container; without it kubectl fails TLS verification.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AksClusterManager: k3s API certificate names")
 class AksClusterManagerTlsSanTest {
+
+    private static final String NAME = "floci-az-aks-c1";
 
     @Mock
     ContainerBuilder containerBuilder;
@@ -44,10 +47,11 @@ class AksClusterManagerTlsSanTest {
     }
 
     @Test
-    @DisplayName("auto mode: localhost only, as before")
+    @DisplayName("auto mode: localhost and the container name")
     void autoMode() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(false);
-        assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost"), manager().k3sServerArgs());
+        assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost", "--tls-san=" + NAME),
+                manager().k3sServerArgs(NAME));
     }
 
     @Test
@@ -55,8 +59,9 @@ class AksClusterManagerTlsSanTest {
     void publishedMode() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
         lenient().when(lifecycleManager.daemonAddress()).thenReturn("docker");
-        assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost", "--tls-san=docker"),
-                manager().k3sServerArgs());
+        assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost", "--tls-san=" + NAME,
+                        "--tls-san=docker"),
+                manager().k3sServerArgs(NAME));
     }
 
     @Test
@@ -64,7 +69,8 @@ class AksClusterManagerTlsSanTest {
     void publishedLocalDaemon() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
         lenient().when(lifecycleManager.daemonAddress()).thenReturn("localhost");
-        assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost"), manager().k3sServerArgs());
+        assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost", "--tls-san=" + NAME),
+                manager().k3sServerArgs(NAME));
     }
 
     @Test
@@ -72,7 +78,8 @@ class AksClusterManagerTlsSanTest {
     void publishedIpv6() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
         lenient().when(lifecycleManager.daemonAddress()).thenReturn("::1");
-        assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost", "--tls-san=::1"),
-                manager().k3sServerArgs());
+        assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost", "--tls-san=" + NAME,
+                        "--tls-san=::1"),
+                manager().k3sServerArgs(NAME));
     }
 }
