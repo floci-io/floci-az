@@ -63,7 +63,10 @@ class ServiceBusTopicManagementCompatibilityTest {
         assertEquals(queueOutcome, topicOutcome, "a topic's management node must answer like a queue's");
     }
 
-    /** "scheduled", or the failure reason; a missing management node is a test failure on its own. */
+    /**
+     * "scheduled", or the reason the broker gave. A missing management node fails the test on its own, and so does a
+     * request the broker never answered: two timeouts would otherwise match and pass with neither node replying.
+     */
     private static String scheduleOutcome(ServiceBusSenderClient sender) {
         try {
             sender.scheduleMessage(new ServiceBusMessage("later"), OffsetDateTime.now().plusMinutes(5));
@@ -71,6 +74,10 @@ class ServiceBusTopicManagementCompatibilityTest {
         } catch (ServiceBusException e) {
             assertNotEquals(ServiceBusFailureReason.MESSAGING_ENTITY_NOT_FOUND, e.getReason(),
                     "the management node must exist: " + e.getMessage());
+            assertNotEquals(ServiceBusFailureReason.SERVICE_TIMEOUT, e.getReason(),
+                    "the management node must answer: " + e.getMessage());
+            assertNotEquals(ServiceBusFailureReason.SERVICE_COMMUNICATION_ERROR, e.getReason(),
+                    "the management node must answer: " + e.getMessage());
             assertFalse(String.valueOf(e.getMessage()).contains("does not exist"),
                     "the management node must exist: " + e.getMessage());
             return e.getReason().toString();
