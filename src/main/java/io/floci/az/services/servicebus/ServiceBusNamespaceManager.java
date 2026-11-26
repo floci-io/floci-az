@@ -610,6 +610,8 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
     /**
      * Provisions an ANYCAST ingress accepted by SDK sender links and diverts it exclusively to a
      * hidden MULTICAST address. Subscription diverts fan messages out from that hidden address.
+     * The topic also gets its {@code {topic}/$management} node, which a sender attaches for
+     * request-response operations (the Go SDK attaches it beside every sender).
      */
     public void jolokiaCreateTopic(
             String namespaceName,
@@ -628,15 +630,17 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
                     jsonArr(topicAddress, "MULTICAST"));
             jolokiaCreateDivert(http, baseUrl, auth, mbean,
                     topicName + TOPIC_DIVERT_SUFFIX, topicName, topicAddress, "", true);
+            createManagementAddress(http, baseUrl, auth, mbean, topicName);
             configureDuplicateDetection(
                     http, baseUrl, auth, topicName, duplicateDetection);
         });
     }
 
-    /** Removes a topic ingress address and its hidden fan-out address from Artemis. */
+    /** Removes a topic ingress address, its management node and its hidden fan-out address from Artemis. */
     public void jolokiaDeleteTopic(String namespaceName, String topicName) {
         String topicAddress = topicName + TOPIC_ADDRESS_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
+            deleteManagementAddress(http, baseUrl, auth, mbean, topicName);
             removeDuplicateDetection(http, baseUrl, auth, topicName);
             jolokiaExec(http, baseUrl, auth, mbean,
                     "destroyDivert(java.lang.String)",

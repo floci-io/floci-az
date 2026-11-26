@@ -219,7 +219,7 @@ jobs:
               -e SERVICEBUS_AMQPS_PORT=5671
               -e SERVICEBUS_NAMESPACE=default
               -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
-              -e MAVEN_ARGS=-Dtest=ServiceBusCompatibilityTest,ServiceBusLazyStartTest,ServiceBusRuleCompatibilityTest,ServiceBusSessionExpiryCompatibilityTest,EventHubCompatibilityTest,EventHubNamespaceManagementTest,EventHubSdkCompatibilityTest,EventHubStreamCompatibilityTest
+              -e MAVEN_ARGS=-Dtest=ServiceBusCompatibilityTest,ServiceBusLazyStartTest,ServiceBusRuleCompatibilityTest,ServiceBusSessionExpiryCompatibilityTest,ServiceBusTopicManagementCompatibilityTest,EventHubCompatibilityTest,EventHubNamespaceManagementTest,EventHubSdkCompatibilityTest,EventHubStreamCompatibilityTest
           - test: sdk-test-dotnet
             min_tests: 20
             emulator_env: >-
