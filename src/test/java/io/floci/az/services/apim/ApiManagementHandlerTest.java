@@ -19,16 +19,19 @@ import java.util.Locale;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 /**
  * Quarkus-level tests for {@link ApiManagementHandler}: the ARM control plane for the service and its child
@@ -128,7 +131,9 @@ class ApiManagementHandlerTest {
         String xml = "<policies><inbound><base />" + inbound + "</inbound><backend><base /></backend>"
                 + "<outbound><base /></outbound><on-error><base /></on-error></policies>";
         String body = MAPPER.writeValueAsString(Map.of("properties", Map.of("format", "rawxml", "value", xml)));
-        put(scope + "/policies/policy", body);
+        given().contentType("application/json").body(body)
+                .when().put(SERVICE_ID + scope + "/policies/policy" + API)
+                .then().statusCode(anyOf(is(200), is(201)));
     }
 
     // ── ARM: service ─────────────────────────────────────────────────────────────
@@ -450,7 +455,7 @@ class ApiManagementHandlerTest {
                 + "<outbound><base /></outbound><on-error><base /></on-error></policies>";
         given().contentType("application/json")
                 .body(MAPPER.writeValueAsString(Map.of("properties", Map.of("format", "rawxml", "value", xml))))
-                .when().put(sibling + "/policies/policy" + API).then().statusCode(200);
+                .when().put(sibling + "/policies/policy" + API).then().statusCode(201);
 
         given().when().delete("/subscriptions/" + SUB + "/resourceGroups/" + RG.toUpperCase(Locale.ROOT)
                 + "/providers/Microsoft.ApiManagement/service/" + SERVICE.toUpperCase(Locale.ROOT) + API)
@@ -709,6 +714,28 @@ class ApiManagementHandlerTest {
         given().when().delete(SERVICE_ID + "/products/starter/apis/orders" + API).then().statusCode(200);
         given().when().get(GATEWAY + "/orders/x")
                 .then().statusCode(201);
+    }
+
+    @Test
+    void aPolicyAnswers201OnCreateAnd200OnUpdateWithAFreshETag() throws IOException {
+        createService();
+        String body = MAPPER.writeValueAsString(Map.of("properties", Map.of("format", "rawxml",
+                "value", "<policies><inbound><base /></inbound></policies>")));
+        String path = SERVICE_ID + "/apis/orders/policies/policy" + API;
+        createApi("orders", "orders", false);
+
+        String created = given().contentType("application/json").body(body).when().put(path)
+                .then().statusCode(201).header("ETag", notNullValue()).extract().header("ETag");
+        given().when().get(path).then().statusCode(200).header("ETag", equalTo(created));
+        given().when().head(path).then().statusCode(200).header("ETag", equalTo(created));
+
+        String updated = given().contentType("application/json").body(body).when().put(path)
+                .then().statusCode(200).extract().header("ETag");
+        assertNotEquals(created, updated);
+        given().when().get(path).then().statusCode(200).header("ETag", equalTo(updated));
+
+        given().when().delete(path).then().statusCode(200);
+        given().when().head(path).then().statusCode(404);
     }
 
     @Test
