@@ -37,7 +37,8 @@ class CloudCatalogTest {
     private static final Set<String> ROUTED_PUBLIC_HOST_SUFFIXES = Set.of(
             ".vault.azure.net", ".managedhsm.azure.net", ".communication.azure.com", ".blob.core.windows.net",
             ".dfs.core.windows.net", ".queue.core.windows.net", ".table.core.windows.net", ".servicebus.windows.net",
-            ".service.signalr.net", ".azurecontainerapps.io", ".azurecr.io", ".search.windows.net");
+            ".service.signalr.net", ".azurecontainerapps.io", ".azurecr.io", ".search.windows.net",
+            ".azure-devices.net");
 
     @Test
     void theThreeCloudsLoadPublicFirst() {

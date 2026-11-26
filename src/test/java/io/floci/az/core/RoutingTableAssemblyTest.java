@@ -44,6 +44,9 @@ class RoutingTableAssemblyTest {
         Map.entry(".managedhsm.azure.net", "keyvault"),
         Map.entry(".communication.azure.com", "email"),
         Map.entry(".search.windows.net", "search"),
+        Map.entry(".azure-devices.net", "iothub"),
+        // A hub in the US Government cloud answers its own cloud's hostName.
+        Map.entry(".azure-devices.us", "iothub"),
         Map.entry(".blob.core.windows.net", "blob"),
         Map.entry(".dfs.core.windows.net", "blob"),
         Map.entry(".queue.core.windows.net", "queue"),

@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# Azure IoT Hub: the management plane (hub lifecycle and shared access policies) via az/ARM.
+# Azure IoT Hub: the management plane (hub lifecycle and shared access policies) via az/ARM, and the device
+# identity registry via the azure-iot extension.
 
 setup_file() {
     load 'test_helper/common-setup'
@@ -196,6 +197,113 @@ has_group() {
     assert_equal "$(echo "$output" | jq -r '.totalDeviceCount')" "0"
     assert_equal "$(echo "$output" | jq -r '.enabledDeviceCount')" "0"
     assert_equal "$(echo "$output" | jq -r '.disabledDeviceCount')" "0"
+}
+
+# az iot hub device-identity (the azure-iot extension): the service API on the hub's host name, signed with the
+# iothubowner key the extension reads through listkeys. Each test removes the devices it creates.
+
+device() {
+    az_json iot hub device-identity show -n "$IOTHUB_NAME" -g "$RG_NAME" -d "$1"
+}
+
+# The devices a test creates. teardown deletes them, so a test that fails part way leaves no device behind to
+# break the counts the next tests check. A test records a device before creating it: `run` creates in a subshell.
+CREATED_DEVICES=()
+
+new_device() {
+    CREATED_DEVICES+=("$1")
+    az iot hub device-identity create -n "$IOTHUB_NAME" -g "$RG_NAME" -d "$@" -o none
+}
+
+teardown() {
+    local id
+    for id in "${CREATED_DEVICES[@]}"; do
+        az iot hub device-identity delete -n "$IOTHUB_NAME" -g "$RG_NAME" -d "$id" -o none 2>/dev/null || true
+    done
+}
+
+@test "az iot hub device-identity: create generates keys, and show answers the device" {
+    CREATED_DEVICES+=(floci-dev-1)
+    run az_json iot hub device-identity create -n "$IOTHUB_NAME" -g "$RG_NAME" -d floci-dev-1
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.deviceId')" "floci-dev-1"
+    assert_equal "$(echo "$output" | jq -r '.status')" "enabled"
+    assert_equal "$(echo "$output" | jq -r '.authentication.type')" "sas"
+    local primary
+    primary="$(echo "$output" | jq -r '.authentication.symmetricKey.primaryKey')"
+    assert [ -n "$primary" ] && assert [ "$primary" != "null" ]
+
+    run device floci-dev-1
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.authentication.symmetricKey.primaryKey')" "$primary"
+    assert_equal "$(echo "$output" | jq -r '.connectionState')" "Disconnected"
+
+    run az_json iot hub device-identity connection-string show -n "$IOTHUB_NAME" -g "$RG_NAME" -d floci-dev-1
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.connectionString')" \
+        "HostName=${IOTHUB_NAME}.azure-devices.net;DeviceId=floci-dev-1;SharedAccessKey=${primary}"
+
+    run az iot hub device-identity create -n "$IOTHUB_NAME" -g "$RG_NAME" -d floci-dev-1 -o none
+    assert_failure
+}
+
+@test "az iot hub device-identity: update disables a device, and show-stats counts it" {
+    new_device floci-dev-off
+
+    run az_json iot hub device-identity update -n "$IOTHUB_NAME" -g "$RG_NAME" -d floci-dev-off \
+        --set status=disabled statusReason=lost
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.status')" "disabled"
+    assert_equal "$(device floci-dev-off | jq -r '.statusReason')" "lost"
+
+    run az_json iot hub show-stats -n "$IOTHUB_NAME" -g "$RG_NAME"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.totalDeviceCount')" "1"
+    assert_equal "$(echo "$output" | jq -r '.disabledDeviceCount')" "1"
+}
+
+@test "az iot hub device-identity: renew-key renews the key asked for, and swap swaps them" {
+    new_device floci-dev-keys
+    local before primary secondary
+    before="$(device floci-dev-keys)"
+    primary="$(echo "$before" | jq -r '.authentication.symmetricKey.primaryKey')"
+    secondary="$(echo "$before" | jq -r '.authentication.symmetricKey.secondaryKey')"
+
+    run az_json iot hub device-identity renew-key -n "$IOTHUB_NAME" -g "$RG_NAME" -d floci-dev-keys --kt primary
+    assert_success
+    assert [ "$(echo "$output" | jq -r '.authentication.symmetricKey.primaryKey')" != "$primary" ]
+    assert_equal "$(echo "$output" | jq -r '.authentication.symmetricKey.secondaryKey')" "$secondary"
+
+    primary="$(device floci-dev-keys | jq -r '.authentication.symmetricKey.primaryKey')"
+    run az_json iot hub device-identity renew-key -n "$IOTHUB_NAME" -g "$RG_NAME" -d floci-dev-keys --kt swap
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.authentication.symmetricKey.primaryKey')" "$secondary"
+    assert_equal "$(echo "$output" | jq -r '.authentication.symmetricKey.secondaryKey')" "$primary"
+}
+
+@test "az iot hub device-identity: list answers every device, and --edge-enabled the edge ones" {
+    new_device floci-dev-leaf
+    new_device floci-dev-edge --edge-enabled
+
+    run az_json iot hub device-identity list -n "$IOTHUB_NAME" -g "$RG_NAME"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '[.[].deviceId] | sort | join(",")')" "floci-dev-edge,floci-dev-leaf"
+
+    run az_json iot hub device-identity list -n "$IOTHUB_NAME" -g "$RG_NAME" --edge-enabled
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '[.[].deviceId] | join(",")')" "floci-dev-edge"
+    assert_equal "$(echo "$output" | jq -r '.[0].capabilities.iotEdge')" "true"
+}
+
+@test "az iot hub device-identity: delete removes the device" {
+    az iot hub device-identity create -n "$IOTHUB_NAME" -g "$RG_NAME" -d floci-dev-gone -o none
+
+    run az iot hub device-identity delete -n "$IOTHUB_NAME" -g "$RG_NAME" -d floci-dev-gone -o none
+    assert_success
+
+    run az iot hub device-identity show -n "$IOTHUB_NAME" -g "$RG_NAME" -d floci-dev-gone -o none
+    assert_failure
+    assert_output --partial "DeviceNotFound"
 }
 
 @test "az iot hub: delete removes the hub" {

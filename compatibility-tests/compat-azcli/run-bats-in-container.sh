@@ -56,6 +56,8 @@ export SSL_CERT_FILE="$COMBINED_CA"
 echo "127.0.0.1 floci-test-kv.vault.azure.net" >> /etc/hosts
 # Keep this name in sync with ACR_NAME in test/test_helper/common-setup.bash.
 echo "127.0.0.1 flocitestacr.azurecr.io" >> /etc/hosts
+# The IoT hub's service API, for az iot hub device-identity. Keep in sync with IOTHUB_NAME.
+echo "127.0.0.1 floci-test-iothub.azure-devices.net" >> /etc/hosts
 socat TCP-LISTEN:443,bind=127.0.0.1,fork,reuseaddr TCP:"${FLOCI_AZ_HOST}" &
 sleep 1
 

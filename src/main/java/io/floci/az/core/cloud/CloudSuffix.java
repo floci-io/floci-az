@@ -33,7 +33,7 @@ public enum CloudSuffix {
     APIM(false),
     WEB(false),
     SEARCH(true),
-    IOTHUB(false);
+    IOTHUB(true);
 
     private final boolean hostRouted;
 

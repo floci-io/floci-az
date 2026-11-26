@@ -1,5 +1,6 @@
 package io.floci.az.services.arm;
 
+import io.floci.az.services.iothub.IotHubTestClient;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -145,7 +146,10 @@ class ResourceGroupDeleteOverrideTest {
             .then().statusCode(201);
     }
 
-    /** An IoT hub is listed with its group, deleted with it, and its global name is free again. */
+    /**
+     * An IoT hub is listed with its group and deleted with it, its devices too, and its global name is free again: a
+     * hub created again under the name has an empty registry.
+     */
     @Test
     void theCascadeDeletesAnIotHubAndFreesItsName() {
         String iotApi = "?api-version=2023-06-30";
@@ -153,6 +157,11 @@ class ResourceGroupDeleteOverrideTest {
         json("{\"location\":\"eastus\"}").when().put(group("rg-iothub") + API).then().statusCode(201);
         String hub = group("rg-iothub") + "/providers/Microsoft.Devices/IotHubs/cascade-hub";
         json(body).when().put(hub + iotApi).then().statusCode(201);
+        String ownerKey = given().when().post(hub + "/listkeys" + iotApi).then().statusCode(200)
+            .extract().path("value.find { it.keyName == 'iothubowner' }.primaryKey");
+        json("{\"deviceId\": \"d1\"}").header("Host", "cascade-hub.azure-devices.net")
+            .header("Authorization", IotHubTestClient.token("cascade-hub.azure-devices.net", "iothubowner", ownerKey))
+            .when().put("/devices/d1" + IotHubTestClient.SERVICE_API).then().statusCode(200);
 
         given().when().get(group("rg-iothub") + "/resources" + API)
             .then().statusCode(200)
@@ -161,8 +170,10 @@ class ResourceGroupDeleteOverrideTest {
         given().when().delete(group("rg-iothub") + API).then().statusCode(202);
 
         given().when().get(hub + iotApi).then().statusCode(404);
-        json(body).when().put(group("rg-other") + "/providers/Microsoft.Devices/IotHubs/cascade-hub" + iotApi)
-            .then().statusCode(201);
+        String recreated = group("rg-other") + "/providers/Microsoft.Devices/IotHubs/cascade-hub";
+        json(body).when().put(recreated + iotApi).then().statusCode(201);
+        given().when().get(recreated + "/IotHubStats" + iotApi).then().statusCode(200)
+            .body("totalDeviceCount", equalTo(0));
     }
 
     /**

@@ -22,7 +22,7 @@ import static org.hamcrest.Matchers.not;
 @QuarkusTest
 @TestProfile(ArmLocationsPerCloudTest.GovSubscription.class)
 @DisplayName("ARM locations: per-cloud region list")
-class ArmLocationsPerCloudTest {
+public class ArmLocationsPerCloudTest {
 
     private static final String DEFAULT_SUB = "00000000-0000-0000-0000-000000000001";
     private static final String GOV_TENANT = "99999999-0000-0000-0000-0000000000c5";

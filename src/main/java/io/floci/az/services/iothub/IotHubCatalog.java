@@ -78,26 +78,29 @@ final class IotHubCatalog {
     private IotHubCatalog() {
     }
 
-    /** {@code IotHubQuotaMetricInfo} entries for a hub: nothing counted yet, the maximums its SKU and units allow. */
-    static List<Map<String, Object>> quotaMetrics(String sku, int capacity) {
+    /**
+     * {@code IotHubQuotaMetricInfo} entries for a hub: the devices its registry holds, and the maximums its SKU and
+     * units allow. No message is counted: the device endpoints are not served yet.
+     */
+    static List<Map<String, Object>> quotaMetrics(String sku, int capacity, long deviceCount) {
         long devices = "F1".equals(sku) ? MAX_DEVICES_FREE : MAX_DEVICES;
-        return List.of(metric("TotalMessages", MESSAGES_PER_UNIT.getOrDefault(sku, 0L) * capacity),
-                metric("TotalDeviceCount", devices));
+        return List.of(metric("TotalMessages", 0, MESSAGES_PER_UNIT.getOrDefault(sku, 0L) * capacity),
+                metric("TotalDeviceCount", deviceCount, devices));
     }
 
-    /** {@code RegistryStatistics}: floci-az has no device registry yet, so a hub has no devices. */
-    static Map<String, Object> registryStatistics() {
+    /** {@code RegistryStatistics}: the devices of the hub's identity registry, by status. */
+    static Map<String, Object> registryStatistics(IotHubDevices.Counts counts) {
         Map<String, Object> stats = new LinkedHashMap<>();
-        stats.put("totalDeviceCount", 0);
-        stats.put("enabledDeviceCount", 0);
-        stats.put("disabledDeviceCount", 0);
+        stats.put("totalDeviceCount", counts.total());
+        stats.put("enabledDeviceCount", counts.enabled());
+        stats.put("disabledDeviceCount", counts.disabled());
         return stats;
     }
 
-    private static Map<String, Object> metric(String name, long maxValue) {
+    private static Map<String, Object> metric(String name, long currentValue, long maxValue) {
         Map<String, Object> metric = new LinkedHashMap<>();
         metric.put("name", name);
-        metric.put("currentValue", 0);
+        metric.put("currentValue", currentValue);
         metric.put("maxValue", maxValue);
         return metric;
     }
