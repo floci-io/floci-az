@@ -1,5 +1,7 @@
 package io.floci.az.services.storageaccounts;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.cloud.CloudSuffix;
@@ -11,6 +13,8 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -38,6 +42,9 @@ class StorageAccountResourceStoreTest {
     @Inject
     BlobServiceHandler blobHandler;
 
+    @Inject
+    ObjectMapper mapper;
+
     @BeforeEach
     void reset() {
         given().post("/_admin/reset").then().statusCode(204);
@@ -63,6 +70,56 @@ class StorageAccountResourceStoreTest {
         storageAccountArmService.restoreHierarchicalNamespaces(null);
         given().head("/restoredsa/container/blob").then().header("x-ms-access-tier", "Cool")
             .header("x-ms-access-tier-inferred", "true");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\"invalid\"", "\"\"", "42", "{}"})
+    void putRejectsInvalidAccountAccessTiersWithoutChangingTheAccount(String invalidTier) {
+        String path = account("sub-tier", "rg", "validsa") + API;
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{\"accessTier\":\"Cool\"}}")
+            .put(path).then().statusCode(200);
+        given().put("/validsa/container?restype=container").then().statusCode(201);
+        given().header("x-ms-blob-type", "BlockBlob").body("data")
+            .put("/validsa/container/blob").then().statusCode(201);
+
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{\"accessTier\":" + invalidTier + "}}")
+            .put(path).then().statusCode(400).body("error.code", equalTo("InvalidValuesForRequestParameters"));
+        given().get(path).then().body("properties.accessTier", equalTo("Cool"));
+        given().head("/validsa/container/blob").then().header("x-ms-access-tier", "Cool");
+
+        String newPath = account("sub-tier", "rg", "invalidsa") + API;
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{\"accessTier\":" + invalidTier + "}}")
+            .put(newPath).then().statusCode(400).body("error.code", equalTo("InvalidValuesForRequestParameters"));
+        given().get(newPath).then().statusCode(404);
+    }
+
+    @Test
+    void invalidPersistedAccountTierIsNotExposedToBlobReads() throws Exception {
+        String accountPath = account("sub-tier", "rg", "legacysa");
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{\"accessTier\":\"Cool\"}}")
+            .put(accountPath + API).then().statusCode(200);
+        given().put("/legacysa/container?restype=container").then().statusCode(201);
+        given().header("x-ms-blob-type", "BlockBlob").body("data")
+            .put("/legacysa/container/blob").then().statusCode(201);
+
+        String key = ArmResourceId.parse(accountPath).orElseThrow().canonicalKey();
+        StorageBackend<String, StoredObject> backend = storageFactory.create(StorageAccountArmService.STORE);
+        StoredObject stored = backend.get(key).orElseThrow();
+        ObjectNode document = (ObjectNode) mapper.readTree(stored.data());
+        ((ObjectNode) document.get("properties")).put("accessTier", "invalid");
+        backend.put(key, new StoredObject(stored.key(), mapper.writeValueAsBytes(document),
+            stored.metadata(), stored.lastModified(), stored.etag()));
+
+        storageAccountArmService.restoreHierarchicalNamespaces(null);
+        given().head("/legacysa/container/blob").then().header("x-ms-access-tier", "Hot")
+            .header("x-ms-access-tier-inferred", "true");
+        given().contentType("application/json").body("{\"properties\":{\"accessTier\":\"Cold\"}}")
+            .patch(accountPath + API).then().statusCode(200);
+        given().head("/legacysa/container/blob").then().header("x-ms-access-tier", "Cold");
     }
 
     @Test

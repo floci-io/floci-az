@@ -419,6 +419,9 @@ public class StorageAccountArmService
     private synchronized Response createOrUpdate(AzureRequest req, ArmResourceId id) {
         Map<String, Object> body = ArmJson.parseBodyLenient(req);
         Map<String, Object> requestedProperties = ArmJson.cast(body.get("properties"));
+        if (!validAccessTier(requestedProperties.get("accessTier"))) {
+            return ArmErrors.error(400, "InvalidValuesForRequestParameters", "Invalid storage account access tier.");
+        }
         Optional<Map<String, Object>> existing = accounts.get(id).map(Stored::value);
         Map<String, Object> existingProperties = ArmJson.cast(existing.map(e -> e.get("properties")).orElse(null));
         boolean existingHnsEnabled = Boolean.TRUE.equals(existingProperties.get("isHnsEnabled"));
@@ -557,9 +560,12 @@ public class StorageAccountArmService
 
     private void syncAccessTier(String account, Map<String, Object> properties) {
         Object tier = properties.get("accessTier");
-        if (tier instanceof String value) {
+        if (tier instanceof String value && validAccessTier(value)) {
             blobHandler.setAccountAccessTier(account, value);
         } else {
+            if (tier != null) {
+                LOG.warnv("Storage account {0} has invalid persisted access tier {1}; using the default", account, tier);
+            }
             blobHandler.removeAccountAccessTier(account);
         }
     }
