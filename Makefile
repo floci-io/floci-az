@@ -61,7 +61,7 @@ SUITE_ENV_JAVA   = $(POD_IDENTITY_ENV) \
 	-e SERVICEBUS_NAMESPACE=default
 # The messaging tests only (Maven 3.9 appends MAVEN_ARGS to the image's mvn test).
 SUITE_ENV_JAVA_PUBLISHED = $(SUITE_ENV_JAVA) \
-	-e MAVEN_ARGS=-Dtest=ServiceBusCompatibilityTest,ServiceBusLazyStartTest,ServiceBusRuleCompatibilityTest,ServiceBusSessionExpiryCompatibilityTest,EventHubCompatibilityTest,EventHubNamespaceManagementTest,EventHubSdkCompatibilityTest,EventHubStreamCompatibilityTest
+	-e MAVEN_ARGS=-Dtest=ServiceBusCompatibilityTest,ServiceBusLazyStartTest,ServiceBusRuleCompatibilityTest,ServiceBusSessionExpiryCompatibilityTest,ServiceBusTopicManagementCompatibilityTest,EventHubCompatibilityTest,EventHubNamespaceManagementTest,EventHubSdkCompatibilityTest,EventHubStreamCompatibilityTest
 SUITE_ENV_NODE   = $(POD_IDENTITY_ENV) \
 	-e SERVICEBUS_HOST=floci-az-servicebus-default \
 	-e SERVICEBUS_AMQP_PORT=5672 \
