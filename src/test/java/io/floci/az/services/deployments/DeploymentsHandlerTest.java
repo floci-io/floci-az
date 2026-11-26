@@ -319,6 +319,32 @@ class DeploymentsHandlerTest {
         given().when().get(DEPLOYMENTS + "/dep4/operationStatuses/00000000000000000000" + API).then().statusCode(404);
     }
 
+    /** The issue's template: a vault URI built from {@code environment().suffixes.keyvaultDns}. */
+    private static final String ENVIRONMENT_DEPLOYMENT = """
+        {"properties": {"mode": "Incremental", "template": {
+          "resources": [],
+          "outputs": {
+            "vaultUri": {"type": "string", "value": "[concat('https://kv-repro', environment().suffixes.keyvaultDns)]"},
+            "suffixes": {"type": "object", "value": "[environment().suffixes]"}}}}}
+        """;
+
+    @Test
+    void environmentSuffixesTakeArmsShapeWithTheLeadingDotOnHostSuffixes() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("env", ENVIRONMENT_DEPLOYMENT)));
+
+        given().when().get(DEPLOYMENTS + "/env" + API).then().statusCode(200)
+            .body("properties.outputs.vaultUri.value", equalTo("https://kv-repro.vault.azure.net"))
+            .body("properties.outputs.suffixes.value.keyvaultDns", equalTo(".vault.azure.net"))
+            .body("properties.outputs.suffixes.value.sqlServerHostname", equalTo(".database.windows.net"))
+            .body("properties.outputs.suffixes.value.acrLoginServer", equalTo(".azurecr.io"))
+            .body("properties.outputs.suffixes.value.storage", equalTo("core.windows.net"))
+            .body("properties.outputs.suffixes.value.azureDatalakeStoreFileSystem", equalTo("azuredatalakestore.net"))
+            .body("properties.outputs.suffixes.value.azureDatalakeAnalyticsCatalogAndJob",
+                equalTo("azuredatalakeanalytics.net"))
+            .body("properties.outputs.suffixes.value.azureFrontDoorEndpointSuffix", equalTo("azurefd.net"))
+            .body("properties.outputs.suffixes.value.size()", equalTo(7));
+    }
+
     private static final String SUB_DEPLOYMENTS = "/subscriptions/" + SUB + "/providers/Microsoft.Resources/deployments";
 
     /** A subscription-scope template that creates a resource group, depending on it by its provider-form id. */
