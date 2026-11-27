@@ -1,7 +1,7 @@
 package io.floci.az.services.aks;
 
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,7 +9,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -21,17 +20,10 @@ import static org.hamcrest.Matchers.*;
  * Covers ARM path routing, CRUD, credentials, and agent pools.
  */
 @QuarkusTest
-@TestProfile(AksHandlerTest.MockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("AksHandler — routing and CRUD (mocked mode)")
 @SuppressWarnings("unused")
 class AksHandlerTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.aks.mocked", "true");
-        }
-    }
 
     private static final String SUB  = "test-sub-aks";
     private static final String RG   = "test-rg-aks";

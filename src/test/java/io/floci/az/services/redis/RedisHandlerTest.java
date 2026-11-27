@@ -1,6 +1,6 @@
 package io.floci.az.services.redis;
 
-import io.floci.az.testing.RedisMockedProfile;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,7 +19,7 @@ import static org.hamcrest.Matchers.*;
  * Covers ARM path routing, CRUD, and the listKeys / regenerateKey actions.</p>
  */
 @QuarkusTest
-@TestProfile(RedisMockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("RedisHandler — routing and CRUD (mocked mode)")
 @SuppressWarnings("unused")
 class RedisHandlerTest {
