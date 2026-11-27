@@ -67,8 +67,15 @@ class BlobAccessTierTest {
                 .body(containsString("<AccessTierInferred>true</AccessTierInferred>"));
         given().contentType("application/json").body("{\"location\":\"eastus\"}").put(accountPath)
                 .then().statusCode(200).body("properties.accessTier", equalTo("Cool"));
-        given().contentType("application/json").body("{\"properties\":{\"accessTier\":\"Hot\"}}").patch(accountPath)
-                .then().statusCode(200).body("properties.accessTier", equalTo("Hot"));
+        given().contentType("application/json")
+                .body("{\"sku\":{\"name\":\"Standard_ZRS\"},"
+                        + "\"properties\":{\"accessTier\":\"Hot\",\"minimumTlsVersion\":\"TLS1_2\"}}")
+                .patch(accountPath).then().statusCode(200)
+                .body("sku.name", equalTo("Standard_ZRS"))
+                .body("properties.minimumTlsVersion", equalTo("TLS1_2"))
+                .body("properties.accessTier", equalTo("Hot"));
+        given().get(accountPath).then().body("sku.name", equalTo("Standard_ZRS"))
+                .body("properties.minimumTlsVersion", equalTo("TLS1_2"));
         given().head(BLOB_PATH, ACCOUNT, CONTAINER, BLOB).then().header("x-ms-access-tier", "Hot");
         given().queryParam("prefix", BLOB).get(LIST_PATH, ACCOUNT, CONTAINER).then()
                 .body(containsString("<AccessTier>Hot</AccessTier>"))

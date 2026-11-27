@@ -105,7 +105,7 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   `x-ms-delete-snapshots` (a blob with snapshots needs it, as a plain delete does) and `?snapshot=`.
   The batch's SAS authorizes each delete, so a container SAS without `d` fails
   every part with `403 AuthorizationPermissionMismatch` while the batch itself stays `202`. Delete Blob is the
-  only sub-request operation: Set Blob Tier and Set Blob Expiry are not implemented, so a batch of them carries
+  only sub-request operation: batched Set Blob Tier and Set Blob Expiry are not implemented, so a batch of them carries
   a single `501 NotImplemented` error part instead of per-object successes that change nothing. At most 256 sub-requests,
   each addressed inside the batch's container (or account) in the endpoint's own form: the target names the
   account (`/{account}/{container}/{blob}`) on the path-addressed endpoint and drops it (`/{container}/{blob}`)
