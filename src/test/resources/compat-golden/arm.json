@@ -2047,6 +2047,11 @@
           "locations" : [ ],
           "resourceType" : "sites/config"
         }, {
+          "apiVersions" : [ "2025-03-01", "2024-11-01", "2024-04-01", "2023-12-01", "2023-01-01", "2022-09-01", "2022-03-01", "2021-03-01", "2021-02-01", "2021-01-15", "2021-01-01", "2020-12-01", "2020-10-01", "2020-09-01", "2020-06-01", "2019-08-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "sites/basicPublishingCredentialsPolicies"
+        }, {
           "apiVersions" : [ "2025-03-01", "2024-11-01", "2024-04-01", "2023-12-01", "2023-01-01", "2022-09-01", "2022-03-01", "2021-03-01", "2021-02-01", "2021-01-15", "2021-01-01", "2020-12-01", "2020-10-01", "2020-09-01", "2020-06-01", "2019-08-01", "2018-02-01", "2016-09-01", "2015-08-01" ],
           "capabilities" : "SupportsTags, SupportsLocation",
           "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
