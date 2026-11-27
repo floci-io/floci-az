@@ -12,8 +12,14 @@ receives events and pushes them to subscriber **webhook** endpoints.
 
 ## Features
 
-- **Custom Topics**: CreateOrUpdate, Get, Delete, List (by resource group and by subscription),
-  with `properties.endpoint` and `inputSchema` (`EventGridSchema` default, or `CloudEventSchemaV1_0`)
+- **Custom Topics**: CreateOrUpdate, Update (`PATCH`), Get, Delete, List (by resource group and by
+  subscription), with `properties.endpoint` and `inputSchema` (`EventGridSchema` default, or
+  `CloudEventSchemaV1_0`). A topic keeps its `tags`, its managed `identity` (a `SystemAssigned` identity gets a
+  `principalId`, kept across later writes, and the `tenantId`; each user-assigned identity answers the ids of its
+  Managed Identity resource), `publicNetworkAccess` (default `Enabled`), `disableLocalAuth` (default `false`),
+  `inboundIpRules` and `inputSchemaMapping`. A `PATCH` replaces the tags, identity, `publicNetworkAccess`,
+  `disableLocalAuth` and `inboundIpRules` it sends, keeps the rest, and answers `201` with the topic, which the
+  long-running-operation pollers read as finished. Regenerating a key keeps every other setting
 - **Access keys**: `listKeys` returns `{key1, key2}`; `regenerateKey` rotates one of them
 - **Event subscriptions**: classic scoped `eventSubscriptions` with a **WebHook** destination,
   `filter` (`subjectBeginsWith`, `subjectEndsWith`, `includedEventTypes`, `isSubjectCaseSensitive`),
@@ -37,6 +43,7 @@ Management operations use ARM paths; publishing uses the topic's data-plane endp
 
 ```
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/topics/{name}
+PATCH  /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/topics/{name}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/topics/{name}
 DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/topics/{name}
 POST   .../topics/{name}/listKeys
@@ -162,6 +169,8 @@ floci-az:
   managed identity of `deadLetterWithResourceIdentity` is echoed but not used. Without a dead-letter
   destination, or when the container does not exist, the event is logged and dropped, as in Azure.
 - **Auth is permissive.** The `aeg-sas-key` header is accepted but not validated against the topic
-  keys (dev mode), matching the rest of the emulator.
+  keys (dev mode), matching the rest of the emulator. `disableLocalAuth`, `publicNetworkAccess` and
+  `inboundIpRules` are stored and answered but not enforced on publish, and the `inputSchemaMapping` is not
+  applied to incoming events.
 - **`CustomEventSchema`** is accepted but treated as the Event Grid schema.
 - **Advanced filters** (`advancedFilters`, array filtering) are accepted but not evaluated.
