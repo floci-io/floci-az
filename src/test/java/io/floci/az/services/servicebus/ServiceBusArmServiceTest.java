@@ -284,6 +284,71 @@ class ServiceBusArmServiceTest {
     }
 
     @Test
+    void aQueuePutOnAnExistingQueueAppliesTheNewSettings() {
+        createNamespace("sbns-update");
+        put(ns("sbns-update") + "/queues/orders",
+                "{\"properties\": {\"lockDuration\": \"PT30S\", \"maxDeliveryCount\": 3}}").then().statusCode(200);
+
+        put(ns("sbns-update") + "/queues/ORDERS",
+                "{\"properties\": {\"lockDuration\": \"PT50S\", \"maxDeliveryCount\": 7,"
+                        + " \"defaultMessageTimeToLive\": \"PT1H\"}}").then().statusCode(200)
+                .body("name", equalTo("orders"))
+                .body("properties.maxDeliveryCount", equalTo(7))
+                .body("properties.lockDuration", equalTo("PT50S"));
+
+        given().get(ns("sbns-update") + "/queues/orders" + API).then().statusCode(200)
+                .body("properties.maxDeliveryCount", equalTo(7))
+                .body("properties.defaultMessageTimeToLive", equalTo("PT1H"));
+        given().get("/devstoreaccount1-servicebus/sbns-update/queues/orders").then().statusCode(200)
+                .body(containsString("<MaxDeliveryCount>7</MaxDeliveryCount>"))
+                .body(containsString("<LockDuration>PT50S</LockDuration>"));
+    }
+
+    @Test
+    void aQueuePutCannotChangeRequiresSession() {
+        createNamespace("sbns-fixed");
+        put(ns("sbns-fixed") + "/queues/orders", "{\"properties\": {\"requiresSession\": true}}").then()
+                .statusCode(200);
+
+        put(ns("sbns-fixed") + "/queues/orders", "{\"properties\": {\"requiresSession\": false}}").then()
+                .statusCode(400)
+                .body("error.message", containsString("RequiresSession"));
+        put(ns("sbns-fixed") + "/queues/orders", "{\"properties\": {\"maxDeliveryCount\": 5}}").then()
+                .statusCode(200)
+                .body("properties.requiresSession", equalTo(true))
+                .body("properties.maxDeliveryCount", equalTo(5));
+    }
+
+    @Test
+    void aTopicAndSubscriptionPutOnExistingEntitiesApplyTheNewSettings() {
+        createNamespace("sbns-subupdate");
+        put(ns("sbns-subupdate") + "/topics/events", "{\"properties\": {}}").then().statusCode(200);
+        put(ns("sbns-subupdate") + "/topics/events/subscriptions/audit",
+                "{\"properties\": {\"maxDeliveryCount\": 3}}").then().statusCode(200);
+        String rules = ns("sbns-subupdate") + "/topics/events/subscriptions/audit/rules";
+        put(rules + "/high", "{\"properties\": {\"filterType\": \"SqlFilter\","
+                + " \"sqlFilter\": {\"sqlExpression\": \"priority > 5\"}}}").then().statusCode(200);
+        given().delete(rules + "/$Default" + API).then().statusCode(200);
+
+        put(ns("sbns-subupdate") + "/topics/events",
+                "{\"properties\": {\"defaultMessageTimeToLive\": \"PT2H\"}}").then().statusCode(200)
+                .body("properties.defaultMessageTimeToLive", equalTo("PT2H"));
+        put(ns("sbns-subupdate") + "/topics/events/subscriptions/audit",
+                "{\"properties\": {\"maxDeliveryCount\": 9, \"deadLetteringOnMessageExpiration\": true}}").then()
+                .statusCode(200)
+                .body("properties.maxDeliveryCount", equalTo(9))
+                .body("properties.deadLetteringOnMessageExpiration", equalTo(true));
+
+        given().get(ns("sbns-subupdate") + "/topics/events/subscriptions/audit" + API).then().statusCode(200)
+                .body("properties.maxDeliveryCount", equalTo(9));
+        // The update keeps the subscription's own rules: a reset would bring $Default back and drop "high".
+        given().get(rules + API).then().statusCode(200)
+                .body("value.name", equalTo(List.of("high")));
+        given().get(rules + "/high" + API).then().statusCode(200)
+                .body("properties.sqlFilter.sqlExpression", equalTo("priority > 5"));
+    }
+
+    @Test
     void aQueueCreatedOverAtomShowsInTheArmListing() {
         createNamespace("sbns-fromatom");
         given().body("<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"

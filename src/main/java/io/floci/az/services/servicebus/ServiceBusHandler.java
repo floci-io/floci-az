@@ -590,7 +590,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
      * Applies a PUT with {@code If-Match} (the SDKs' update call) to an existing queue. As in Azure,
      * a missing queue answers 404 and a change to RequiresSession or RequiresDuplicateDetection 400.
      */
-    private synchronized Response handleUpdateQueue(String account, String namespace, String queueName,
+    synchronized Response handleUpdateQueue(String account, String namespace, String queueName,
                                        boolean requiresSession,
                                        ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
                                        ServiceBusEntityXml.MessageLifetimeSettings lifetime,
@@ -744,7 +744,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
      * Applies an update to an existing topic. Subscription expiry depends on the topic's
      * DefaultMessageTimeToLive, so every subscription is re-applied to the broker as well.
      */
-    private synchronized Response handleUpdateTopic(
+    synchronized Response handleUpdateTopic(
             String account, String namespace, String topicName,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime,
@@ -943,7 +943,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
      * Applies an update to an existing subscription; its rules are left as they are. A missing
      * subscription answers 404 and a change to RequiresSession 400, as in Azure.
      */
-    private synchronized Response handleUpdateSubscription(String account, String namespace,
+    synchronized Response handleUpdateSubscription(String account, String namespace,
                                               String topicName, String subName,
                                               ServiceBusEntityXml.MessageLifetimeSettings lifetime,
                                               ServiceBusEntityXml.DeliverySettings delivery,
