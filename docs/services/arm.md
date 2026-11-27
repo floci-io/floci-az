@@ -79,7 +79,10 @@ PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.KeyVault/vau
 
 `azurerm_storage_account` and `azurerm_key_vault` resolve to those two provider paths; the storage
 account returns the well-known development key and the vault's `vaultUri` points at the live
-[Key Vault](key-vault.md) data plane.
+[Key Vault](key-vault.md) data plane. A storage account `PATCH` (`az storage account update`) merges
+what it names onto the account: `tags`, `sku`, `kind` and the properties `StorageAccounts_Update` lets
+a client change, such as `minimumTlsVersion`, `networkAcls` or `encryption`. The rest of the account is
+kept. `identity`, `zones` and `placement` are not modelled, on a `PUT` or a `PATCH`.
 
 ## Quickstart
 
