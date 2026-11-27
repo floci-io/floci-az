@@ -135,6 +135,30 @@ class SearchFilterTest {
     }
 
     @Test
+    void aLongChainIsOneSolrClauseAndTooManyClausesOrLevelsAreRefused() {
+        // The chain at the limit translates and writes as JSON: it does not nest a level per clause.
+        String chain = String.join(" or ", Collections.nCopies(1000, "stars eq 1"));
+        assertThat(solr(chain), containsString("_v_stars:[1 TO 1]"));
+        String both = String.join(" and ", Collections.nCopies(1000, "stars eq 1"));
+        assertThat(solr(both), containsString("_v_stars:[1 TO 1]"));
+        String nested = "(stars eq 1 or ".repeat(99) + "stars eq 2" + ")".repeat(99);
+        assertThat(solr(nested), containsString("_v_stars:[2 TO 2]"));
+
+        assertThat(refusal(chain + " or stars eq 1"), containsString("more than 1000 clauses"));
+        assertThat(refusal("(".repeat(101) + "stars eq 1" + ")".repeat(101)), containsString("more than 100 levels"));
+        assertThat(refusal("not ".repeat(20000) + "parking"), containsString("more than 100 levels"));
+    }
+
+    @Test
+    void aPointMustBeOnTheGlobe() {
+        for (String point : new String[] {"POINT(NaN 60)", "POINT(24 200)", "POINT(-181 0)", "POINT(Infinity 0)"}) {
+            assertThat(refusal("geo.distance(location, geography'" + point + "') lt 5"),
+                    containsString("is not a valid point"));
+        }
+        assertThat(solr("geo.distance(location, geography'POINT(-180 90)') lt 5"), containsString("pt=90.0,-180.0"));
+    }
+
+    @Test
     void aComplexLambdaJoinsTheElementsChildDocumentsAndAPrimitiveOneTestsTheValues() {
         String rooms = solr("rooms/any(r: r/type eq 'Suite' and r/price lt 100)");
         assertThat(rooms, containsString("\"parent\":{\"which\":\"_depth_:[0 TO 0]\""));
@@ -261,6 +285,9 @@ class SearchFilterTest {
         assertThat(String.valueOf(point.response().getEntity()), containsString("can only be sorted by geo.distance"));
         // As recorded from Azure (java SuggestTests.suggestThrowsWhenRequestIsMalformedAsync): the syntax is checked
         // before any field is looked up.
+        Refused offTheGlobe = assertThrows(Refused.class, () -> SearchOrderBy.sort(
+                "geo.distance(location, geography'POINT(24 200)')", definition, layout));
+        assertThat(String.valueOf(offTheGlobe.response().getEntity()), containsString("is not a valid point"));
         Refused malformed = assertThrows(Refused.class,
                 () -> SearchOrderBy.sort("This is not a valid orderby.", definition, layout));
         assertThat(String.valueOf(malformed.response().getEntity()),

@@ -362,6 +362,12 @@ class SearchDocumentsTest {
         lookup("ninf").then().body("rating", equalTo("-INF"));
         lookup("millis").then().body("updated", equalTo("2026-01-02T10:00:00.123Z"));
         // Azure answers any point with WGS 84's crs, the coordinates unchanged.
+        // A point off the globe is refused, as one that is not a number is.
+        for (String coordinates : new String[] {"[24, 91]", "[181, 60]"}) {
+            batch("{\"id\": \"off\", \"point\": {\"type\": \"Point\", \"coordinates\": " + coordinates + "}}")
+                .then().statusCode(400)
+                .body("error.message", containsString("to the expected type 'Edm.GeographyPoint'"));
+        }
         lookup("geo").then()
             .body("point.type", equalTo("Point"))
             .body("point.coordinates", contains(24.94f, 60.17f))

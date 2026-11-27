@@ -138,9 +138,8 @@ final class SearchOrderBy {
             throw cursor.invalid("geo.distance can only be used with fields of type Edm.GeographyPoint.");
         }
         try {
-            double longitude = Double.parseDouble(coordinates.group(1));
-            double latitude = Double.parseDouble(coordinates.group(2));
-            return "geodist(" + field.solrName() + "," + latitude + "," + longitude + ")";
+            double[] lonLat = SearchOData.point(coordinates.group(1), coordinates.group(2));
+            return "geodist(" + field.solrName() + "," + lonLat[1] + "," + lonLat[0] + ")";
         } catch (NumberFormatException e) {
             throw cursor.invalid("The geography literal '" + point + "' is not a valid point.");
         }

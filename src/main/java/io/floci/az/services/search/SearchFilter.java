@@ -16,6 +16,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -177,19 +178,40 @@ final class SearchFilter {
     }
 
     private static final class Parser {
+        /**
+         * Learn: "if you have hundreds of clauses, you are at risk of hitting the limit". The limits and their words
+         * are floci-az's; they keep the parser and the translation off the end of the stack.
+         */
+        private static final int MAX_CLAUSES = 1000;
+        private static final int MAX_DEPTH = 100;
+
         private final Cursor cursor;
+        private int clauses;
+        private int depth;
 
         Parser(Cursor cursor) {
             this.cursor = cursor;
         }
 
         Node or() {
-            Node left = and();
-            while (cursor.peek().is("or")) {
-                int position = cursor.next().position();
-                left = new Or(left, and(), position);
+            enter();
+            try {
+                Node left = and();
+                while (cursor.peek().is("or")) {
+                    int position = cursor.next().position();
+                    left = new Or(left, and(), position);
+                }
+                return left;
+            } finally {
+                depth--;
             }
-            return left;
+        }
+
+        private void enter() {
+            if (++depth > MAX_DEPTH) {
+                throw cursor.invalid("The expression nests more than " + MAX_DEPTH + " levels of parentheses,"
+                        + " 'not' or lambdas.");
+            }
         }
 
         Node and() {
@@ -202,6 +224,9 @@ final class SearchFilter {
         }
 
         Node comparison() {
+            if (++clauses > MAX_CLAUSES) {
+                throw cursor.invalid("The expression has more than " + MAX_CLAUSES + " clauses.");
+            }
             Node left = unary();
             Token operator = cursor.peek();
             if (operator.kind() == Kind.IDENTIFIER && COMPARISONS.contains(operator.text())) {
@@ -214,7 +239,12 @@ final class SearchFilter {
         Node unary() {
             if (cursor.peek().is("not")) {
                 int position = cursor.next().position();
-                return new Not(unary(), position);
+                enter();
+                try {
+                    return new Not(unary(), position);
+                } finally {
+                    depth--;
+                }
             }
             return primary();
         }
@@ -384,7 +414,7 @@ final class SearchFilter {
             Matcher point = POINT.matcher(token.text());
             if (point.matches()) {
                 try {
-                    double[] coordinates = {Double.parseDouble(point.group(1)), Double.parseDouble(point.group(2))};
+                    double[] coordinates = SearchOData.point(point.group(1), point.group(2));
                     return new Literal(LiteralKind.POINT, coordinates, token.text(), token.position());
                 } catch (NumberFormatException e) {
                     throw cursor.invalid("The geography literal '" + token.text() + "' is not a valid point.");
@@ -437,8 +467,9 @@ final class SearchFilter {
 
         Q translate(Node node, Frame frame) {
             return switch (node) {
-                case And and -> and(translate(and.left(), frame), translate(and.right(), frame));
-                case Or or -> or(translate(or.left(), frame), translate(or.right(), frame));
+                // A chain of one operator is one Solr clause, so it nests no deeper however long it is.
+                case And and -> and(operands(and, frame));
+                case Or or -> or(operands(or, frame));
                 case Not not -> {
                     requireBoolean(not.operand(), frame);
                     yield Q.filter(not(translate(not.operand(), frame).dsl()));
@@ -568,6 +599,31 @@ final class SearchFilter {
                 case "ge" -> kilometres <= 0 ? Optional.of(true) : Optional.empty();
                 default -> Optional.empty();
             };
+        }
+
+        /** The translated operands of a chain of {@code and}s or of {@code or}s, in order, walked without recursion. */
+        private List<Q> operands(Node chain, Frame frame) {
+            Class<?> operator = chain.getClass();
+            List<Node> nodes = new ArrayList<>();
+            ArrayDeque<Node> pending = new ArrayDeque<>();
+            pending.push(chain);
+            while (!pending.isEmpty()) {
+                Node node = pending.pop();
+                if (node.getClass() != operator) {
+                    nodes.add(node);
+                } else if (node instanceof And and) {
+                    pending.push(and.right());
+                    pending.push(and.left());
+                } else if (node instanceof Or or) {
+                    pending.push(or.right());
+                    pending.push(or.left());
+                }
+            }
+            List<Q> translated = new ArrayList<>();
+            for (Node node : nodes) {
+                translated.add(translate(node, frame));
+            }
+            return translated;
         }
 
         private Object compareValue(ValueField field, String operator, Literal literal) {
@@ -1125,9 +1181,13 @@ final class SearchFilter {
     // ── Combinators ──────────────────────────────────────────────────────────
 
     private static Q and(Q left, Q right) {
+        return and(List.of(left, right));
+    }
+
+    private static Q and(List<Q> operands) {
         List<Object> must = new ArrayList<>();
         List<Object> filter = new ArrayList<>();
-        for (Q q : List.of(left, right)) {
+        for (Q q : operands) {
             (q.scoring() ? must : filter).add(q.dsl());
         }
         Map<String, Object> bool = new LinkedHashMap<>();
@@ -1140,10 +1200,10 @@ final class SearchFilter {
         return new Q(Map.of("bool", bool), !must.isEmpty());
     }
 
-    private static Q or(Q left, Q right) {
-        boolean scoring = left.scoring() || right.scoring();
+    private static Q or(List<Q> operands) {
+        boolean scoring = operands.stream().anyMatch(Q::scoring);
         List<Object> should = new ArrayList<>();
-        for (Q q : List.of(left, right)) {
+        for (Q q : operands) {
             // Under a scoring query, a filter matches with a score of zero.
             should.add(scoring && !q.scoring() ? Map.of("bool", Map.of("filter", List.of(q.dsl()))) : q.dsl());
         }

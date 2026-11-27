@@ -56,6 +56,22 @@ final class SearchOData {
         return Double.isFinite(value) ? BigDecimal.valueOf(value) : null;
     }
 
+    /**
+     * A point's longitude and latitude, each a finite number on the globe: longitude -180 to 180, latitude -90 to
+     * 90.
+     *
+     * @throws NumberFormatException when either is not
+     */
+    static double[] point(String longitude, String latitude) {
+        double lon = Double.parseDouble(longitude);
+        double lat = Double.parseDouble(latitude);
+        if (!(Math.abs(lon) <= 180) || !(Math.abs(lat) <= 90)) {
+            // Also false for NaN.
+            throw new NumberFormatException(longitude + " " + latitude);
+        }
+        return new double[] {lon, lat};
+    }
+
     /** A {@code 400} in the words of Azure's OData parser, naming the parameter. */
     static Refused invalid(String parameter, String message) {
         return new Refused(SearchErrors.error(400, SearchErrors.NO_CODE, "Invalid expression: " + message

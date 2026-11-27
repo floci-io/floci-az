@@ -124,9 +124,8 @@ final class SearchScoring {
                             + " longitude and a latitude, separated by a comma.");
                 }
                 try {
-                    double longitude = Double.parseDouble(coordinates[0].trim());
-                    double latitude = Double.parseDouble(coordinates[1].trim());
-                    yield clamp("sub(1,div(geodist(" + name + "," + latitude + "," + longitude + ")," + kilometres
+                    double[] lonLat = SearchOData.point(coordinates[0].trim(), coordinates[1].trim());
+                    yield clamp("sub(1,div(geodist(" + name + "," + lonLat[1] + "," + lonLat[0] + ")," + kilometres
                             + "))");
                 } catch (NumberFormatException e) {
                     throw refuse("The scoring parameter '" + settings.get("referencePointParameter") + "' must be a"

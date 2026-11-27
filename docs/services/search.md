@@ -329,7 +329,9 @@ Values are kept and answered as Azure answers them:
 - an `Edm.DateTimeOffset` comes back in UTC with a `Z`, to the millisecond, with no fraction when there
   is none: `2026-01-02T12:00:00+02:00` is answered as `2026-01-02T10:00:00Z`
 - an `Edm.GeographyPoint` is GeoJSON. Azure accepts one with any `crs` or none, and answers it with
-  WGS 84's (`"crs": {"type": "name", "properties": {"name": "EPSG:4326"}}`), the coordinates unchanged
+  WGS 84's (`"crs": {"type": "name", "properties": {"name": "EPSG:4326"}}`), the coordinates unchanged.
+  A longitude outside -180 to 180 or a latitude outside -90 to 90 is refused, as in a filter, a sort or a
+  scoring parameter
 
 A lookup, `GET docs('{key}')`, answers every retrievable field in the order of the index. A field the
 document does not have is `null`, an empty collection `[]`. A field with `retrievable: false`, such as
@@ -389,7 +391,9 @@ A document is searchable as soon as its batch answers: there is no indexing dela
 
 A `$filter` is OData as Azure reads it: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not` and
 parentheses, where `not` binds tighter than a comparison and `and` tighter than `or`. A field must be
-`filterable`; `address/city` names a sub-field.
+`filterable`; `address/city` names a sub-field. A filter takes up to 1000 comparisons and 100 levels
+of parentheses, `not` and lambdas; Learn warns of a limit at hundreds of clauses without naming it, so
+these numbers and their messages are floci-az's.
 
 - **Constants:** `'text'` (with `''` for a quote), numbers, `true`/`false`, `null`, dates such as
   `2026-01-02T10:00:00Z` or with an offset, `INF`, `-INF`, `NaN` and `geography'POINT(lon lat)'`. The

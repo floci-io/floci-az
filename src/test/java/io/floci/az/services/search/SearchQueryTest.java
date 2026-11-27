@@ -137,6 +137,11 @@ class SearchQueryTest {
             .body("error.message", containsString("'here'"));
         search("{\"search\": \"x\", \"scoringProfile\": \"near\", \"scoringParameters\": [\"here-24.9,60.2\"]}")
             .then().statusCode(503);
+        for (String point : new String[] {"here-24.9,200", "here-NaN,60"}) {
+            search("{\"search\": \"x\", \"scoringProfile\": \"near\", \"scoringParameters\": [\"" + point + "\"]}")
+                .then().statusCode(400)
+                .body("error.message", containsString("must be a longitude and a latitude"));
+        }
     }
 
     @Test

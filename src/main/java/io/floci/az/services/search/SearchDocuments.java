@@ -739,7 +739,10 @@ public class SearchDocuments {
     private static Map<String, Object> point(Object value) {
         if (value instanceof Map<?, ?> sent && "Point".equals(sent.get("type"))
                 && sent.get("coordinates") instanceof List<?> coordinates && coordinates.size() == 2
-                && coordinates.stream().allMatch(c -> finiteDouble(c).isPresent())) {
+                && coordinates.stream().allMatch(c -> finiteDouble(c).isPresent())
+                // A longitude and a latitude on the globe, or Solr could not index the document.
+                && Math.abs(finiteDouble(coordinates.get(0)).orElseThrow()) <= 180
+                && Math.abs(finiteDouble(coordinates.get(1)).orElseThrow()) <= 90) {
             Map<String, Object> point = new LinkedHashMap<>();
             point.put("type", "Point");
             point.put("coordinates", coordinates.stream().map(c -> finiteDouble(c).orElseThrow()).toList());
