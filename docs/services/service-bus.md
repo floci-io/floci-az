@@ -54,6 +54,11 @@ Entity CRUD is served over HTTP at `/{account}-servicebus/`:
 | `GET` | `/{account}-servicebus/{topic}/subscriptions/{sub}/rules` | List subscription rules |
 | `PUT` / `GET` / `DELETE` | `/{account}-servicebus/{topic}/subscriptions/{sub}/rules/{rule}` | Manage a subscription rule |
 
+A queue, topic or subscription `PUT` without `If-Match` is a create: on an entity that already exists it
+answers `409` and leaves the entity unchanged, as Azure does, so the administration clients raise their
+"already exists" error (`MessagingEntityAlreadyExists` in .NET, `ResourceExistsException` in Java). A `PUT`
+with `If-Match: *` is the SDKs' update call and applies the new settings.
+
 ## ARM management plane (Microsoft.ServiceBus)
 
 Service Bus is also served on the ARM plane, so `azurerm_servicebus_*` resources, `az servicebus` and

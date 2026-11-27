@@ -305,15 +305,16 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             return isUpdate(req)
                     ? handleUpdateTopic(account, ns, entityName, duplicateDetection, lifetime, metadata,
                             ServiceBusEntityXml.parseFixedSettings(body))
-                    : handleCreateTopic(account, ns, entityName, duplicateDetection, lifetime, metadata);
+                    : createUnlessExists(topicKey(account, ns, entityName), entityName,
+                            () -> handleCreateTopic(account, ns, entityName, duplicateDetection, lifetime, metadata));
         }
         // Default to queue (empty body, QueueDescription, or ambiguous)
         if (isUpdate(req)) {
             return handleUpdateQueue(account, ns, entityName, requiresSession, duplicateDetection,
                     lifetime, delivery, metadata, ServiceBusEntityXml.parseFixedSettings(body));
         }
-        return handleCreateQueue(
-                account, ns, entityName, requiresSession, duplicateDetection, lifetime, delivery, metadata);
+        return createUnlessExists(queueKey(account, ns, entityName), entityName, () -> handleCreateQueue(
+                account, ns, entityName, requiresSession, duplicateDetection, lifetime, delivery, metadata));
     }
 
     private Response handleSpecEntityDelete(String account, String ns, String entityName) {
@@ -523,8 +524,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                             ? handleUpdateQueue(account, namespace, queueName, requiresSession,
                                     duplicateDetection, lifetime, delivery, metadata,
                                     ServiceBusEntityXml.parseFixedSettings(body))
-                            : handleCreateQueue(account, namespace, queueName, requiresSession,
-                                    duplicateDetection, lifetime, delivery, metadata);
+                            : createUnlessExists(queueKey(account, namespace, queueName), queueName,
+                                    () -> handleCreateQueue(account, namespace, queueName, requiresSession,
+                                            duplicateDetection, lifetime, delivery, metadata));
                 } catch (IllegalArgumentException e) {
                     yield badRequestAtom(e.getMessage());
                 }
@@ -680,8 +682,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                     yield isUpdate(req)
                             ? handleUpdateTopic(account, namespace, topicName, duplicateDetection,
                                     lifetime, metadata, ServiceBusEntityXml.parseFixedSettings(body))
-                            : handleCreateTopic(account, namespace, topicName, duplicateDetection,
-                                    lifetime, metadata);
+                            : createUnlessExists(topicKey(account, namespace, topicName), topicName,
+                                    () -> handleCreateTopic(account, namespace, topicName, duplicateDetection,
+                                            lifetime, metadata));
                 } catch (IllegalArgumentException e) {
                     yield badRequestAtom(e.getMessage());
                 }
@@ -832,8 +835,10 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                 lifetime, delivery, ServiceBusEntityXml.parseMetadata(body),
                                 ServiceBusEntityXml.parseFixedSettings(body));
                     }
-                    yield handleCreateSubscription(account, namespace, topicName, subName,
-                            requiresSession, body, lifetime, delivery);
+                    yield createUnlessExists(subKey(account, namespace, topicName, subName),
+                            topicName + "/Subscriptions/" + subName,
+                            () -> handleCreateSubscription(account, namespace, topicName, subName,
+                                    requiresSession, body, lifetime, delivery));
                 } catch (IllegalArgumentException e) {
                     yield badRequestAtom(e.getMessage());
                 }
@@ -1018,6 +1023,19 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     /** The SDKs' update calls are a PUT with {@code If-Match: *}; a create sends no If-Match. */
     private static boolean isUpdate(AzureRequest req) {
         return req.headers() != null && req.headers().getHeaderString("If-Match") != null;
+    }
+
+    /**
+     * A create (a PUT without {@code If-Match}) of an entity that already exists answers 409, which every SDK maps to
+     * MessagingEntityAlreadyExists from the status alone. Only the Atom requests go through here: the topology loader
+     * and the ARM plane call the create methods directly and keep their 200 for an existing entity. The check and the
+     * create run under the handler's lock, the one the create methods take, so two concurrent creates cannot both pass.
+     */
+    private synchronized Response createUnlessExists(String key, String entityPath, Supplier<Response> create) {
+        if (store.get(key).isPresent()) {
+            return errorAtom(409, "The messaging entity '" + entityPath + "' already exists.");
+        }
+        return create.get();
     }
 
     private static ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection(

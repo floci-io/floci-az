@@ -537,7 +537,7 @@ public final class EmulatorConfig {
      * Creates a queue via the Azure spec path (/{entityName}) — the same path used by
      * {@code ServiceBusAdministrationClient}. Triggers lazy namespace auto-start.
      */
-    static void createQueueViaSpecPath(String queueName, boolean requiresSession) throws Exception {
+    static int createQueueViaSpecPath(String queueName, boolean requiresSession) throws Exception {
         String url = BASE + "/" + ACCOUNT + "-servicebus/" + queueName;
         String body = requiresSession
                 ? "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
@@ -558,9 +558,10 @@ public final class EmulatorConfig {
             os.write(bodyBytes);
         }
         int status = conn.getResponseCode();
-        if (status != 200 && status != 201) {
+        if (status != 201 && status != 409) {
             throw new RuntimeException("createQueueViaSpecPath '" + queueName + "' failed, HTTP " + status);
         }
+        return status;
     }
 
     /** GET the Service Bus namespaces list; returns the raw JSON body. */
@@ -606,7 +607,7 @@ public final class EmulatorConfig {
             os.write(bodyBytes);
         }
         int status = conn.getResponseCode();
-        if (status != 200 && status != 201) {
+        if (status != 200 && status != 201 && status != 409) {
             throw new RuntimeException(
                     "Failed to create Service Bus queue '" + queueName + "', HTTP " + status);
         }
@@ -650,7 +651,7 @@ public final class EmulatorConfig {
         conn.setRequestProperty("Content-Length", "0");
         conn.getOutputStream().close();
         int status = conn.getResponseCode();
-        if (status != 200 && status != 201) {
+        if (status != 200 && status != 201 && status != 409) {
             throw new RuntimeException(
                     "Failed to create Service Bus topic '" + topicName + "', HTTP " + status);
         }
@@ -683,7 +684,7 @@ public final class EmulatorConfig {
             os.write(bodyBytes);
         }
         int status = conn.getResponseCode();
-        if (status != 200 && status != 201) {
+        if (status != 200 && status != 201 && status != 409) {
             throw new RuntimeException(
                     "Failed to create subscription '" + topicName + "/" + subName + "', HTTP " + status);
         }

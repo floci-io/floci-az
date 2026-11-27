@@ -307,9 +307,9 @@ public class ServiceBusRulesTest {
                 .when().put(rules + "/keep-me").then().statusCode(201);
         given().when().delete(rules + "/$Default").then().statusCode(200);
 
-        // idempotent re-create returns the existing subscription and leaves rules alone
+        // a re-create without If-Match answers 409 and leaves the rules alone
         given().when().put(BASE + "/rules-topic-recreate/subscriptions/sub1")
-                .then().statusCode(200);
+                .then().statusCode(409);
         given().when().get(rules)
                 .then().statusCode(200)
                 .body(containsString("keep-me"))

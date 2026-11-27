@@ -1,5 +1,6 @@
 package io.floci.az.compat;
 
+import com.azure.core.exception.ResourceExistsException;
 import com.azure.core.exception.ResourceNotFoundException;
 import com.azure.messaging.servicebus.ServiceBusMessage;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
@@ -616,6 +617,23 @@ class ServiceBusCompatibilityTest {
 
         assertThrows(ResourceNotFoundException.class, () -> admin.updateQueue(properties));
         assertFalse(admin.getQueueExists(queue), "An update must not recreate a deleted queue");
+    }
+
+    @Test
+    @DisplayName("administration client create of an existing queue, topic or subscription answers ResourceExists")
+    void administrationClientCreateOfAnExistingEntityIsResourceExists() {
+        String queue = uniqueName("exists-queue");
+        String topic = uniqueName("exists-topic");
+        ServiceBusAdministrationClient admin = EmulatorConfig.serviceBusAdministrationClient();
+        admin.createQueue(queue, new CreateQueueOptions().setMaxDeliveryCount(3));
+        admin.createTopic(topic);
+        admin.createSubscription(topic, "sub");
+
+        assertThrows(ResourceExistsException.class,
+                () -> admin.createQueue(queue, new CreateQueueOptions().setMaxDeliveryCount(7)));
+        assertThrows(ResourceExistsException.class, () -> admin.createTopic(topic));
+        assertThrows(ResourceExistsException.class, () -> admin.createSubscription(topic, "sub"));
+        assertEquals(3, admin.getQueue(queue).getMaxDeliveryCount(), "A rejected create must leave the queue as it was");
     }
 
     @Test

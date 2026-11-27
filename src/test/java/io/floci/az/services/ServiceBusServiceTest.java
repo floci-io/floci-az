@@ -5,9 +5,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 public class ServiceBusServiceTest {
@@ -459,15 +469,82 @@ public class ServiceBusServiceTest {
     }
 
     @Test
-    void puttingAnExistingQueueWithoutIfMatchLeavesItUnchanged() {
+    void creatingAQueueThatExistsAnswers409AndLeavesItUnchanged() {
         given().body(queueDescription("PT30S", 3))
                 .when().put(BASE + "/recreate-queue")
                 .then().statusCode(201);
 
         given().body(queueDescription("PT50S", 7))
                 .when().put(BASE + "/recreate-queue")
+                .then().statusCode(409)
+                .body(containsString("<Code>409</Code>"))
+                .body(containsString("The messaging entity &apos;recreate-queue&apos; already exists."));
+
+        given().when().get(BASE + "/recreate-queue")
                 .then().statusCode(200)
                 .body(containsString("<MaxDeliveryCount>3</MaxDeliveryCount>"));
+    }
+
+    @Test
+    void concurrentCreatesOfOneQueueLetExactlyOneSucceed() throws Exception {
+        int callers = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(callers);
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Integer>> statuses = new ArrayList<>();
+            for (int i = 0; i < callers; i++) {
+                statuses.add(pool.submit(() -> {
+                    start.await();
+                    return given().body(queueDescription("PT30S", 3))
+                            .when().put(BASE + "/concurrent-create-queue").statusCode();
+                }));
+            }
+            start.countDown();
+            List<Integer> answered = new ArrayList<>();
+            for (Future<Integer> status : statuses) {
+                answered.add(status.get(30, TimeUnit.SECONDS));
+            }
+            assertEquals(1, Collections.frequency(answered, 201), "exactly one create wins: " + answered);
+            assertEquals(callers - 1, Collections.frequency(answered, 409), "the rest are conflicts: " + answered);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void creatingAQueueThatExistsOnTheNamespacePathAnswers409() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/default/queues/recreate-legacy-queue")
+                .then().statusCode(201);
+
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/default/queues/recreate-legacy-queue")
+                .then().statusCode(409);
+    }
+
+    @Test
+    void creatingATopicThatExistsAnswers409() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/recreate-topic")
+                .then().statusCode(201);
+
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/recreate-topic")
+                .then().statusCode(409)
+                .body(containsString("The messaging entity &apos;recreate-topic&apos; already exists."));
+    }
+
+    @Test
+    void creatingASubscriptionThatExistsAnswers409() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/recreate-sub-topic")
+                .then().statusCode(201);
+        given().when().put(BASE + "/recreate-sub-topic/subscriptions/sub1")
+                .then().statusCode(201);
+
+        given().when().put(BASE + "/recreate-sub-topic/subscriptions/sub1")
+                .then().statusCode(409)
+                .body(containsString("The messaging entity &apos;recreate-sub-topic/Subscriptions/sub1&apos; already exists."));
     }
 
     @Test
