@@ -510,12 +510,13 @@ class SearchSolrDockerTest {
                 {"name": "special", "fields": [
                   {"name": "id", "type": "Edm.String", "key": true},
                   {"name": "rating", "type": "Edm.Double"},
-                  {"name": "prices", "type": "Collection(Edm.Double)"}]}""");
+                  {"name": "prices", "type": "Collection(Edm.Double)"},
+                  {"name": "serial", "type": "Edm.Int64"}]}""");
         upload("special", """
                 {"id": "nan", "rating": "NaN", "prices": ["NaN"]},
                 {"id": "one", "rating": 1.0, "prices": [1.0]},
                 {"id": "none"},
-                {"id": "big", "rating": 1e20}""");
+                {"id": "big", "rating": 1e20, "serial": 9223372036854775806}""");
         assertThat(ids("special", "rating eq null"), contains("none"));
         assertThat(ids("special", "rating ne null"), containsInAnyOrder("nan", "one", "big"));
         assertThat(ids("special", "rating gt 0"), containsInAnyOrder("one", "big"));
@@ -533,6 +534,11 @@ class SearchSolrDockerTest {
         search("special", "{\"top\": 0, \"facets\": [\"rating,interval:1\"]}").then().statusCode(200)
             .body("'@search.facets'.rating.value", contains(1))
             .body("'@search.facets'.rating.count", contains(1));
+        // A boundary of a long field keeps every digit, though it has 19.
+        search("special", "{\"top\": 0, \"facets\": [\"serial,values:9223372036854775806\"]}").then()
+            .statusCode(200)
+            .body(containsString("{\"to\":9223372036854775806,\"count\":0}"))
+            .body(containsString("{\"from\":9223372036854775806,\"count\":1}"));
     }
 
     private static List<String> ids(String index, String filter) {

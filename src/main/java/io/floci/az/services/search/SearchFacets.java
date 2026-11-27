@@ -58,6 +58,8 @@ final class SearchFacets {
      * sparse over a wide range, and the buckets are found from the distinct values instead.
      */
     static final int MAX_BUCKETS = 1000;
+    private static final BigDecimal LONG_MIN = BigDecimal.valueOf(Long.MIN_VALUE);
+    private static final BigDecimal LONG_MAX = BigDecimal.valueOf(Long.MAX_VALUE);
 
     /** One facet expression, read and checked. */
     record Facet(String path, ValueField field, int count, String sort, List<Object> boundaries, String interval,
@@ -450,8 +452,8 @@ final class SearchFacets {
         BigDecimal number = (BigDecimal) value;
         BigDecimal whole = number.stripTrailingZeros();
         // A whole number past a long (a double field's 1e20) stays a double rather than wrapping.
-        return whole.scale() <= 0 && whole.precision() - whole.scale() < 19 ? (Object) number.longValue()
-                : (Object) number.doubleValue();
+        boolean fitsALong = whole.scale() <= 0 && whole.compareTo(LONG_MIN) >= 0 && whole.compareTo(LONG_MAX) <= 0;
+        return fitsALong ? (Object) number.longValue() : (Object) number.doubleValue();
     }
 
     /** A value of a field as Solr answered it, as Azure answers it. */
