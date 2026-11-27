@@ -66,6 +66,29 @@ answers from the same ownership for a `Site` or `Microsoft.Web/sites` name. Path
 the same site. With `parity-overrides.strict-names` a name outside 2 to 60 letters, digits and hyphens, or starting
 or ending with a hyphen, is refused with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
 
+A site PUT replaces the site whole, as in Azure, and reads back the `kind`, `tags` and `properties` it sent
+(`serverFarmId`, `httpsOnly`, `virtualNetworkSubnetId` and the rest), with `state: Running` and
+`defaultHostName: {name}.azurewebsites.net` (the App Service suffix of the subscription's cloud). A `SystemAssigned` identity gets a `principalId` and `tenantId`, kept
+across re-PUTs so role assignments to it stay valid. A `PUT` of `config/web` replaces the stored `siteConfig` whole
+and keeps the rest of the site. The `appSettings` and `connectionStrings` lists a site PUT or a `config/web` PUT sends
+are kept as the site's `config/appsettings` and `config/connectionstrings`, where azurerm reads them back, and left out
+of the stored `siteConfig`, as in Azure; a PUT that leaves a list out keeps what is stored.
+
+A site's other config documents (`sites/{name}/config/{configName}`: `appsettings`, `authsettings`,
+`authsettingsV2`, `azurestorageaccounts`, `backup`, `connectionstrings`, `logs`, `metadata`, `pushsettings` and
+`slotConfigNames`) are stored ARM documents with no runtime behind them, served with the methods the App Service
+REST API defines for each: `PUT` replaces a config's `properties` whole; `logs`, `slotConfigNames` and
+`authsettingsV2` also answer `GET`; the configs that carry secrets read back only through their `.../list` action
+(`POST`, or `GET` for `authsettingsV2`); `backup` also answers `DELETE`. Another method answers `405`. A config never
+written reads back with empty `properties`, except `backup`, which answers `404` until one is set, as Azure does
+for a site without a backup. Config names match ignoring case and read back as
+the API spells them; a name the API does not define, or a site that does not exist, answers `404`. Deleting a site
+deletes its configs. Only `config/web` reaches the Function App runtime. `POST .../config/publishingcredentials/list`
+returns the site's `$sitename` deployment user and a password generated on the first call and kept until the site
+is deleted. `sites/{name}/basicPublishingCredentialsPolicies/{ftp|scm}` answer `GET` and `PUT` for
+whether FTP and SCM basic auth are allowed: a policy never written reads back `allow: true`, Azure's default for a
+new site, and the collection lists both.
+
 App Service plans (`Microsoft.Web/serverFarms`) are stored ARM documents in the same `arm-web` store, with no
 runtime behind them: `PUT` creates or replaces a plan, `PATCH` changes only the `sku`, `kind`, `tags` and
 `properties` it sends, and `GET` lists them per resource group or across a subscription. The `sku`, `kind` and
