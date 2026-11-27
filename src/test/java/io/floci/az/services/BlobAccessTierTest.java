@@ -40,7 +40,7 @@ class BlobAccessTierTest {
 
         String listing = given().get(LIST_PATH, ACCOUNT, CONTAINER).then().statusCode(200).extract().asString();
         assertThat(listing, containsString("<AccessTier>Cool</AccessTier>"));
-        assertThat(listing, not(containsString("<AccessTier>Hot</AccessTier>")));
+        assertThat(listing, containsString("<AccessTier>Hot</AccessTier>"));
         assertThat(listing, containsString("<AccessTierInferred>true</AccessTierInferred>"));
         given().head(BLOB_PATH, ACCOUNT, CONTAINER, BLOB).then().statusCode(200)
                 .header("x-ms-access-tier", "Cool")
@@ -62,13 +62,17 @@ class BlobAccessTierTest {
                 .put(BLOB_PATH, ACCOUNT, CONTAINER, "explicit").then().statusCode(201);
         given().head(BLOB_PATH, ACCOUNT, CONTAINER, BLOB).then().header("x-ms-access-tier", "Cool")
                 .header("x-ms-access-tier-inferred", "true");
-        given().get(LIST_PATH, ACCOUNT, CONTAINER).then().body(not(containsString("<AccessTier>Cool</AccessTier>")))
+        given().queryParam("prefix", BLOB).get(LIST_PATH, ACCOUNT, CONTAINER).then()
+                .body(containsString("<AccessTier>Cool</AccessTier>"))
                 .body(containsString("<AccessTierInferred>true</AccessTierInferred>"));
         given().contentType("application/json").body("{\"location\":\"eastus\"}").put(accountPath)
                 .then().statusCode(200).body("properties.accessTier", equalTo("Cool"));
         given().contentType("application/json").body("{\"properties\":{\"accessTier\":\"Hot\"}}").patch(accountPath)
                 .then().statusCode(200).body("properties.accessTier", equalTo("Hot"));
         given().head(BLOB_PATH, ACCOUNT, CONTAINER, BLOB).then().header("x-ms-access-tier", "Hot");
+        given().queryParam("prefix", BLOB).get(LIST_PATH, ACCOUNT, CONTAINER).then()
+                .body(containsString("<AccessTier>Hot</AccessTier>"))
+                .body(containsString("<AccessTierInferred>true</AccessTierInferred>"));
         given().head(BLOB_PATH, ACCOUNT, CONTAINER, "explicit").then().header("x-ms-access-tier", "Cold");
         given().contentType("application/json").body("{\"properties\":{\"accessTier\":\"Cool\"}}").patch(accountPath)
                 .then().statusCode(200);
@@ -83,7 +87,7 @@ class BlobAccessTierTest {
         given().header("x-ms-blob-type", "AppendBlob").body("")
                 .put(BLOB_PATH, ACCOUNT, CONTAINER, BLOB).then().statusCode(201);
         given().get(LIST_PATH, ACCOUNT, CONTAINER).then()
-                .body(not(containsString("<AccessTier>Cool</AccessTier>")));
+                .body(not(containsString("<AccessTier>")));
         given().header("x-ms-blob-type", "BlockBlob").header("x-ms-access-tier", "Cool").body("file")
                 .put(BLOB_PATH, ACCOUNT, CONTAINER, "file").then().statusCode(201);
         given().header("Host", ACCOUNT + ".dfs.core.windows.net")
@@ -191,7 +195,11 @@ class BlobAccessTierTest {
                 .then().statusCode(400).header("x-ms-error-code", "InvalidHeaderValue");
         given().header("x-ms-access-tier", "Cold").header("x-ms-blob-type", "AppendBlob")
                 .body("replacement").put(BLOB_PATH, ACCOUNT, CONTAINER, BLOB)
-                .then().statusCode(409).header("x-ms-error-code", "AccessTierNotSupportedForBlobType");
+                .then().statusCode(400).header("x-ms-error-code", "AccessTierNotSupportedForBlobType");
+        given().header("x-ms-blob-type", "AppendBlob").body("")
+                .put(BLOB_PATH, ACCOUNT, CONTAINER, "append").then().statusCode(201);
+        given().header("x-ms-access-tier", "Cold").put(BLOB_PATH + "?comp=tier", ACCOUNT, CONTAINER, "append")
+                .then().statusCode(400).header("x-ms-error-code", "AccessTierNotSupportedForBlobType");
         given().get(BLOB_PATH, ACCOUNT, CONTAINER, BLOB).then().statusCode(200)
                 .header("x-ms-access-tier", "Cool").body(equalTo("content"));
         given().get(LIST_PATH, ACCOUNT, CONTAINER).then().body(not(containsString("<AccessTier>Cold</AccessTier>")));

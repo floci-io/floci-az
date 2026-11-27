@@ -139,9 +139,16 @@ class BlobCompatibilityTest {
                 .collect(Collectors.toMap(BlobItem::getName, item -> item));
 
             assertEquals(AccessTier.COOL, listed.get("explicit").getProperties().getAccessTier());
-            assertNull(listed.get("inferred").getProperties().getAccessTier());
+            assertEquals(AccessTier.HOT, listed.get("inferred").getProperties().getAccessTier());
             assertEquals(Boolean.TRUE, listed.get("inferred").getProperties().isAccessTierInferred());
             assertEquals(AccessTier.HOT, inferred.getProperties().getAccessTier());
+
+            BlobClient append = container.getBlobClient("append");
+            append.getAppendBlobClient().create();
+            BlobStorageException unsupportedType = assertThrows(BlobStorageException.class,
+                () -> append.setAccessTier(AccessTier.COOL));
+            assertEquals(400, unsupportedType.getStatusCode());
+            assertEquals(BlobErrorCode.fromString("AccessTierNotSupportedForBlobType"), unsupportedType.getErrorCode());
 
             explicit.setAccessTier(AccessTier.HOT);
             BlobItem updated = container.listBlobs().stream()

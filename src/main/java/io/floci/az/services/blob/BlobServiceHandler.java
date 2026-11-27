@@ -3093,7 +3093,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (!"BlockBlob".equalsIgnoreCase(metadata.getOrDefault("BlobType", "BlockBlob"))) {
             return new AzureErrorResponse("AccessTierNotSupportedForBlobType",
                     "The access tier is not supported for this blob type.")
-                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
         }
         if ("Archive".equals(canonical) || "Smart".equals(canonical)) {
             return notImplemented();
@@ -3475,7 +3475,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     (long) so.data().length,
                     usableContentType(so.metadata().get("Content-Type")),
                     so.metadata().getOrDefault("BlobType", "BlockBlob"),
-                    so.metadata().get(ACCESS_TIER_KEY),
+                    "BlockBlob".equalsIgnoreCase(so.metadata().getOrDefault("BlobType", "BlockBlob"))
+                            ? so.metadata().getOrDefault(ACCESS_TIER_KEY, accountAccessTier(request.accountName()))
+                            : null,
                     "BlockBlob".equalsIgnoreCase(so.metadata().getOrDefault("BlobType", "BlockBlob"))
                             && !so.metadata().containsKey(ACCESS_TIER_KEY) ? true : null,
                     so.metadata().containsKey(ACCESS_TIER_CHANGE_TIME_KEY)

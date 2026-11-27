@@ -20,9 +20,9 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 - **Block blob access tiers**: Put Blob, Put Blob From URL, Copy Blob and Put Block List accept
   `Hot`, `Cool` and `Cold` via `x-ms-access-tier`; Set Blob Tier (`?comp=tier`) updates the tier
   without changing the content, ETag or last-modified time. Explicit tiers appear in List Blobs and
-  Get Blob properties. When no tier was set, listings mark it as inferred without an `AccessTier`
-  element, and Get Blob properties reports the effective account tier as inferred. The default is
-  `Hot`; an ARM storage account's `properties.accessTier` overrides it
+  Get Blob properties. When no tier was set, listings and Get Blob properties report the effective
+  account tier as inferred. The default is `Hot`; an ARM storage account's `properties.accessTier`
+  overrides it
 - **Data Lake Storage Gen2 endpoint alias**: the `{account}.dfs.core.windows.net` host maps to the
   Blob backend so ADLS SDK path clients can create, read, write, and delete paths through the same
   local data store
