@@ -68,10 +68,11 @@ or ending with a hyphen, is refused with `400 InvalidResourceName` (see [ARM nam
 
 A site PUT replaces the site whole, as in Azure, and reads back the `kind`, `tags` and `properties` it sent
 (`serverFarmId`, `httpsOnly`, `virtualNetworkSubnetId` and the rest), with `state: Running` and
-`defaultHostName: {name}.azurewebsites.net`. A `SystemAssigned` identity gets a `principalId` and `tenantId`, kept
+`defaultHostName: {name}.azurewebsites.net` (the App Service suffix of the subscription's cloud). A `SystemAssigned` identity gets a `principalId` and `tenantId`, kept
 across re-PUTs so role assignments to it stay valid. A `PUT` of `config/web` replaces the stored `siteConfig` whole
-and keeps the rest of the site. The `appSettings` and `connectionStrings` lists a site PUT sends in `siteConfig` are kept as
-the site's `config/appsettings` and `config/connectionstrings`, where azurerm reads them back, as in Azure.
+and keeps the rest of the site. The `appSettings` and `connectionStrings` lists a site PUT or a `config/web` PUT sends
+are kept as the site's `config/appsettings` and `config/connectionstrings`, where azurerm reads them back, and left out
+of the stored `siteConfig`, as in Azure; a PUT that leaves a list out keeps what is stored.
 
 A site's other config documents (`sites/{name}/config/{configName}`: `appsettings`, `authsettings`,
 `authsettingsV2`, `azurestorageaccounts`, `backup`, `connectionstrings`, `logs`, `metadata`, `pushsettings` and

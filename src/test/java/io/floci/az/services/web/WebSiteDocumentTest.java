@@ -126,4 +126,28 @@ class WebSiteDocumentTest {
         given().when().post(site("settingssite") + "/config/appsettings/list" + API)
             .then().statusCode(200).body("properties.FUNCTIONS_EXTENSION_VERSION", equalTo("~4"));
     }
+
+    @Test
+    void appSettingsAndConnectionStringsInAConfigWebPutReadBackFromTheirConfigs() {
+        putSite(site("cfgsettingssite"), "{\"location\":\"eastus\",\"properties\":{\"siteConfig\":{"
+            + "\"appSettings\":[{\"name\":\"MODE\",\"value\":\"old\"}]}}}");
+        given().contentType("application/json")
+            .body("{\"properties\":{\"appSettings\":[{\"name\":\"MODE\",\"value\":\"new\"}],"
+                + "\"connectionStrings\":[{\"name\":\"db\",\"connectionString\":\"Server=y\"}]}}")
+            .when().put(site("cfgsettingssite") + "/config/web" + API)
+            .then().statusCode(200)
+            .body("properties", not(hasKey("appSettings")))
+            .body("properties", not(hasKey("connectionStrings")));
+
+        given().when().post(site("cfgsettingssite") + "/config/appsettings/list" + API)
+            .then().statusCode(200).body("properties.MODE", equalTo("new"));
+        given().when().post(site("cfgsettingssite") + "/config/connectionstrings/list" + API)
+            .then().statusCode(200)
+            .body("properties.db.value", equalTo("Server=y"))
+            .body("properties.db.type", equalTo("Custom"));
+        given().when().get(site("cfgsettingssite") + API)
+            .then().statusCode(200)
+            .body("properties.siteConfig", not(hasKey("appSettings")))
+            .body("properties.siteConfig", not(hasKey("connectionStrings")));
+    }
 }

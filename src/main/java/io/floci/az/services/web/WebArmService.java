@@ -122,7 +122,6 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     private static final String PUBLISHING_CREDENTIALS = "publishingcredentials";
     private static final String PUBLISHING_CREDENTIALS_TYPE = NAMESPACE + "/sites/publishingcredentials";
     private static final String ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    private static final SecureRandom RANDOM = new SecureRandom();
 
     /**
      * An App Service plan's own path, namespace and type in any case: group 1 the plan name. Any path under a plan
@@ -342,14 +341,8 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
             body.get("tags") instanceof Map<?, ?> tags ? ArmJson.cast(tags) : null,
             ArmJson.string(body, "kind", null),
             siteIdentity(req, body.get("identity"), existing.map(WebArmService::identityOf).orElse(null)),
-            properties, siteConfig)).stored().value();
-        ArmResourceId stored = ArmResourceId.parse(idOf(written)).orElseThrow();
-        if (appSettings instanceof List<?> settings) {
-            putSiteConfig(stored, "appsettings", appSettingsProperties(settings));
-        }
-        if (connectionStrings instanceof List<?> strings) {
-            putSiteConfig(stored, "connectionstrings", connectionStringProperties(strings));
-        }
+            properties, siteConfig, webSuffix(req))).stored().value();
+        storeSettingLists(ArmResourceId.parse(idOf(written)).orElseThrow(), appSettings, connectionStrings);
         LOG.infov("ARM: created site {0}", written.get("name"));
         return Response.ok(written).build();
     }
@@ -383,10 +376,29 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         } catch (IllegalArgumentException e) {
             return invalidLinuxFxVersion(e);
         }
-        Optional<Stored<Map<String, Object>>> updated = sites.update(id, existing -> withSiteConfig(existing, config));
+        Map<String, Object> siteConfig = new LinkedHashMap<>(config);
+        Object appSettings = siteConfig.remove("appSettings");
+        Object connectionStrings = siteConfig.remove("connectionStrings");
+        Optional<Stored<Map<String, Object>>> updated = sites.update(id, existing -> withSiteConfig(existing, siteConfig));
+        updated.ifPresent(stored ->
+            storeSettingLists(ArmResourceId.parse(idOf(stored.value())).orElseThrow(), appSettings, connectionStrings));
         return updated
             .map(stored -> configResponse(path, stored.value()))
             .orElseGet(() -> armNotFound("sites/" + id.name()));
+    }
+
+    /**
+     * {@code appSettings} and {@code connectionStrings} sent inside a {@code siteConfig} (a site PUT or a
+     * {@code config/web} PUT) are stored as the site's {@code config/appsettings} and {@code config/connectionstrings},
+     * which is where Azure reads them back from; a list the request leaves out keeps what is stored.
+     */
+    private void storeSettingLists(ArmResourceId siteId, Object appSettings, Object connectionStrings) {
+        if (appSettings instanceof List<?> settings) {
+            putSiteConfig(siteId, "appsettings", appSettingsProperties(settings));
+        }
+        if (connectionStrings instanceof List<?> strings) {
+            putSiteConfig(siteId, "connectionstrings", connectionStringProperties(strings));
+        }
     }
 
     private static Response configResponse(String path, Map<String, Object> site) {
@@ -412,7 +424,7 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     private Response handleSiteConfig(AzureRequest req, String method, ArmResourceId siteId, String requestedName,
                                       boolean listAction) {
         if (PUBLISHING_CREDENTIALS.equalsIgnoreCase(requestedName)) {
-            return listPublishingCredentials(method, siteId, listAction);
+            return listPublishingCredentials(method, siteId, listAction, webSuffix(req));
         }
         SiteConfigOps ops = SITE_CONFIGS.get(requestedName.toLowerCase(Locale.ROOT));
         if (ops == null || (listAction && ops.listMethod() == null)) {
@@ -465,7 +477,8 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
      * The site's deployment credentials, the {@code $sitename} user azurerm reads into {@code site_credential}. They
      * are generated on the first list and kept, so every read returns the same pair until the site is deleted.
      */
-    private Response listPublishingCredentials(String method, ArmResourceId siteId, boolean listAction) {
+    private Response listPublishingCredentials(String method, ArmResourceId siteId, boolean listAction,
+                                               String webSuffix) {
         if (!listAction) {
             return armNotFound("sites/" + siteId.name() + "/config/" + PUBLISHING_CREDENTIALS);
         }
@@ -480,20 +493,20 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
             String siteName = nameOf(site.get().value());
             ArmResourceId id = siteConfigId(siteId, PUBLISHING_CREDENTIALS);
             Map<String, Object> credentials = siteConfigs.createOrUpdate(id,
-                existing -> existing.orElseGet(() -> publishingCredentialsDocument(id.id(), siteName)))
+                existing -> existing.orElseGet(() -> publishingCredentialsDocument(id.id(), siteName, webSuffix)))
                 .stored().value();
             return Response.ok(credentials).build();
         }
     }
 
-    private static Map<String, Object> publishingCredentialsDocument(String id, String siteName) {
+    private static Map<String, Object> publishingCredentialsDocument(String id, String siteName, String webSuffix) {
         String userName = "$" + siteName;
         String password = generatePassword();
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("name", userName);
         properties.put("publishingUserName", userName);
         properties.put("publishingPassword", password);
-        properties.put("scmUri", "https://" + userName + ":" + password + "@" + siteName + ".scm.azurewebsites.net");
+        properties.put("scmUri", "https://" + userName + ":" + password + "@" + siteName + ".scm." + webSuffix);
 
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("id", id);
@@ -504,9 +517,11 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     }
 
     private static String generatePassword() {
+        // A SecureRandom per call, not a static field: a native image would otherwise build it into the image heap.
+        SecureRandom random = new SecureRandom();
         StringBuilder password = new StringBuilder(60);
         for (int i = 0; i < 60; i++) {
-            password.append(ALNUM.charAt(RANDOM.nextInt(ALNUM.length())));
+            password.append(ALNUM.charAt(random.nextInt(ALNUM.length())));
         }
         return password.toString();
     }
@@ -662,11 +677,11 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
                                                     Map<String, Object> tags, String kind,
                                                     Map<String, Object> identity,
                                                     Map<String, Object> requestedProperties,
-                                                    Map<String, Object> siteConfig) {
+                                                    Map<String, Object> siteConfig, String webSuffix) {
         Map<String, Object> properties = new LinkedHashMap<>(requestedProperties);
         properties.put("state", "Running");
         properties.putIfAbsent("enabled", true);
-        properties.put("defaultHostName", siteName + ".azurewebsites.net");
+        properties.put("defaultHostName", siteName + "." + webSuffix);
         properties.put("siteConfig", new LinkedHashMap<>(siteConfig));
 
         Map<String, Object> resource = new LinkedHashMap<>();
@@ -879,6 +894,13 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     /** The cloud the request's subscription belongs to, as the routing filter resolved it; public without a scope. */
     private static CloudProfile cloud(AzureRequest req) {
         return req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : req.scope().cloud();
+    }
+
+    /** The App Service DNS suffix of the request's cloud ({@code azurewebsites.net} in the public cloud). */
+    private static String webSuffix(AzureRequest req) {
+        return cloud(req).suffix(CloudSuffix.WEB)
+            .or(() -> CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD).suffix(CloudSuffix.WEB))
+            .orElseThrow();
     }
 
     private static Response armNotFound(String path) {
