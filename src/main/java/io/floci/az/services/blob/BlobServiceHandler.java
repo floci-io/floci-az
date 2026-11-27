@@ -167,6 +167,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             } else if ("POST".equalsIgnoreCase(method) && "service".equals(query.get("restype"))
                     && "userdelegationkey".equals(query.get("comp"))) {
                 response = getUserDelegationKey(request);
+            } else if ("POST".equalsIgnoreCase(method) && "batch".equals(query.get("comp"))) {
+                // Batch at service scope: each sub-request names its own container.
+                response = submitBatch(request, null);
             } else if ("service".equals(query.get("restype")) && "properties".equals(query.get("comp"))) {
                 if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
                     response = getBlobServiceProperties();
@@ -256,6 +259,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     response = listBlobs(request, containerName);
                 } else if ("GET".equalsIgnoreCase(method) && "blobs".equals(comp)) {
                     response = findBlobsByTags(request, containerName);
+                } else if ("POST".equalsIgnoreCase(method) && "batch".equals(comp)) {
+                    response = submitBatch(request, containerName);
                 } else if (comp != null) {
                     // Container ops are multiplexed onto the same URL by `comp` (metadata, acl,
                     // lease, ...). None are implemented. This branch must stay ABOVE the
@@ -2838,6 +2843,94 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             leaseService.onBlobDeleted(key);
             return Response.status(Response.Status.ACCEPTED).build();
         });
+    }
+
+    // ── Blob Batch ──────────────────────────────────────────────────────────────
+
+    /**
+     * Blob Batch: {@code POST /{container}?restype=container&comp=batch} over one container, or
+     * {@code POST /?restype=service&comp=batch} over the account. Each multipart sub-request is one
+     * operation, and the single {@code 202 Accepted} they come back in reports each one's own status, so a
+     * caller deleting a prefix sees which objects went and which were already gone.
+     *
+     * <p>Only Blob Delete is a sub-request operation: Set Blob Tier and Set Blob Expiry are not implemented
+     * anywhere in this emulator, so a batch of them carries a single {@code 501 NotImplemented} error part
+     * rather than per-object successes that change nothing.
+     */
+    private Response submitBatch(AzureRequest request, String containerName) {
+        List<BlobBatch.SubRequest> subRequests;
+        try {
+            subRequests = BlobBatch.parse(request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE),
+                    request.bodyStream().readAllBytes(), request.accountName(), containerName,
+                    pathAddressed(request));
+        } catch (IOException e) {
+            return new AzureErrorResponse("InvalidInput", "One of the request inputs is not valid.")
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        } catch (BlobBatch.BlobBatchException e) {
+            if (e.requiresDirectResponse()) {
+                return e.toResponse();
+            }
+            Response.ResponseBuilder errorPart = Response.fromResponse(e.toResponse())
+                    .header("x-ms-request-id", UUID.randomUUID().toString())
+                    .header("Date", RFC1123_DATE_TIME.format(Instant.now()));
+            String version = request.headers().getHeaderString("x-ms-version");
+            if (version != null) {
+                errorPart.header("x-ms-version", version);
+            }
+            return BlobBatch.accepted(List.of(new BlobBatch.Part(null, errorPart.build())));
+        }
+
+        List<BlobBatch.Part> parts = new ArrayList<>(subRequests.size());
+        for (BlobBatch.SubRequest subRequest : subRequests) {
+            parts.add(new BlobBatch.Part(subRequest.contentId(), batchDelete(request, subRequest)));
+        }
+        return BlobBatch.accepted(parts);
+    }
+
+    /**
+     * Whether the caller addressed this account by path ({@code /{account}/{container}/{blob}}) rather than by
+     * host ({@code /{container}/{blob}}, as {@code {account}.blob.core.windows.net} does). A sub-request repeats
+     * the batch endpoint's own addressing, because the SDKs take each sub-request's target from the path of the
+     * blob URL they were given, not from the account.
+     */
+    private static boolean pathAddressed(AzureRequest request) {
+        String rawPath = request.rawPath();
+        if (rawPath == null) {
+            return false;
+        }
+        String account = request.accountName();
+        // The account is the path's own first segment, alone at the account's root and followed by the rest of
+        // the URL otherwise. Host addressing puts the container there instead, so the path never starts with it.
+        return rawPath.equalsIgnoreCase(account)
+                || rawPath.regionMatches(true, 0, account + "/", 0, account.length() + 1);
+    }
+
+    /**
+     * Runs one sub-request's Blob Delete as the standalone operation, in the batch's account and with the
+     * batch's authorization: the sub-request's own headers and query carry its conditions, its
+     * {@code x-ms-delete-snapshots} and its snapshot, exactly as they would on a plain delete.
+     */
+    private Response batchDelete(AzureRequest request, BlobBatch.SubRequest subRequest) {
+        String path = subRequest.container() + "/" + subRequest.blob();
+        AzureRequest subRequestScope = new AzureRequest("DELETE", request.accountName(), request.serviceType(), path,
+                new SyntheticHttpHeaders(subRequest.headers()), InputStream.nullInputStream(),
+                subRequest.singleQuery(), subRequest.query(), request.authContext(), request.secure(),
+                request.host(), request.remoteAddress(), path, null, request.authority());
+        Response deleted = deleteBlob(subRequestScope, subRequest.container(), subRequest.blob());
+        // Each sub-response is a response in its own right, so it carries its own request id, version and
+        // date: SDKs read x-ms-request-id per part, not from the batch's envelope. The version is the one
+        // the sub-request sent, which is the one that operation ran under.
+        String version = subRequest.headers().get("x-ms-version");
+        if (version == null) {
+            version = request.headers().getHeaderString("x-ms-version");
+        }
+        Response.ResponseBuilder subResponse = Response.fromResponse(deleted)
+                .header("x-ms-request-id", UUID.randomUUID().toString())
+                .header("Date", RFC1123_DATE_TIME.format(Instant.now()));
+        if (version != null) {
+            subResponse.header("x-ms-version", version);
+        }
+        return subResponse.build();
     }
 
     private Response snapshotBlob(AzureRequest request, String containerName, String blobName) {
