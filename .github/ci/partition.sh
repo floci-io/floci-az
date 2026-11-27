@@ -33,7 +33,6 @@ AUGMENTATION_WEIGHT = 3
 # The tests pass their own through PARTITION_SLOW_CLASSES, a JSON object of the same shape.
 DEFAULT_SLOW_CLASSES = {
     'QueueServiceTest': 19,
-    'ArtemisReadinessProbeTest': 13,
     'BlobServiceTest': 10,
     'PasswordGrantIntegrationTest': 10,
 }
