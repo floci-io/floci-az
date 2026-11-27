@@ -33,6 +33,7 @@ class SearchQueryTest {
               {"name": "secret", "type": "Edm.String", "retrievable": false},
               {"name": "code", "type": "Edm.String", "searchable": false},
               {"name": "spot", "type": "Edm.GeographyPoint"},
+              {"name": "opened", "type": "Edm.DateTimeOffset"},
               {"name": "note", "type": "Edm.String", "filterable": false, "sortable": false, "facetable": false}],
              "scoringProfiles": [
               {"name": "near", "functions": [{"type": "distance", "fieldName": "spot", "boost": 5,
@@ -112,6 +113,20 @@ class SearchQueryTest {
         search("{\"facets\": [\"rating,count:2,values:1|2\"]}").then().statusCode(400);
         given().when().get(DOCS + API + "&facet=rating,values:5|1").then().statusCode(400)
             .body("error.message", containsString("ascending"));
+    }
+
+    @Test
+    void aNumberOrOffsetOutOfRangeIsReadWithoutExpandingItOrFailingTheServer() {
+        // An exponent is read as the double it denotes, never written out in full.
+        search("{\"facets\": [\"rating,values:1e1000000000\"]}").then().statusCode(400)
+            .body("error.message", containsString("is not a value of type Edm.Double"));
+        search("{\"facets\": [\"rating,values:1e-1000000000|1\"]}").then().statusCode(503);
+        search("{\"facets\": [\"rating,interval:1e300\"]}").then().statusCode(503);
+        search("{\"filter\": \"rating gt 1e1000000000\"}").then().statusCode(503);
+        search("{\"filter\": \"rating gt 1e-1000000000\"}").then().statusCode(503);
+        search("{\"facets\": [\"opened,interval:day,timeoffset:+99:00\"]}").then().statusCode(400)
+            .body("error.message", containsString("outside -18:00 to +18:00"));
+        search("{\"facets\": [\"opened,interval:day,timeoffset:+02:00\"]}").then().statusCode(503);
     }
 
     @Test

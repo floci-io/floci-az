@@ -51,6 +51,11 @@ final class SearchSolrSchema {
     static final String DEPTH = "_depth_";
     /** The Azure path of the complex collection a child document is an element of. */
     static final String SCOPE = "_scope_";
+    /**
+     * The Solr names of the value fields that hold {@code NaN} in a document or child. A {@code NaN} is a value, so
+     * {@code eq null} does not find it, but it compares with nothing, so its value field leaves it out.
+     */
+    static final String NAN = "_nan_";
     /** The prefix of a value field, which no Azure field name can take. */
     static final String VALUE_PREFIX = "_v_";
     /** The prefix under which child documents are nested in a Solr update. */
@@ -453,6 +458,8 @@ final class SearchSolrSchema {
             Object converted = solrValue(field, value);
             if (converted != null) {
                 values.add(converted);
+            } else if ("NaN".equals(value) && "Edm.Double".equals(field.type())) {
+                markNaN(document, field.solrName());
             }
         }
         if (!values.isEmpty()) {
@@ -463,7 +470,7 @@ final class SearchSolrSchema {
     /**
      * A stored value as Solr takes it: a string normalized, a point as {@code lat,lon}, the infinities as Java
      * writes them. {@code NaN} is left out, so it equals nothing and is not less or greater than anything, as Azure
-     * has it; {@code eq null} finds it too.
+     * has it; {@link #NAN} marks that the field holds one.
      */
     static Object solrValue(ValueField field, Object value) {
         return switch (value) {
@@ -477,6 +484,14 @@ final class SearchSolrSchema {
                     && coordinates.size() == 2 -> coordinates.get(1) + "," + coordinates.get(0);
             default -> value;
         };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void markNaN(Map<String, Object> document, String solrName) {
+        List<Object> marked = (List<Object>) document.computeIfAbsent(NAN, name -> new ArrayList<>());
+        if (!marked.contains(solrName)) {
+            marked.add(solrName);
+        }
     }
 
     private static void gather(Object value, String[] path, int depth, List<Object> values) {
@@ -538,6 +553,8 @@ final class SearchSolrSchema {
                         "docValues", "true")
                 .selfClose("field", "name", SCOPE, "type", "string", "indexed", "true", "stored", "false",
                         "docValues", "true")
+                .selfClose("field", "name", NAN, "type", "string", "indexed", "true", "stored", "false",
+                        "multiValued", "true")
                 .elem("uniqueKey", KEY)
                 .end("schema")
                 .build();

@@ -361,8 +361,13 @@ final class SearchFilter {
                 case "NaN" -> new Literal(LiteralKind.DOUBLE, null, text, token.position());
                 case "INF" -> new Literal(LiteralKind.DOUBLE, INFINITY, text, token.position());
                 case "-INF" -> new Literal(LiteralKind.DOUBLE, INFINITY.negate(), text, token.position());
-                default -> new Literal(text.matches("-?\\d+") ? LiteralKind.INTEGER : LiteralKind.DOUBLE,
-                        new BigDecimal(text), text, token.position());
+                default -> {
+                    // A number beyond a double's range is the infinity a double reads it as.
+                    BigDecimal value = SearchOData.decimal(text);
+                    yield new Literal(text.matches("-?\\d+") ? LiteralKind.INTEGER : LiteralKind.DOUBLE,
+                            value != null ? value : text.startsWith("-") ? INFINITY.negate() : INFINITY, text,
+                            token.position());
+                }
             };
         }
 
@@ -568,8 +573,8 @@ final class SearchFilter {
         private Object compareValue(ValueField field, String operator, Literal literal) {
             if (literal.kind() == LiteralKind.NULL) {
                 return switch (operator) {
-                    case "eq" -> not(exists(field.solrName()));
-                    case "ne" -> exists(field.solrName());
+                    case "eq" -> not(present(field));
+                    case "ne" -> present(field);
                     default -> throw invalid("The '" + operator + "' operator cannot compare with null; only 'eq'"
                             + " and 'ne' can.");
                 };
@@ -666,7 +671,7 @@ final class SearchFilter {
             }
             ValueField values = valueField(lambda.collection(), frame, true);
             if (lambda.body() == null) {
-                return exists(values.solrName());
+                return present(values);
             }
             String variable = lambda.variable();
             return switch (values.type()) {
@@ -835,10 +840,37 @@ final class SearchFilter {
         private Object rangeLambda(ValueField field, Lambda lambda, String variable) {
             requireNormalForm(lambda.body(), lambda.all(), false, true);
             List<Intervals.Interval> accepted = intervals(lambda.body(), variable, field);
+            // A NaN lies in no interval, so whether the body holds for one is worked out on its own.
+            boolean nanPasses = acceptsNaN(lambda.body());
             if (lambda.all()) {
-                return not(ranges(field, Intervals.complement(accepted)));
+                Object failing = ranges(field, Intervals.complement(accepted));
+                return not(nanPasses ? failing : orNaN(field, failing));
             }
-            return ranges(field, accepted);
+            return nanPasses ? orNaN(field, ranges(field, accepted)) : ranges(field, accepted);
+        }
+
+        /** Whether a lambda body holds for a NaN element: NaN only ever passes {@code ne}. */
+        private static boolean acceptsNaN(Node node) {
+            return switch (node) {
+                case Or or -> acceptsNaN(or.left()) || acceptsNaN(or.right());
+                case And and -> acceptsNaN(and.left()) && acceptsNaN(and.right());
+                case Not not -> !acceptsNaN(not.operand());
+                case Compare compare -> "ne".equals(compare.operator());
+                default -> false;
+            };
+        }
+
+        /** {@code query}, or a document whose double {@code field} holds NaN. */
+        private Object orNaN(ValueField field, Object query) {
+            if (!"Edm.Double".equals(field.type())) {
+                return query;
+            }
+            return Map.of("bool", Map.of("should", List.of(query, term(SearchSolrSchema.NAN, field.solrName()))));
+        }
+
+        /** A document where {@code field} has a value, NaN included. */
+        private Object present(ValueField field) {
+            return orNaN(field, exists(field.solrName()));
         }
 
         /**

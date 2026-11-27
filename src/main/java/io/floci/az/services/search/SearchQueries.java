@@ -186,7 +186,7 @@ public class SearchQueries {
             // Nothing to match text in, but a search still needs the engine, as every other one does.
             available();
             hits = new Hits(0, List.of(), Map.of(), List.of(), plan.facets() == null ? null
-                    : plan.facets().read(MissingNode.getInstance(), MissingNode.getInstance()));
+                    : plan.facets().read(MissingNode.getInstance(), Map.of()));
         } else {
             hits = run(plan, cloud, service, index, definition);
         }
@@ -272,17 +272,17 @@ public class SearchQueries {
             throw new Refused(SearchErrors.error(503, UNAVAILABLE, e.getMessage()));
         }
         JsonNode answer;
-        JsonNode distinct = MissingNode.getInstance();
+        Map<Integer, List<Object[]>> intervals = Map.of();
         try {
-            if (plan.facets() != null && plan.facets().needsDistinctValues()) {
-                List<Map.Entry<String, String>> first = new ArrayList<>(plan.params().stream()
-                        .filter(param -> !"rows".equals(param.getKey()) && !param.getKey().startsWith("hl")).toList());
-                first.add(param("rows", "0"));
-                first.add(param("json", json(plan.json(), plan.facets().distinctValues())));
-                distinct = client.select(target.engine().baseUrl(), target.collection(), first).path("facets");
+            if (plan.facets() != null && plan.facets().needsIntervals()) {
+                // The lowest and highest values first; the distinct values only of a facet whose range is too wide.
+                JsonNode bounds = facetsOnly(plan, target, plan.facets().boundsRequest());
+                Map<String, Object> wide = plan.facets().distinctRequest(bounds);
+                JsonNode distinct = wide.isEmpty() ? MissingNode.getInstance() : facetsOnly(plan, target, wide);
+                intervals = plan.facets().intervals(bounds, distinct);
             }
             List<Map.Entry<String, String>> params = new ArrayList<>(plan.params());
-            params.add(param("json", json(plan.json(), plan.facets() == null ? null : plan.facets().solr(distinct))));
+            params.add(param("json", json(plan.json(), plan.facets() == null ? null : plan.facets().solr(intervals))));
             answer = client.select(target.engine().baseUrl(), target.collection(), params);
         } catch (SearchSolrClient.SolrUnreachable e) {
             sync.lost(target.engine());
@@ -314,8 +314,17 @@ public class SearchQueries {
             highlights.put(key, byField);
         }
         Map<String, Object> facets = plan.facets() == null ? null
-                : plan.facets().read(answer.path("facets"), distinct);
+                : plan.facets().read(answer.path("facets"), intervals);
         return new Hits(answer.path("response").path("numFound").asLong(), keys, highlights, scores, facets);
+    }
+
+    /** Runs the search's filter and query with no rows and no highlights, answering only {@code facets}. */
+    private JsonNode facetsOnly(Plan plan, SearchIndexSync.Target target, Map<String, Object> facets) {
+        List<Map.Entry<String, String>> params = new ArrayList<>(plan.params().stream()
+                .filter(param -> !"rows".equals(param.getKey()) && !param.getKey().startsWith("hl")).toList());
+        params.add(param("rows", "0"));
+        params.add(param("json", json(plan.json(), facets)));
+        return client.select(target.engine().baseUrl(), target.collection(), params).path("facets");
     }
 
     /** The {@code json} parameter: the query, its filters and the facets, if any. */

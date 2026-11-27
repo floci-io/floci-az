@@ -7,6 +7,7 @@ import io.floci.az.services.search.SearchSolrSchema.ValueField;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DateTimeException;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -36,7 +37,8 @@ import java.util.regex.Pattern;
  *   <li>{@code interval}: a number, or for dates {@code minute}, {@code hour}, {@code day}, {@code week} (from Monday),
  *       {@code month}, {@code quarter} or {@code year}, in UTC unless {@code timeoffset} names another offset. A
  *       bucket is {@code {count, value}}, the value its start, for each interval that holds a value. Solr first
- *       answers the distinct values, then counts the documents in each interval.</li>
+ *       answers the field's lowest and highest value, and the intervals between them are counted; when there would
+ *       be more than {@link #MAX_BUCKETS}, Solr answers the distinct values and only their intervals are.</li>
  * </ul>
  * Counts are of documents: one whose collection holds two values in a bucket counts once. A facet on a field of the
  * elements of a complex collection counts the documents, not the elements.
@@ -51,6 +53,11 @@ final class SearchFacets {
             "year");
     private static final Pattern OFFSET = Pattern.compile("[+-]\\d{2}(:?\\d{2})?");
     private static final int DEFAULT_COUNT = 10;
+    /**
+     * The most buckets an interval facet counts between its field's lowest and highest value. Past it, the values are
+     * sparse over a wide range, and the buckets are found from the distinct values instead.
+     */
+    static final int MAX_BUCKETS = 1000;
 
     /** One facet expression, read and checked. */
     record Facet(String path, ValueField field, int count, String sort, List<Object> boundaries, String interval,
@@ -63,31 +70,67 @@ final class SearchFacets {
     /** The facets of a search. */
     record Plan(List<Facet> facets) {
 
-        /** Whether an interval facet needs the distinct values first. */
-        boolean needsDistinctValues() {
+        /** Whether an interval facet needs its buckets found first. */
+        boolean needsIntervals() {
             return facets.stream().anyMatch(Facet::byInterval);
         }
 
-        /** The facets of the request that answers the distinct values of each interval facet's field. */
-        Map<String, Object> distinctValues() {
+        /** The facets of the request that answers each interval facet field's lowest and highest finite value. */
+        Map<String, Object> boundsRequest() {
             Map<String, Object> json = new LinkedHashMap<>();
             for (int i = 0; i < facets.size(); i++) {
                 Facet facet = facets.get(i);
                 if (facet.byInterval()) {
+                    String name = facet.field().solrName();
+                    // INF and -INF fall in no interval: an interval of infinite width has no start.
+                    String finite = "Edm.Double".equals(facet.field().type())
+                            ? name + ":{\"-Infinity\" TO \"Infinity\"}" : name + ":[* TO *]";
+                    Map<String, Object> range = new LinkedHashMap<>();
+                    range.put("type", "query");
+                    range.put("q", finite);
+                    range.put("facet", Map.of("lo", "min(" + name + ")", "hi", "max(" + name + ")"));
+                    json.put("b" + i, range);
+                }
+            }
+            return json;
+        }
+
+        /**
+         * The facets of the request that answers the distinct values of each interval facet whose range holds more
+         * than {@link #MAX_BUCKETS} buckets, given the answer to {@link #boundsRequest()}; empty when none does.
+         */
+        Map<String, Object> distinctRequest(JsonNode bounds) {
+            Map<String, Object> json = new LinkedHashMap<>();
+            for (int i = 0; i < facets.size(); i++) {
+                Facet facet = facets.get(i);
+                if (facet.byInterval() && spanned(facet, bounds.path("b" + i)) == null) {
                     json.put("d" + i, terms(facet.field().solrName(), -1));
                 }
             }
             return json;
         }
 
-        /** The JSON facets of the search, given the answer to {@link #distinctValues()} if it was needed. */
-        Map<String, Object> solr(JsonNode distinct) {
+        /** The intervals of each interval facet, by its position, from the two answers above. */
+        Map<Integer, List<Object[]>> intervals(JsonNode bounds, JsonNode distinct) {
+            Map<Integer, List<Object[]>> intervals = new LinkedHashMap<>();
+            for (int i = 0; i < facets.size(); i++) {
+                Facet facet = facets.get(i);
+                if (facet.byInterval()) {
+                    List<Object[]> spanned = spanned(facet, bounds.path("b" + i));
+                    intervals.put(i, spanned != null ? spanned : SearchFacets.intervals(facet, distinct.path("d" + i)));
+                }
+            }
+            return intervals;
+        }
+
+        /** The JSON facets of the search, given the {@link #intervals} of its interval facets. */
+        Map<String, Object> solr(Map<Integer, List<Object[]>> intervals) {
             Map<String, Object> json = new LinkedHashMap<>();
             for (int i = 0; i < facets.size(); i++) {
                 Facet facet = facets.get(i);
                 String name = facet.field().solrName();
                 if (facet.byInterval()) {
-                    List<Object[]> buckets = intervals(facet, distinct.path("d" + i));
+                    List<Object[]> buckets = intervals.get(i);
                     for (int j = 0; j < buckets.size(); j++) {
                         json.put("f" + i + "_" + j, query(name + ":[" + literal(facet, buckets.get(j)[0]) + " TO "
                                 + literal(facet, buckets.get(j)[1]) + "}"));
@@ -106,14 +149,14 @@ final class SearchFacets {
             return json;
         }
 
-        /** {@code @search.facets}, from Solr's facets and the distinct values. */
-        Map<String, Object> read(JsonNode answer, JsonNode distinct) {
+        /** {@code @search.facets}, from Solr's facets and the {@link #intervals} of the interval facets. */
+        Map<String, Object> read(JsonNode answer, Map<Integer, List<Object[]>> intervalsByFacet) {
             Map<String, Object> result = new LinkedHashMap<>();
             for (int i = 0; i < facets.size(); i++) {
                 Facet facet = facets.get(i);
                 List<Map<String, Object>> buckets = new ArrayList<>();
                 if (facet.byInterval()) {
-                    List<Object[]> intervals = intervals(facet, distinct.path("d" + i));
+                    List<Object[]> intervals = intervalsByFacet.getOrDefault(i, List.of());
                     for (int j = 0; j < intervals.size(); j++) {
                         long count = answer.path("f" + i + "_" + j).path("count").asLong();
                         if (count > 0) {
@@ -242,7 +285,13 @@ final class SearchFacets {
         try {
             return switch (field.type()) {
                 case "Edm.DateTimeOffset" -> OffsetDateTime.parse(text).toInstant().truncatedTo(ChronoUnit.MILLIS);
-                case "Edm.Int32", "Edm.Int64", "Edm.Double" -> new BigDecimal(text);
+                case "Edm.Int32", "Edm.Int64", "Edm.Double" -> {
+                    BigDecimal number = SearchOData.decimal(text);
+                    if (number == null) {
+                        throw new NumberFormatException(text);
+                    }
+                    yield number;
+                }
                 default -> throw refuse("The facet '" + expression + "' uses values or interval, which only fields"
                         + " of numbers and dates take.");
             };
@@ -266,7 +315,7 @@ final class SearchFacets {
             // Learn: "An integer interval greater than zero for numbers"; the words are floci-az's.
             throw refuse("The facet interval of '" + expression + "' must be an integer greater than zero.");
         }
-        return value;
+        return width.stripTrailingZeros().toPlainString();
     }
 
     private static ZoneOffset offset(String value, ValueField field, String expression) {
@@ -274,11 +323,48 @@ final class SearchFacets {
             throw refuse("The facet timeoffset of '" + expression + "' must be [+-]hh:mm, [+-]hhmm or [+-]hh, on a"
                     + " field of type Edm.DateTimeOffset.");
         }
-        return ZoneOffset.of(value.length() == 5 && value.indexOf(':') < 0
-                ? value.substring(0, 3) + ":" + value.substring(3) : value);
+        try {
+            return ZoneOffset.of(value.length() == 5 && value.indexOf(':') < 0
+                    ? value.substring(0, 3) + ":" + value.substring(3) : value);
+        } catch (DateTimeException e) {
+            throw refuse("The facet timeoffset of '" + expression + "' is outside -18:00 to +18:00.");
+        }
     }
 
     // ── Buckets ──────────────────────────────────────────────────────────────
+
+    /**
+     * Every interval from the one holding the field's lowest value to the one holding its highest, each as its start
+     * and end, in order: none when no document has a finite value, and null when there would be more than
+     * {@link #MAX_BUCKETS}.
+     */
+    private static List<Object[]> spanned(Facet facet, JsonNode bounds) {
+        JsonNode lo = bounds.path("lo");
+        JsonNode hi = bounds.path("hi");
+        if (bounds.path("count").asLong() == 0 || lo.isMissingNode() || hi.isMissingNode()) {
+            return List.of();
+        }
+        boolean date = "Edm.DateTimeOffset".equals(facet.field().type());
+        Object last = date ? dateStart(Instant.parse(hi.asText()), facet) : numberStart(hi.decimalValue(), facet);
+        Object start = date ? dateStart(Instant.parse(lo.asText()), facet) : numberStart(lo.decimalValue(), facet);
+        if (!date) {
+            BigDecimal count = ((BigDecimal) last).subtract((BigDecimal) start)
+                    .divide(new BigDecimal(facet.interval()), 0, RoundingMode.FLOOR).add(BigDecimal.ONE);
+            if (count.compareTo(BigDecimal.valueOf(MAX_BUCKETS)) > 0) {
+                return null;
+            }
+        }
+        List<Object[]> intervals = new ArrayList<>();
+        while (compare(start, last) <= 0) {
+            if (intervals.size() == MAX_BUCKETS) {
+                return null;
+            }
+            Object next = next(start, facet);
+            intervals.add(new Object[] {start, next});
+            start = next;
+        }
+        return intervals;
+    }
 
     /** The intervals that hold the distinct values Solr answered, each as its start and end, in order. */
     private static List<Object[]> intervals(Facet facet, JsonNode distinct) {
@@ -362,7 +448,10 @@ final class SearchFacets {
                     : instant.atOffset(facet.offset()).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
         }
         BigDecimal number = (BigDecimal) value;
-        return number.stripTrailingZeros().scale() <= 0 ? (Object) number.longValue() : (Object) number.doubleValue();
+        BigDecimal whole = number.stripTrailingZeros();
+        // A whole number past a long (a double field's 1e20) stays a double rather than wrapping.
+        return whole.scale() <= 0 && whole.precision() - whole.scale() < 19 ? (Object) number.longValue()
+                : (Object) number.doubleValue();
     }
 
     /** A value of a field as Solr answered it, as Azure answers it. */

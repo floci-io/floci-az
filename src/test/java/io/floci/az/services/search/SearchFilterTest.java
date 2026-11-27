@@ -46,6 +46,7 @@ class SearchFilterTest {
               {"name": "tags", "type": "Collection(Edm.String)", "filterable": true},
               {"name": "flags", "type": "Collection(Edm.Boolean)", "filterable": true},
               {"name": "scores", "type": "Collection(Edm.Int32)", "filterable": true},
+              {"name": "prices", "type": "Collection(Edm.Double)", "filterable": true},
               {"name": "hidden", "type": "Edm.Int32", "filterable": false},
               {"name": "rooms", "type": "Collection(Edm.ComplexType)", "fields": [
                 {"name": "type", "type": "Edm.String", "filterable": true},
@@ -99,11 +100,38 @@ class SearchFilterTest {
     void stringsAreExactAfterTheNormalizerAndNullIsAMissingValue() {
         assertThat(solr("category eq 'Café'"), containsString("azp0=cafe"));
         assertThat(solr("name eq 'It''s'"), containsString("azp0=It's"));
-        assertThat(solr("rating eq null"), containsString("\"must_not\":[\"_v_rating:[* TO *]\"]"));
-        assertThat(solr("rating ne null"), equalTo("\"_v_rating:[* TO *]\" []"));
+        assertThat(solr("rating eq null"), containsString("\"must_not\":[{\"bool\":{\"should\":[\"_v_rating:[* TO *]\""));
+        assertThat(solr("rating ne null"), containsString("_v_rating:[* TO *]"));
         assertThat(solr("search.in(name, 'a b,c')"), containsString("azp1=a,b,c"));
         assertThat(solr("search.in(name, 'a b|c', '|')"), containsString("azp1=a b,c"));
         assertThat(solr("rating eq NaN"), containsString("must_not"));
+    }
+
+    @Test
+    void aNaNIsAValueThatPassesOnlyNe() {
+        // A double's NaN has no value field entry, only a mark in _nan_: null tests and lambdas count it.
+        assertThat(solr("rating ne null"), containsString("{!term f=_nan_ v=$azp0}"));
+        assertThat(solr("rating ne null"), containsString("azp0=_v_rating"));
+        assertThat(solr("rating eq null"), containsString("{!term f=_nan_"));
+        assertThat(solr("prices/any()"), containsString("{!term f=_nan_"));
+        assertThat(solr("prices/any(p: p gt 2)"), not(containsString("_nan_")));
+        assertThat(solr("prices/any(p: p ne 2)"), containsString("_nan_"));
+        // all: a NaN element fails ge, and passes ne.
+        assertThat(solr("prices/all(p: p ge 2)"), containsString("_nan_"));
+        assertThat(solr("prices/all(p: p ne 2)"), not(containsString("_nan_")));
+        // Whole numbers have no NaN.
+        assertThat(solr("scores/any()"), not(containsString("_nan_")));
+        assertThat(solr("stars eq null"), not(containsString("_nan_")));
+    }
+
+    @Test
+    void aNumberBeyondADoubleIsAnInfinityAndAnExponentNeverGrowsIntoDigits() {
+        assertThat(solr("rating lt 1e1000000000"), equalTo(solr("rating lt INF")));
+        assertThat(solr("rating gt -1e1000000000"), equalTo(solr("rating gt -INF")));
+        assertThat(solr("rating gt 1e-1000000000"), containsString("_v_rating:{\\\"0.0\\\" TO *]"));
+        assertThat(refusal("stars gt 1e1000000000"), containsString("NaN, -INF, or INF are not allowed"));
+        // No whole number of the field is above 1e300.
+        assertThat(solr("stars gt 1e300"), containsString("{\"bool\":{\"must_not\":[\"*:*\"]}}"));
     }
 
     @Test

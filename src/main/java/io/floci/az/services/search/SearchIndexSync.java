@@ -75,6 +75,8 @@ public class SearchIndexSync {
         return thread;
     });
     private final AtomicBoolean retirementScheduled = new AtomicBoolean();
+    /** Set by each request for a retirement, so one made while a retirement runs is not lost. */
+    private final AtomicBoolean retirementRequested = new AtomicBoolean();
     /** By collection name. Guarded by itself; an entry is deleted from Solr under its index's lock. */
     private final Map<String, Orphan> orphans = new HashMap<>();
 
@@ -179,19 +181,35 @@ public class SearchIndexSync {
         synchronized (orphans) {
             pending = !orphans.isEmpty();
         }
-        if ((pending || !changes.droppedIndexes().isEmpty()) && retirementScheduled.compareAndSet(false, true)) {
-            try {
-                retirer.execute(() -> {
-                    try {
+        if (!pending && changes.droppedIndexes().isEmpty()) {
+            return;
+        }
+        // Requested before it is scheduled: a retirement already running sees the request when it finishes.
+        retirementRequested.set(true);
+        startRetirement();
+    }
+
+    private void startRetirement() {
+        if (!retirementScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            retirer.execute(() -> {
+                try {
+                    while (retirementRequested.getAndSet(false)) {
                         manager.running().ifPresent(this::retireDropped);
-                    } finally {
-                        retirementScheduled.set(false);
                     }
-                });
-            } catch (RejectedExecutionException e) {
-                // Shutting down.
-                retirementScheduled.set(false);
-            }
+                } finally {
+                    retirementScheduled.set(false);
+                }
+                if (retirementRequested.get()) {
+                    // Requested after the loop's last check.
+                    startRetirement();
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // Shutting down.
+            retirementScheduled.set(false);
         }
     }
 

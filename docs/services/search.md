@@ -398,7 +398,8 @@ parentheses, where `not` binds tighter than a comparison and `and` tighter than 
   (`standard`, `lowercase`, `uppercase`, `asciifolding`, `elision`, or a custom one's token filters
   of these names); `gt` and the others compare ordinally. A bare boolean field is a test of itself
 - **Null:** `eq null` matches a document without a value, and `ne` is true for one, so
-  `rating ne 4` matches it. Only `eq` and `ne` take `null`
+  `rating ne 4` matches it. Only `eq` and `ne` take `null`. A `NaN` is a value, so `ne null` finds it,
+  but it equals nothing and is neither less nor greater than anything
 - **Collections** are tested with `any` and `all`: `tags/any(t: t eq 'wifi')`, `tags/any()` for a
   non-empty one, `rooms/any(r: r/type eq 'Suite' and r/price lt 100)`, which needs one room that is
   both, and lambdas inside lambdas. Azure's rules for what a lambda may hold apply, with its messages:

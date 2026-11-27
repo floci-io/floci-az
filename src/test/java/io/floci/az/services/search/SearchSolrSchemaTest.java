@@ -162,6 +162,15 @@ class SearchSolrSchemaTest {
     }
 
     @Test
+    void aNaNIsMarkedRatherThanGivenAValue() {
+        Map<String, Object> document = SearchSolrSchema.document(SearchSolrSchema.layout(INVENTORY), "k",
+                json("{\"id\": \"k\", \"rating\": \"NaN\"}"));
+
+        assertThat(document, not(hasKey("_v_rating")));
+        assertThat(document.get("_nan_"), equalTo(List.of("_v_rating")));
+    }
+
+    @Test
     void aComplexCollectionInsideAComplexFieldIsAChildDocumentOfItsOwn() {
         Map<String, Object> definition = json("""
                 {"name": "nested", "fields": [

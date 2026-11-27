@@ -505,6 +505,42 @@ class SearchSolrDockerTest {
     }
 
     @Test
+    void aNaNIsAValueButComparesWithNothingAndALargeBucketKeepsItsSize() {
+        createIndex("""
+                {"name": "special", "fields": [
+                  {"name": "id", "type": "Edm.String", "key": true},
+                  {"name": "rating", "type": "Edm.Double"},
+                  {"name": "prices", "type": "Collection(Edm.Double)"}]}""");
+        upload("special", """
+                {"id": "nan", "rating": "NaN", "prices": ["NaN"]},
+                {"id": "one", "rating": 1.0, "prices": [1.0]},
+                {"id": "none"},
+                {"id": "big", "rating": 1e20}""");
+        assertThat(ids("special", "rating eq null"), contains("none"));
+        assertThat(ids("special", "rating ne null"), containsInAnyOrder("nan", "one", "big"));
+        assertThat(ids("special", "rating gt 0"), containsInAnyOrder("one", "big"));
+        assertThat(ids("special", "prices/any()"), containsInAnyOrder("nan", "one"));
+        assertThat(ids("special", "prices/any(p: p ne 1)"), contains("nan"));
+        assertThat(ids("special", "prices/all(p: p ge 1)"), containsInAnyOrder("one", "none", "big"));
+
+        // A whole-number start past a long stays a double rather than wrapping. (A width of 1 at 1e20 is below a
+        // double's resolution, so the width is one a double can step by.)
+        search("special", "{\"top\": 0, \"facets\": [\"rating,interval:10000000000000000000\"]}").then()
+            .statusCode(200)
+            .body(containsString("\"value\":1.0E20"));
+        // 1 to 1e20 by 1 is far past the bucket limit, so the buckets come from the distinct values; the 1e20 one
+        // is empty at a double's resolution and left out.
+        search("special", "{\"top\": 0, \"facets\": [\"rating,interval:1\"]}").then().statusCode(200)
+            .body("'@search.facets'.rating.value", contains(1))
+            .body("'@search.facets'.rating.count", contains(1));
+    }
+
+    private static List<String> ids(String index, String filter) {
+        return search(index, "{\"filter\": \"" + filter + "\", \"select\": \"id\"}").then().statusCode(200)
+            .extract().jsonPath().getList("value.id", String.class);
+    }
+
+    @Test
     void scoringFunctionsBoostByMagnitudeDistanceAndTags() {
         assertThat(boosted("{\"scoringProfile\": \"rated\"}"), contains("b", "a", "d", "c"));
         assertThat(boosted("{\"scoringProfile\": \"near\", \"scoringParameters\": [\"here-24.9,60.2\"]}")

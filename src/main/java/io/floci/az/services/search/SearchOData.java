@@ -2,6 +2,7 @@ package io.floci.az.services.search;
 
 import io.floci.az.services.search.SearchDocuments.Refused;
 
+import java.math.BigDecimal;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,8 +33,27 @@ final class SearchOData {
             "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:\\d{2})");
     private static final Pattern NUMBER = Pattern.compile("-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?");
     private static final Pattern IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_.]*");
+    private static final Pattern WHOLE = Pattern.compile("[+-]?\\d+");
+    private static final Pattern DECIMAL = Pattern.compile("[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?");
 
     private SearchOData() {
+    }
+
+    /**
+     * A number a caller wrote: a whole number exactly, any other as the double it denotes, so an exponent such as
+     * {@code 1e1000000000} cannot grow into a billion digits. Null for a number beyond a double's range.
+     *
+     * @throws NumberFormatException when the text is not a number
+     */
+    static BigDecimal decimal(String text) {
+        if (WHOLE.matcher(text).matches()) {
+            return new BigDecimal(text);
+        }
+        if (!DECIMAL.matcher(text).matches()) {
+            throw new NumberFormatException(text);
+        }
+        double value = Double.parseDouble(text);
+        return Double.isFinite(value) ? BigDecimal.valueOf(value) : null;
     }
 
     /** A {@code 400} in the words of Azure's OData parser, naming the parameter. */
