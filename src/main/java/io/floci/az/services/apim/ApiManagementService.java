@@ -19,6 +19,7 @@ import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.apim.ApiManagementModels.ApimDeletedService;
 import io.floci.az.services.apim.ApiManagementModels.ApimService;
+import io.floci.az.services.managedidentity.ArmIdentities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -70,13 +71,15 @@ public class ApiManagementService implements GlobalNameSource {
     private final EmulatorConfig config;
     private final GlobalNameRegistry names;
     private final CloudDefaults defaults;
+    private final ArmIdentities identities;
 
     @Inject
     public ApiManagementService(EmulatorConfig config, ApiManagementStore store, StorageFactory storageFactory,
-                                GlobalNameRegistry names, CloudDefaults defaults) {
+                                GlobalNameRegistry names, CloudDefaults defaults, ArmIdentities identities) {
         this.config = config;
         this.names = names;
         this.defaults = defaults;
+        this.identities = identities;
         this.services = ArmResourceStore.create(storageFactory, "apim", ApiManagementModels.SERVICE_TYPE,
                 ApimService.class, ApimService::id, key -> false);
         this.deletedServices = ArmResourceStore.create(storageFactory, "apim",
@@ -112,6 +115,7 @@ public class ApiManagementService implements GlobalNameSource {
         if (parts.length == 2) {
             return switch (method) {
                 case "PUT" -> createOrUpdateService(request, requested);
+                case "PATCH" -> updateService(request, requested);
                 case "GET" -> services.get(requested)
                         .map(stored -> Response.ok(stored.value().toArm()).build())
                         .orElseGet(() -> notFound("service/" + requested.name()));
@@ -378,6 +382,10 @@ public class ApiManagementService implements GlobalNameSource {
 
     private synchronized Response createOrUpdateService(AzureRequest request, ArmResourceId requested) {
         Map<String, Object> body = parseBody(request);
+        Optional<Response> badIdentity = malformedIdentity(body);
+        if (badIdentity.isPresent()) {
+            return badIdentity.get();
+        }
         if (services.get(requested).isEmpty()) {
             // "You can't reuse the name of the API Management instance while the instance is soft-deleted": only a
             // restore of the service's own record brings the name back. The name is global, so a deleted service in
@@ -398,11 +406,62 @@ public class ApiManagementService implements GlobalNameSource {
         ArmResourceStore.Written<ApimService> written = services.createOrUpdate(requested, existing -> {
             // A service keeps the casing of the PUT that created it, as ARM does.
             ArmResourceId id = existing.map(service -> serviceId(service.id())).orElse(requested);
-            return newService(id, body, defaults.defaultLocation(request.scope()));
+            Map<String, Object> identity = identities.resolve(body.get("identity"),
+                    existing.map(ApimService::identity).orElse(null), request.scope());
+            return newService(id, body, identity, defaults.defaultLocation(request.scope()));
         });
         LOG.infov("ARM: {0} API Management service {1}", written.created() ? "created" : "updated",
                 written.stored().value().name());
         return Response.ok(written.stored().value().toArm()).build();
+    }
+
+    /**
+     * {@code ApiManagementService_Update}: the tags, identity, SKU and properties the body carries replace the stored
+     * ones, a property at a time, and everything it leaves out stays. The operation is a long-running one whose final
+     * state comes from the {@code location} header; the spec also declares {@code 200} with the service, which is
+     * terminal, so the service is answered at once with {@code provisioningState: Succeeded}.
+     */
+    private synchronized Response updateService(AzureRequest request, ArmResourceId requested) {
+        Map<String, Object> body = parseBody(request);
+        Optional<Response> badIdentity = malformedIdentity(body);
+        if (badIdentity.isPresent()) {
+            return badIdentity.get();
+        }
+        return services.update(requested, service -> patched(service, body, request))
+                .map(stored -> {
+                    LOG.infov("ARM: patched API Management service {0}", stored.value().name());
+                    return Response.ok(stored.value().toArm()).build();
+                })
+                .orElseGet(() -> notFound("service/" + requested.name()));
+    }
+
+    private ApimService patched(ApimService service, Map<String, Object> body, AzureRequest request) {
+        Map<String, Object> properties = new LinkedHashMap<>(service.properties());
+        properties.putAll(cast(body.get("properties")));
+        properties.put("provisioningState", "Succeeded");
+        Map<String, Object> sku = body.get("sku") instanceof Map<?, ?> sent
+                ? mergedSku(service.sku(), cast(sent)) : service.sku();
+        Map<String, Object> tags = body.containsKey("tags") ? tags(body.get("tags")) : service.tags();
+        Map<String, Object> identity = body.containsKey("identity")
+                ? identities.resolve(body.get("identity"), service.identity(), request.scope()) : service.identity();
+        return new ApimService(service.id(), service.name(), service.location(), "\"" + UUID.randomUUID() + "\"",
+                tags, identity, properties, sku);
+    }
+
+    private static Map<String, Object> mergedSku(Map<String, Object> stored, Map<String, Object> sent) {
+        Map<String, Object> sku = new LinkedHashMap<>(stored);
+        sku.putAll(sent);
+        return sku;
+    }
+
+    /** The tags as sent: null for none sent, and a value that is not an object reads as empty. */
+    private static Map<String, Object> tags(Object sent) {
+        return sent == null ? null : new LinkedHashMap<>(cast(sent));
+    }
+
+    private static Optional<Response> malformedIdentity(Map<String, Object> body) {
+        return ArmIdentities.malformed(body.get("identity"), "an API Management service")
+                .map(message -> ArmErrors.error(400, "ValidationError", message));
     }
 
     /** Whether {@code stored} is the deleted record of the service whose canonical key is {@code key}. */
@@ -435,7 +494,8 @@ public class ApiManagementService implements GlobalNameSource {
             && services.get(owner).filter(stored -> name.equalsIgnoreCase(stored.value().name())).isPresent();
     }
 
-    private ApimService newService(ArmResourceId id, Map<String, Object> body, String defaultLocation) {
+    private ApimService newService(ArmResourceId id, Map<String, Object> body, Map<String, Object> identity,
+                                   String defaultLocation) {
         Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
         properties.put("provisioningState", "Succeeded");
         properties.putIfAbsent("gatewayUrl", gatewayUrl(id.name()));
@@ -445,7 +505,7 @@ public class ApiManagementService implements GlobalNameSource {
         Object sku = body.get("sku");
         Map<String, Object> skuValue = sku instanceof Map<?, ?> ? cast(sku) : Map.of("name", "Developer", "capacity", 1);
         return new ApimService(id.id(), id.name(), bodyString(body, "location", defaultLocation),
-                "\"" + UUID.randomUUID() + "\"", properties, skuValue);
+                "\"" + UUID.randomUUID() + "\"", tags(body.get("tags")), identity, properties, skuValue);
     }
 
     private Response createOrUpdateApi(AzureRequest request, String sub, String rg, String serviceName, String apiId) {
