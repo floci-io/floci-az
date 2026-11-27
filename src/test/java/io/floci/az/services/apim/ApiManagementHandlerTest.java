@@ -31,6 +31,7 @@ import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 /**
@@ -93,6 +94,8 @@ class ApiManagementHandlerTest {
         body.put("body", new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         byte[] response = MAPPER.writeValueAsBytes(body);
         exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.getResponseHeaders().add("X-Backend", "echo");
+        exchange.getResponseHeaders().add("X-Internal", "secret");
         exchange.sendResponseHeaders(201, response.length);
         exchange.getResponseBody().write(response);
         exchange.close();
@@ -128,8 +131,12 @@ class ApiManagementHandlerTest {
     }
 
     private static void putPolicy(String scope, String inbound) throws IOException {
+        putPolicy(scope, inbound, "");
+    }
+
+    private static void putPolicy(String scope, String inbound, String outbound) throws IOException {
         String xml = "<policies><inbound><base />" + inbound + "</inbound><backend><base /></backend>"
-                + "<outbound><base /></outbound><on-error><base /></on-error></policies>";
+                + "<outbound><base />" + outbound + "</outbound><on-error><base /></on-error></policies>";
         String body = MAPPER.writeValueAsString(Map.of("properties", Map.of("format", "rawxml", "value", xml)));
         given().contentType("application/json").body(body)
                 .when().put(SERVICE_ID + scope + "/policies/policy" + API)
@@ -565,13 +572,15 @@ class ApiManagementHandlerTest {
     void returnResponsePolicyStillAnswersForAnApiWithoutBackend() throws IOException {
         createService();
         createApi("bare", "bare", false);
-        putPolicy("/apis/bare", "<return-response><set-status code=\"202\" reason=\"Accepted\" />"
+        putPolicy("/apis/bare", "<set-header name=\"X-Request-Only\" exists-action=\"override\"><value>req</value>"
+                + "</set-header><return-response><set-status code=\"202\" reason=\"Accepted\" />"
                 + "<set-header name=\"X-Mock\" exists-action=\"override\"><value>yes</value></set-header>"
                 + "<set-body>{\"mocked\":true}</set-body></return-response>");
 
         given().when().get(GATEWAY + "/bare/anything")
                 .then().statusCode(202)
                 .header("X-Mock", equalTo("yes"))
+                .header("X-Request-Only", nullValue())
                 .contentType(containsString("application/json"))
                 .body("mocked", equalTo(true));
     }
@@ -800,5 +809,66 @@ class ApiManagementHandlerTest {
                 .body("headers.x-product", nullValue())
                 .body("headers.x-layers", equalTo("service"))
                 .body("headers.x-api", equalTo("orders"));
+    }
+
+    @Test
+    void anOutboundSetHeaderReachesTheCallerAndAnInboundOneTheBackend() throws IOException {
+        createService();
+        createApi("orders", "orders", true);
+        putPolicy("/apis/orders",
+                "<set-header name=\"X-In\" exists-action=\"override\"><value>request</value></set-header>",
+                "<set-header name=\"X-Out\" exists-action=\"override\"><value>response</value></set-header>");
+
+        given().when().get(GATEWAY + "/orders/x")
+                .then().statusCode(201)
+                .header("X-Out", equalTo("response"))
+                .header("X-In", nullValue())
+                .header("X-Backend", equalTo("echo"))
+                .body("headers.x-in", equalTo("request"))
+                .body("headers.x-out", nullValue());
+    }
+
+    @Test
+    void anOutboundDeleteRemovesABackendResponseHeader() throws IOException {
+        createService();
+        createApi("orders", "orders", true);
+        putPolicy("/apis/orders", "",
+                "<set-header name=\"x-internal\" exists-action=\"delete\" />"
+                        + "<set-header name=\"X-Backend\" exists-action=\"skip\"><value>policy</value></set-header>");
+
+        given().when().get(GATEWAY + "/orders/x")
+                .then().statusCode(201)
+                .header("X-Internal", nullValue())
+                .header("X-Backend", equalTo("echo"))
+                .contentType(containsString("application/json"));
+    }
+
+    @Test
+    void outboundPoliciesComposeOutermostScopeFirst() throws IOException {
+        createService();
+        createApi("orders", "orders", true);
+        createOperation("orders", "get-order", "GET", "/items/{id}");
+        put("/products/starter", "{\"properties\":{}}");
+        put("/products/starter/apis/orders", "{}");
+        put("/subscriptions/s1", "{\"properties\":{\"scope\":\"/products/starter\",\"primaryKey\":\"pk\","
+                + "\"secondaryKey\":\"sk\"}}");
+        putPolicy("", "", outboundLayer("service"));
+        putPolicy("/products/starter", "", outboundLayer("product"));
+        putPolicy("/apis/orders", "", outboundLayer("api"));
+        putPolicy("/apis/orders/operations/get-order", "",
+                "<set-header name=\"X-Trail\" exists-action=\"append\"><value>operation</value></set-header>");
+
+        List<String> trail = given().header("Ocp-Apim-Subscription-Key", "pk").when().get(GATEWAY + "/orders/items/1")
+                .then().statusCode(201)
+                .header("X-Scope", equalTo("api"))
+                .body("headers.x-trail", nullValue())
+                .extract().headers().getValues("X-Trail");
+        // Each append adds a header value; joined, they read in scope order whether sent as lines or one list.
+        assertEquals("service,product,api,operation", String.join(",", trail).replace(" ", ""));
+    }
+
+    private static String outboundLayer(String scope) {
+        return "<set-header name=\"X-Scope\" exists-action=\"override\"><value>" + scope + "</value></set-header>"
+                + "<set-header name=\"X-Trail\" exists-action=\"append\"><value>" + scope + "</value></set-header>";
     }
 }
