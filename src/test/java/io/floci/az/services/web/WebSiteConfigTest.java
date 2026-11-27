@@ -138,11 +138,14 @@ class WebSiteConfigTest {
         given().when().get(app + "/config/slotConfigNames" + API).then().statusCode(200);
         given().when().post(app + "/config/logs/list" + API).then().statusCode(404);
 
-        // backup is the one config the API lets a client DELETE.
+        // backup answers 404 until one is set, as Azure does for a site without a backup, and is the one config the
+        // API lets a client DELETE.
+        given().when().post(app + "/config/backup/list" + API).then().statusCode(404);
         putConfig(app + "/config/backup", "{\"enabled\":true}");
-        given().when().delete(app + "/config/backup" + API).then().statusCode(200);
         given().when().post(app + "/config/backup/list" + API)
-            .then().statusCode(200).body("properties", equalTo(Map.of()));
+            .then().statusCode(200).body("properties.enabled", equalTo(true));
+        given().when().delete(app + "/config/backup" + API).then().statusCode(200);
+        given().when().post(app + "/config/backup/list" + API).then().statusCode(404);
     }
 
     @Test

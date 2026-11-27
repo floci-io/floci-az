@@ -66,13 +66,21 @@ answers from the same ownership for a `Site` or `Microsoft.Web/sites` name. Path
 the same site. With `parity-overrides.strict-names` a name outside 2 to 60 letters, digits and hyphens, or starting
 or ending with a hyphen, is refused with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
 
+A site PUT replaces the site whole, as in Azure, and reads back the `kind`, `tags` and `properties` it sent
+(`serverFarmId`, `httpsOnly`, `virtualNetworkSubnetId` and the rest), with `state: Running` and
+`defaultHostName: {name}.azurewebsites.net`. A `SystemAssigned` identity gets a `principalId` and `tenantId`, kept
+across re-PUTs so role assignments to it stay valid. A `PUT` of `config/web` replaces the stored `siteConfig` whole
+and keeps the rest of the site. The `appSettings` and `connectionStrings` lists a site PUT sends in `siteConfig` are kept as
+the site's `config/appsettings` and `config/connectionstrings`, where azurerm reads them back, as in Azure.
+
 A site's other config documents (`sites/{name}/config/{configName}`: `appsettings`, `authsettings`,
 `authsettingsV2`, `azurestorageaccounts`, `backup`, `connectionstrings`, `logs`, `metadata`, `pushsettings` and
 `slotConfigNames`) are stored ARM documents with no runtime behind them, served with the methods the App Service
 REST API defines for each: `PUT` replaces a config's `properties` whole; `logs`, `slotConfigNames` and
 `authsettingsV2` also answer `GET`; the configs that carry secrets read back only through their `.../list` action
 (`POST`, or `GET` for `authsettingsV2`); `backup` also answers `DELETE`. Another method answers `405`. A config never
-written reads back with empty `properties`. Config names match ignoring case and read back as
+written reads back with empty `properties`, except `backup`, which answers `404` until one is set, as Azure does
+for a site without a backup. Config names match ignoring case and read back as
 the API spells them; a name the API does not define, or a site that does not exist, answers `404`. Deleting a site
 deletes its configs. Only `config/web` reaches the Function App runtime. `POST .../config/publishingcredentials/list`
 returns the site's `$sitename` deployment user and a password generated on the first call and kept until the site

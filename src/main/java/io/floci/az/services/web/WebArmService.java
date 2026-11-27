@@ -33,6 +33,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -86,23 +87,25 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
      * How the App Service REST API (WebApps.json, 2024-11-01) serves each {@code sites/{name}/config/{configName}}
      * other than {@code web}: whether the document itself answers GET and DELETE besides PUT, and the method of its
      * {@code .../list} action, null when it has none. {@code authsettingsV2/list} is a GET in the spec, the others a
-     * POST, because they return secrets.
+     * POST, because they return secrets. {@code backup} is the one config Azure answers 404 for until one is set,
+     * which is how azurerm tells a site without a backup ({@code notFoundUntilSet}).
      */
-    private record SiteConfigOps(String name, boolean get, boolean delete, String listMethod) {
+    private record SiteConfigOps(String name, boolean get, boolean delete, String listMethod,
+                                 boolean notFoundUntilSet) {
     }
 
     /** The {@link SiteConfigOps} by config name lowercased. Any other name answers ARM 404, as in Azure. */
     private static final Map<String, SiteConfigOps> SITE_CONFIGS = Map.ofEntries(
-        siteConfig("appsettings", false, false, "POST"),
-        siteConfig("authsettings", false, false, "POST"),
-        siteConfig("authsettingsV2", true, false, "GET"),
-        siteConfig("azurestorageaccounts", false, false, "POST"),
-        siteConfig("backup", false, true, "POST"),
-        siteConfig("connectionstrings", false, false, "POST"),
-        siteConfig("logs", true, false, null),
-        siteConfig("metadata", false, false, "POST"),
-        siteConfig("pushsettings", false, false, "POST"),
-        siteConfig("slotConfigNames", true, false, null));
+        siteConfig("appsettings", false, false, "POST", false),
+        siteConfig("authsettings", false, false, "POST", false),
+        siteConfig("authsettingsV2", true, false, "GET", false),
+        siteConfig("azurestorageaccounts", false, false, "POST", false),
+        siteConfig("backup", false, true, "POST", true),
+        siteConfig("connectionstrings", false, false, "POST", false),
+        siteConfig("logs", true, false, null, false),
+        siteConfig("metadata", false, false, "POST", false),
+        siteConfig("pushsettings", false, false, "POST", false),
+        siteConfig("slotConfigNames", true, false, null, false));
 
     /**
      * A site's {@code basicPublishingCredentialsPolicies} collection or one of its two policies, namespace and segments
@@ -305,10 +308,8 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         Map<String, Object> properties = ArmJson.cast(body.get("properties"));
         Map<String, Object> siteConfig = ArmJson.cast(properties.get("siteConfig"));
         String linuxFxVersion = ArmJson.string(siteConfig, "linuxFxVersion", null);
-        String location = ArmJson.string(body, "location", defaults.defaultLocation(req.scope()));
-        Map<String, Object> tags = body.get("tags") instanceof Map<?, ?> map ? ArmJson.cast(map) : null;
         synchronized (siteWrites) {
-            return writeSite(req, id, location, linuxFxVersion, tags);
+            return writeSite(req, id, body, linuxFxVersion);
         }
     }
 
@@ -318,8 +319,7 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
      * hold it now: that PUT is then the one that owns the name and this one answers the gate's conflict, writing
      * nothing. A reservation made here is freed again when the sync refuses the {@code linuxFxVersion}.
      */
-    private Response writeSite(AzureRequest req, ArmResourceId id, String location, String linuxFxVersion,
-                               Map<String, Object> tags) {
+    private Response writeSite(AzureRequest req, ArmResourceId id, Map<String, Object> body, String linuxFxVersion) {
         String siteName = sites.get(id).map(stored -> nameOf(stored.value())).orElse(id.name());
         GlobalNameRegistry.Reservation reservation = names.reserve(cloud(req), CloudSuffix.WEB, siteName, id);
         if (reservation.outcome() == GlobalNameRegistry.Outcome.TAKEN) {
@@ -331,9 +331,25 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
             names.releasePending(cloud(req), CloudSuffix.WEB, siteName, reservation.token());
             return invalidLinuxFxVersion(e);
         }
+        String location = ArmJson.string(body, "location", defaults.defaultLocation(req.scope()));
+        Map<String, Object> properties = ArmJson.cast(body.get("properties"));
+        Map<String, Object> siteConfig = new LinkedHashMap<>(ArmJson.cast(properties.get("siteConfig")));
+        Object appSettings = siteConfig.remove("appSettings");
+        Object connectionStrings = siteConfig.remove("connectionStrings");
         Map<String, Object> written = sites.createOrUpdate(id, existing -> siteDocument(
             existing.map(WebArmService::idOf).orElse(id.id()),
-            existing.map(WebArmService::nameOf).orElse(id.name()), location, linuxFxVersion, tags)).stored().value();
+            existing.map(WebArmService::nameOf).orElse(id.name()), location,
+            body.get("tags") instanceof Map<?, ?> tags ? ArmJson.cast(tags) : null,
+            ArmJson.string(body, "kind", null),
+            siteIdentity(req, body.get("identity"), existing.map(WebArmService::identityOf).orElse(null)),
+            properties, siteConfig)).stored().value();
+        ArmResourceId stored = ArmResourceId.parse(idOf(written)).orElseThrow();
+        if (appSettings instanceof List<?> settings) {
+            putSiteConfig(stored, "appsettings", appSettingsProperties(settings));
+        }
+        if (connectionStrings instanceof List<?> strings) {
+            putSiteConfig(stored, "connectionstrings", connectionStringProperties(strings));
+        }
         LOG.infov("ARM: created site {0}", written.get("name"));
         return Response.ok(written).build();
     }
@@ -350,13 +366,14 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         }
         Map<String, Object> body = ArmJson.parseBodyLenient(req);
         Map<String, Object> config = body.containsKey("properties") ? ArmJson.cast(body.get("properties")) : body;
-        String linuxFxVersion = ArmJson.string(config, "linuxFxVersion", null);
         synchronized (siteWrites) {
-            return writeConfig(path, id, linuxFxVersion);
+            return writeConfig(path, id, config);
         }
     }
 
-    private Response writeConfig(String path, ArmResourceId id, String linuxFxVersion) {
+    /** A PUT of {@code config/web} replaces the site's {@code siteConfig} whole, as in Azure, and keeps the rest. */
+    private Response writeConfig(String path, ArmResourceId id, Map<String, Object> config) {
+        String linuxFxVersion = ArmJson.string(config, "linuxFxVersion", null);
         Optional<Stored<Map<String, Object>>> site = sites.get(id);
         if (site.isEmpty()) {
             return armNotFound("sites/" + id.name());
@@ -366,8 +383,7 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         } catch (IllegalArgumentException e) {
             return invalidLinuxFxVersion(e);
         }
-        Optional<Stored<Map<String, Object>>> updated = sites.update(id, existing -> siteDocument(idOf(existing),
-            nameOf(existing), String.valueOf(existing.get("location")), linuxFxVersion, tagsOf(existing)));
+        Optional<Stored<Map<String, Object>>> updated = sites.update(id, existing -> withSiteConfig(existing, config));
         return updated
             .map(stored -> configResponse(path, stored.value()))
             .orElseGet(() -> armNotFound("sites/" + id.name()));
@@ -407,8 +423,13 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         }
         ArmResourceId id = siteConfigId(siteId, ops.name());
         if (listAction) {
-            return ops.listMethod().equals(method) ? Response.ok(readSiteConfig(id, ops.name())).build()
-                : Response.status(405).build();
+            if (!ops.listMethod().equals(method)) {
+                return Response.status(405).build();
+            }
+            if (ops.notFoundUntilSet() && siteConfigs.get(id).isEmpty()) {
+                return armNotFound("sites/" + siteId.name() + "/config/" + ops.name());
+            }
+            return Response.ok(readSiteConfig(id, ops.name())).build();
         }
         return switch (method) {
             case "PUT" -> writeSiteConfig(req, siteId, id, ops.name());
@@ -491,8 +512,9 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
     }
 
     private static Map.Entry<String, SiteConfigOps> siteConfig(String name, boolean get, boolean delete,
-                                                               String listMethod) {
-        return Map.entry(name.toLowerCase(Locale.ROOT), new SiteConfigOps(name, get, delete, listMethod));
+                                                               String listMethod, boolean notFoundUntilSet) {
+        return Map.entry(name.toLowerCase(Locale.ROOT),
+            new SiteConfigOps(name, get, delete, listMethod, notFoundUntilSet));
     }
 
     // ── Basic publishing credentials policies (ftp, scm) ────────────────────
@@ -562,6 +584,42 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         return resource;
     }
 
+    /**
+     * A site PUT carries its app settings and connection strings in {@code siteConfig}, as name/value lists; Azure
+     * keeps them as the site's {@code config/appsettings} and {@code config/connectionstrings}, which is where
+     * azurerm reads them back, and does not return them in {@code siteConfig}. A PUT that sends no list leaves them as
+     * they were.
+     */
+    private void putSiteConfig(ArmResourceId siteId, String configName, Map<String, Object> properties) {
+        ArmResourceId id = siteConfigId(siteId, configName);
+        siteConfigs.createOrUpdate(id, existing -> siteConfigDocument(id.id(), configName, properties));
+    }
+
+    private static Map<String, Object> appSettingsProperties(List<?> settings) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        for (Object setting : settings) {
+            Map<String, Object> pair = ArmJson.cast(setting);
+            if (pair.get("name") instanceof String name) {
+                properties.put(name, pair.get("value"));
+            }
+        }
+        return properties;
+    }
+
+    private static Map<String, Object> connectionStringProperties(List<?> strings) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        for (Object entry : strings) {
+            Map<String, Object> connection = ArmJson.cast(entry);
+            if (connection.get("name") instanceof String name) {
+                Map<String, Object> value = new LinkedHashMap<>();
+                value.put("value", connection.get("connectionString"));
+                value.put("type", connection.getOrDefault("type", "Custom"));
+                properties.put(name, value);
+            }
+        }
+        return properties;
+    }
+
     private static ArmResourceId siteConfigId(ArmResourceId siteId, String configName) {
         return ArmResourceId.parse(siteId.id() + "/config/" + configName).orElseThrow();
     }
@@ -594,23 +652,32 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         functionsHandler.upsertApp(DEFAULT_FUNCTIONS_ACCOUNT, siteName, runtime, linuxFxVersion, null);
     }
 
-    /** A PUT replaces the site's tags whole; a site PUT without {@code tags} has none, as in Azure. */
+    /**
+     * A PUT replaces the site whole, as in Azure: its tags (none when the PUT sends none), {@code kind} and
+     * {@code identity}, and the {@code properties} it sends, such as {@code serverFarmId}, {@code httpsOnly} or
+     * {@code virtualNetworkSubnetId}, which azurerm reads back. {@code state} and {@code defaultHostName} are Azure's
+     * own; {@code siteConfig} is kept as sent, since {@code config/web} reads it back.
+     */
     private static Map<String, Object> siteDocument(String id, String siteName, String location,
-                                                    String linuxFxVersion, Map<String, Object> tags) {
-        Map<String, Object> siteConfig = new LinkedHashMap<>();
-        if (linuxFxVersion != null) {
-            siteConfig.put("linuxFxVersion", linuxFxVersion);
-        }
-        Map<String, Object> properties = new LinkedHashMap<>();
+                                                    Map<String, Object> tags, String kind,
+                                                    Map<String, Object> identity,
+                                                    Map<String, Object> requestedProperties,
+                                                    Map<String, Object> siteConfig) {
+        Map<String, Object> properties = new LinkedHashMap<>(requestedProperties);
         properties.put("state", "Running");
-        properties.put("siteConfig", siteConfig);
+        properties.putIfAbsent("enabled", true);
+        properties.put("defaultHostName", siteName + ".azurewebsites.net");
+        properties.put("siteConfig", new LinkedHashMap<>(siteConfig));
 
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("id", id);
         resource.put("name", siteName);
         resource.put("type", SITE_TYPE);
         resource.put("location", location);
-        resource.put("kind", "functionapp,linux");
+        resource.put("kind", kind != null ? kind : "functionapp,linux");
+        if (identity != null) {
+            resource.put("identity", identity);
+        }
         if (tags != null) {
             resource.put("tags", tags);
         }
@@ -618,12 +685,46 @@ public class WebArmService implements ArmProviderService, StoreIndexSource, Glob
         return resource;
     }
 
-    private static String nameOf(Map<String, Object> document) {
-        return String.valueOf(document.get("name"));
+    /** The site as stored, with {@code config} as its whole {@code siteConfig}. */
+    private static Map<String, Object> withSiteConfig(Map<String, Object> site, Map<String, Object> config) {
+        Map<String, Object> properties = new LinkedHashMap<>(ArmJson.cast(site.get("properties")));
+        properties.put("siteConfig", new LinkedHashMap<>(config));
+        Map<String, Object> resource = new LinkedHashMap<>(site);
+        resource.put("properties", properties);
+        return resource;
     }
 
-    private static Map<String, Object> tagsOf(Map<String, Object> document) {
-        return document.get("tags") instanceof Map<?, ?> tags ? ArmJson.cast(tags) : null;
+    /**
+     * The identity to store: null for none, else the sent one, with a {@code principalId} and {@code tenantId} for a
+     * system-assigned identity, as Azure creates a service principal for it. A re-PUT keeps the principal the site was
+     * given, so role assignments made to it stay valid.
+     */
+    private static Map<String, Object> siteIdentity(AzureRequest req, Object sent, Map<String, Object> existing) {
+        if (!(sent instanceof Map<?, ?> requested)) {
+            return null;
+        }
+        Map<String, Object> body = ArmJson.cast(requested);
+        String type = ArmJson.string(body, "type", "None");
+        if ("None".equalsIgnoreCase(type)) {
+            return null;
+        }
+        Map<String, Object> identity = new LinkedHashMap<>(body);
+        if (type.toLowerCase(Locale.ROOT).contains("systemassigned")) {
+            identity.put("principalId", existing != null && existing.get("principalId") instanceof String principal
+                ? principal : UUID.randomUUID().toString());
+            if (req.scope() != null && req.scope().tenantId() != null) {
+                identity.put("tenantId", req.scope().tenantId());
+            }
+        }
+        return identity;
+    }
+
+    private static Map<String, Object> identityOf(Map<String, Object> document) {
+        return document.get("identity") instanceof Map<?, ?> identity ? ArmJson.cast(identity) : null;
+    }
+
+    private static String nameOf(Map<String, Object> document) {
+        return String.valueOf(document.get("name"));
     }
 
     // ── App Service plans (serverFarms) ─────────────────────────────────────
