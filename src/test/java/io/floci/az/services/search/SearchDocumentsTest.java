@@ -132,19 +132,9 @@ class SearchDocumentsTest {
             .body("keySet()", contains("@odata.context", "address"))
             .body("address.keySet()", contains("city"));
 
-        // A whole field stays whole when one of its sub-fields is named too.
-        given().queryParam("$select", "address,address/city").when().get(DOCS + "('one')" + API).then()
-            .statusCode(200)
-            .body("address.keySet()", contains("city", "postcode"));
-        given().queryParam("$select", "address/city,address").when().get(DOCS + "('one')" + API).then()
-            .statusCode(200)
-            .body("address.keySet()", contains("city", "postcode"));
-
         lookup("missing").then().statusCode(404)
             .header("Content-Type", nullValue())
             .body(emptyString());
-        given().when().get(BASE + "/indexes('nothere')/docs('one')" + API).then().statusCode(404)
-            .body("error.code", equalTo(""));
     }
 
     @Test
@@ -421,28 +411,27 @@ class SearchDocumentsTest {
     }
 
     @Test
-    void aBatchOverTheActionLimitIsTooLarge() {
+    void aBatchOverTheActionLimitIsRefusedAsAzureRefusesIt() {
         String actions = IntStream.range(0, 32001).mapToObj(i -> "{\"id\": \"k" + i + "\"}")
             .collect(Collectors.joining(","));
 
-        batch(actions).then().statusCode(413);
+        batch(actions).then().statusCode(400)
+            .body("error.code", equalTo("LimitExceeded"))
+            .body("error.message", equalTo("The request is invalid. Details: actions : Too many indexing actions found"
+                + " in the request: 32001. Please include between 1 and 32000 indexing actions in your request."))
+            .body("error.details[0].code", equalTo("IndexDocumentsActionCountExceeded"));
         given().when().get(DOCS + "/$count" + API).then().body(equalTo("0"));
     }
 
     @Test
-    void deletingAnIndexDeletesItsDocuments() {
-        batch("{\"id\": \"one\"}").then().statusCode(200);
-
+    void deletingTheIndexOrTheServiceOrResettingForgetsTheDocuments() {
+        batch("{\"id\": \"zero\"}").then().statusCode(200);
         given().when().delete(BASE + "/indexes('hotels')" + API).then().statusCode(204);
         given().contentType("application/json").body(HOTELS).when().post(BASE + "/indexes" + API)
             .then().statusCode(201);
-
-        lookup("one").then().statusCode(404);
+        lookup("zero").then().statusCode(404);
         given().when().get(DOCS + "/$count" + API).then().body(equalTo("0"));
-    }
 
-    @Test
-    void deletingTheServiceOrResettingForgetsItsIndexesAndDocuments() {
         given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"basic\"}}")
             .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
         batch("{\"id\": \"one\"}").then().statusCode(200);
@@ -467,11 +456,13 @@ class SearchDocumentsTest {
             .body("error.message", equalTo("No index with the name 'nothere' was found in the service '" + SERVICE
                     + "'."));
         given().when().get(BASE + "/indexes('nothere')/docs/$count" + API).then().statusCode(404);
+        given().when().get(BASE + "/indexes('nothere')/docs('one')" + API).then().statusCode(404)
+            .body("error.code", equalTo(""));
         given().when().get(DOCS + "/search.index" + API).then().statusCode(405);
     }
 
     @Test
-    void aNestedComplexFieldStaysWholeWhenOneOfItsSubFieldsIsSelectedToo() {
+    void aComplexFieldStaysWholeWhenOneOfItsSubFieldsIsSelectedToo() {
         given().contentType("application/json").body("""
                 {"name": "nested", "fields": [
                   {"name": "id", "type": "Edm.String", "key": true},
@@ -485,6 +476,10 @@ class SearchDocumentsTest {
         batchTo(docs, "{\"id\": \"one\", \"address\": {\"city\": \"Oulu\", \"region\": {\"name\": \"North\","
                 + " \"code\": \"N\"}}}", "").then().statusCode(200);
 
+        for (String select : new String[] {"address,address/city", "address/city,address"}) {
+            given().queryParam("$select", select).when().get(docs + "('one')" + API).then().statusCode(200)
+                .body("address.keySet()", contains("city", "region"));
+        }
         for (String select : new String[] {"address/region,address/region/name",
                 "address/region/name,address/region"}) {
             given().queryParam("$select", select).when().get(docs + "('one')" + API).then().statusCode(200)

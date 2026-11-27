@@ -134,6 +134,10 @@ class SearchArmServiceTest {
 
         post(service("rg", "replace") + "/listAdminKeys").then().statusCode(200)
             .body("primaryKey", equalTo(primary));
+
+        // A PUT without a sku keeps the stored one.
+        put("rg", "replace", "{\"location\": \"westus\"}").then().statusCode(200)
+            .body("sku.name", equalTo("standard"));
     }
 
     @Test
@@ -375,6 +379,8 @@ class SearchArmServiceTest {
         // The service exists but the key is gone: Azure answers 204, so a repeated delete succeeds.
         given().when().delete(keys + "/deleteQueryKey/" + created + API).then().statusCode(204);
         post(keys + "/listQueryKeys").then().body("value", hasSize(1));
+        given().when().delete(service("rg", "absent") + "/deleteQueryKey/anything" + API).then().statusCode(404)
+            .body("error.code", equalTo("ResourceNotFound"));
     }
 
     @Test
@@ -427,7 +433,7 @@ class SearchArmServiceTest {
     }
 
     @Test
-    void aScaleTheSkuDoesNotReachIsRefused() {
+    void aScaleMustFitTheSkuAndItsHostingMode() {
         put("rg", "free2", sized("free", 2, 1)).then().statusCode(400)
             .body("error.code", equalTo("InvalidRequestContent"))
             .body("error.message", containsString("at most 1 replica"));
@@ -443,18 +449,13 @@ class SearchArmServiceTest {
             .body("error.message", containsString("36 search units"));
 
         given().when().get(service("rg", "basic4") + API).then().statusCode(404);
-    }
 
-    @Test
-    void aScaleWithinTheSkuIsAccepted() {
         put("rg", "free1", sized("free", 1, 1)).then().statusCode(201);
         put("rg", "basic9", sized("basic", 3, 3)).then().statusCode(201);
         put("rg", "std36", sized("standard", 3, 12)).then().statusCode(201);
         put("rg", "l2", sized("storage_optimized_l2", 12, 3)).then().statusCode(201);
-    }
 
-    @Test
-    void highDensityHostingIsStandard3AloneAndStopsAtThreePartitions() {
+        // High-density hosting is for standard3 alone, and stops at three partitions.
         String highDensity = """
                 {"location": "westus", "sku": {"name": "%s"},
                  "properties": {"hostingMode": "highDensity", "partitionCount": %d}}""";
@@ -484,7 +485,7 @@ class SearchArmServiceTest {
     }
 
     @Test
-    void valuesOutsideTheSpecsEnumsAndMalformedIpRulesAreRefused() {
+    void enumValuesAndIpRulesAreCheckedAgainstTheSpecInAnyCasing() {
         put("rg", "enums", CLI_BODY).then().statusCode(201);
         String service = service("rg", "enums");
 
@@ -516,18 +517,13 @@ class SearchArmServiceTest {
             .body("properties.semanticSearch", equalTo("free"))
             .body("properties.publicNetworkAccess", equalTo("Enabled"))
             .body("properties.networkRuleSet.ipRules", empty());
-    }
-
-    @Test
-    void validEnumValuesInAnyCasingAndIpRulesAreAccepted() {
-        put("rg", "valid", CLI_BODY).then().statusCode(201);
 
         given().contentType("application/json").body("""
                 {"properties": {"semanticSearch": "Standard", "publicNetworkAccess": "disabled",
                  "encryptionWithCmk": {"enforcement": "Enabled"}, "dataExfiltrationProtections": ["BlockAll"],
                  "networkRuleSet": {"bypass": "AzurePortal",
                                     "ipRules": [{"value": "123.1.2.3"}, {"value": "10.0.0.0/24"}]}}}""")
-            .when().patch(service("rg", "valid") + API)
+            .when().patch(service + API)
             .then().statusCode(200)
             .body("properties.publicNetworkAccess", equalTo("Disabled"))
             .body("properties.networkRuleSet.bypass", equalTo("AzurePortal"))
@@ -580,15 +576,6 @@ class SearchArmServiceTest {
             .when().patch(service("rg", "fixedmode") + API).then().statusCode(200);
         put("rg", "fixedmode", "{\"location\": \"westus\", \"sku\": {\"name\": \"standard3\"}}")
             .then().statusCode(200).body("properties.hostingMode", equalTo("highdensity"));
-    }
-
-    @Test
-    void aPutWithoutASkuKeepsTheStoredOneAndDeletingAKeyOfNoServiceIsNotFound() {
-        put("rg", "keepsku", sized("basic", 1, 1)).then().statusCode(201);
-        put("rg", "keepsku", "{\"location\": \"westus\"}").then().statusCode(200).body("sku.name", equalTo("basic"));
-
-        given().when().delete(service("rg", "absent") + "/deleteQueryKey/anything" + API).then().statusCode(404)
-            .body("error.code", equalTo("ResourceNotFound"));
     }
 
     @Test

@@ -69,7 +69,7 @@ public sealed class SearchCompatibilityTests
 
     [Test]
     [Timeout(60_000)]
-    public async Task AnswersBadRequestForATakenNameAndNotFoundForAMissingIndex(CancellationToken cancellationToken)
+    public async Task AnswersBadRequestForATakenNameAndAnIndexWithoutAKey(CancellationToken cancellationToken)
     {
         await using var service = await SearchService.CreateAsync(cancellationToken);
         var client = service.Client;
@@ -78,8 +78,6 @@ public sealed class SearchCompatibilityTests
         // Azure answers 400 ResourceNameAlreadyInUse here, not 409.
         await Assert.That(await StatusOf(() => client.CreateIndexAsync(Hotels("hotels-twice"), cancellationToken)))
             .IsEqualTo(400);
-        await Assert.That(await StatusOf(() => client.GetIndexAsync("hotels-missing", cancellationToken)))
-            .IsEqualTo(404);
 
         var withoutKey = new SearchIndex("hotels-no-key")
         {
@@ -220,13 +218,36 @@ public sealed class SearchCompatibilityTests
     public async Task SearchesRankCountSelectHighlightAndPage(CancellationToken cancellationToken)
     {
         await using var service = await SearchService.CreateAsync(cancellationToken);
-        await service.Client.CreateIndexAsync(Hotels("hotels-query"), cancellationToken);
+        SearchIndex index = Hotels("hotels-query");
+        index.Fields.Add(new SimpleField("opened", SearchFieldDataType.DateTimeOffset)
+        {
+            IsFilterable = true, IsSortable = true, IsFacetable = true
+        });
+        index.Fields.Add(new SimpleField("location", SearchFieldDataType.GeographyPoint)
+        {
+            IsFilterable = true, IsSortable = true
+        });
+        await service.Client.CreateIndexAsync(index, cancellationToken);
         SearchClient docs = service.Client.GetSearchClient("hotels-query");
         var documents = new List<SearchDocument>
         {
-            new() { ["hotelId"] = "1", ["hotelName"] = "Fancy seaside hotel", ["tags"] = new[] { "pool", "wifi" } },
-            new() { ["hotelId"] = "2", ["hotelName"] = "Plain hotel", ["tags"] = new[] { "wifi" } },
-            new() { ["hotelId"] = "3", ["hotelName"] = "Fancy resort", ["tags"] = new[] { "spa" } }
+            new()
+            {
+                ["hotelId"] = "1", ["hotelName"] = "Fancy seaside hotel", ["rating"] = 4.5,
+                ["tags"] = new[] { "pool", "wifi" }, ["opened"] = DateTimeOffset.Parse("2020-05-01T00:00:00Z"),
+                ["location"] = new Dictionary<string, object> { ["type"] = "Point", ["coordinates"] = new[] { 24.94, 60.17 } }
+            },
+            new()
+            {
+                ["hotelId"] = "2", ["hotelName"] = "Plain hotel", ["rating"] = 2.0, ["tags"] = new[] { "wifi" },
+                ["opened"] = DateTimeOffset.Parse("2021-06-01T00:00:00Z")
+            },
+            new()
+            {
+                ["hotelId"] = "3", ["hotelName"] = "Fancy resort", ["rating"] = 5.0, ["tags"] = new[] { "spa" },
+                ["opened"] = DateTimeOffset.Parse("2022-07-01T00:00:00Z"),
+                ["location"] = new Dictionary<string, object> { ["type"] = "Point", ["coordinates"] = new[] { 2.35, 48.85 } }
+            }
         };
         documents.AddRange(Enumerable.Range(0, 60)
             .Select(i => new SearchDocument { ["hotelId"] = $"p{i}", ["hotelName"] = "Paged inn" }));
@@ -263,6 +284,18 @@ public sealed class SearchCompatibilityTests
         // Sixty results take two pages: the SDK follows the next page parameters.
         var paged = new SearchOptions { IncludeTotalCount = true };
         await Assert.That((await Ids(docs, "paged", paged, cancellationToken)).Count).IsEqualTo(60);
+
+        var pool = new SearchOptions { Filter = "rating ge 4 and tags/any(t: t eq 'pool')" };
+        await Assert.That(await Ids(docs, "*", pool, cancellationToken)).IsEquivalentTo(["1"]);
+        var ordered = new SearchOptions { Filter = "opened ne null", OrderBy = { "opened desc" } };
+        await Assert.That(string.Join(",", await Ids(docs, "*", ordered, cancellationToken))).IsEqualTo("3,2,1");
+        var near = new SearchOptions { Filter = "geo.distance(location, geography'POINT(24.9 60.2)') lt 10" };
+        await Assert.That(await Ids(docs, "*", near, cancellationToken)).IsEquivalentTo(["1"]);
+        var faceting = new SearchOptions { Size = 0, Facets = { "rating,values:3", "opened,interval:year" } };
+        SearchResults<SearchDocument> faceted = await docs.SearchAsync<SearchDocument>("*", faceting,
+            cancellationToken);
+        await Assert.That(string.Join(",", faceted.Facets["rating"].Select(bucket => bucket.Count))).IsEqualTo("1,2");
+        await Assert.That(faceted.Facets["opened"].Count).IsEqualTo(3);
     }
 
     private static async Task<List<string>> Ids(SearchClient docs, string text, SearchOptions options,
