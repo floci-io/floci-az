@@ -1173,10 +1173,15 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Creates or updates a rule, then re-applies the compiled selector to the Artemis queue. */
-    private Response handlePutRule(AzureRequest req, String account, String namespace,
-                                    String topicName, String subName, String ruleName) {
+    /**
+     * Resolves the rule's stored spelling under the handler's lock, the one {@link #putRule} takes, so a PUT of
+     * {@code HIGH} racing one of {@code high} updates one rule rather than storing two.
+     */
+    private synchronized Response handlePutRule(AzureRequest req, String account, String namespace,
+                                                String topicName, String subName, String ruleName) {
+        String storedRuleName = storedName(rulePrefix(account, namespace, topicName, subName), ruleName);
         return putRule(account, namespace,
-                ServiceBusRuleXml.parseRule(topicName, subName, ruleName, readBody(req)));
+                ServiceBusRuleXml.parseRule(topicName, subName, storedRuleName, readBody(req)));
     }
 
     /** Stores a parsed rule and re-applies the compiled selector; 400 when it cannot compile. */

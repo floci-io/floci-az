@@ -5,6 +5,15 @@ import io.restassured.response.Response;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
@@ -334,6 +343,41 @@ public class ServiceBusRulesTest {
 
         given().when().delete(rulesPath("rules-topic-case", "sub1") + "/keep-me").then().statusCode(200);
         given().when().get(rulesPath("rules-topic-case", "sub1") + "/Keep-Me").then().statusCode(404);
+    }
+
+    @Test
+    void concurrentRulePutsInDifferentCasingsStoreOneRule() throws Exception {
+        createTopicAndSubscription("rules-topic-race", "sub1");
+        List<String> spellings = List.of("race-rule", "RACE-RULE", "Race-Rule", "race-RULE", "RACE-rule", "rAcE-rUlE");
+        ExecutorService pool = Executors.newFixedThreadPool(spellings.size());
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Integer>> statuses = new ArrayList<>();
+            for (String spelling : spellings) {
+                statuses.add(pool.submit(() -> {
+                    start.await();
+                    return given().body(correlationRuleBody(spelling, "red"))
+                            .when().put(rulesPath("rules-topic-race", "sub1") + "/" + spelling).statusCode();
+                }));
+            }
+            start.countDown();
+            List<Integer> answered = new ArrayList<>();
+            for (Future<Integer> status : statuses) {
+                answered.add(status.get(30, TimeUnit.SECONDS));
+            }
+            Assertions.assertEquals(1, Collections.frequency(answered, 201), "exactly one create: " + answered);
+            Assertions.assertEquals(spellings.size() - 1, Collections.frequency(answered, 200),
+                    "the rest update it: " + answered);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        String feed = given().when().get(rulesPath("rules-topic-race", "sub1"))
+                .then().statusCode(200).extract().asString();
+        long stored = spellings.stream()
+                .filter(spelling -> feed.contains("<title type=\"text\">" + spelling + "</title>"))
+                .count();
+        Assertions.assertEquals(1, stored, "one rule stored: " + feed);
     }
 
     @Test
