@@ -24,6 +24,16 @@ public class SearchChanges {
 
     private final Map<String, Set<String>> documents = new HashMap<>();
     private final Set<String> droppedIndexes = new LinkedHashSet<>();
+    /** Told after indexes are deleted; set once by {@link SearchIndexSync}. */
+    private volatile Runnable dropListener = () -> { };
+
+    /**
+     * Who to tell after indexes are deleted, outside this object's lock. It runs on the deleting thread, so it must
+     * only hand the work on.
+     */
+    void onIndexesDropped(Runnable listener) {
+        dropListener = listener;
+    }
 
     /** The id of an index. */
     static String indexId(String cloud, String service, String index) {
@@ -38,9 +48,12 @@ public class SearchChanges {
     }
 
     /** Indexes were deleted, with their documents. */
-    synchronized void indexesDropped(Collection<String> indexIds) {
-        droppedIndexes.addAll(indexIds);
-        indexIds.forEach(documents::remove);
+    void indexesDropped(Collection<String> indexIds) {
+        synchronized (this) {
+            droppedIndexes.addAll(indexIds);
+            indexIds.forEach(documents::remove);
+        }
+        dropListener.run();
     }
 
     /** The keys of the documents of an index that changed since the last call, which forgets them. */

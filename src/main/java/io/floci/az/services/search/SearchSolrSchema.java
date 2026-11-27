@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.UnaryOperator;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -28,6 +29,14 @@ import java.util.zip.ZipOutputStream;
  * {@code .}, so the full Lucene syntax's {@code field:term} needs no translation. A field under a complex collection
  * holds the values of every element.
  *
+ * <p>Each filterable, sortable or facetable field also has a value field, {@code _v_} and its Solr name: the value
+ * itself, with docValues, of the matching Solr type (a string passed through the field's normalizer). Filters,
+ * sorting and facets use only these. Each element of a complex collection is also a child document, so a lambda
+ * ({@code rooms/any(r: r/type eq 'Suite' and r/price lt 100)}) tests both conditions on the same element: a child
+ * holds the value fields of its own element, {@code _scope_} (its collection's path) and {@code _depth_} (1 for an
+ * element of a top-level collection, 2 below that). A document itself has depth 0, and every query keeps to those.
+ * The document also holds the values of every element, for facets.
+ *
  * <p>Azure's analyzers are Lucene's, so each maps to the same Lucene analyzer class or factory chain. A language
  * analyzer the Solr image lacks, a Microsoft one without a Lucene twin, and a custom analyzer (not served yet) fall
  * back to the standard analyzer.
@@ -35,13 +44,29 @@ import java.util.zip.ZipOutputStream;
 final class SearchSolrSchema {
 
     /** Raised when this mapping changes, so collections built by an older one are rebuilt. */
-    static final int MAPPING_VERSION = 1;
+    static final int MAPPING_VERSION = 2;
     /** The Solr field that holds the document key. */
     static final String KEY = "_key_";
+    /** How deep a Solr document sits: 0 for an Azure document, 1 for an element of its complex collections. */
+    static final String DEPTH = "_depth_";
+    /** The Azure path of the complex collection a child document is an element of. */
+    static final String SCOPE = "_scope_";
+    /**
+     * The Solr names of the value fields that hold {@code NaN} in a document or child. A {@code NaN} is a value, so
+     * {@code eq null} does not find it, but it compares with nothing, so its value field leaves it out.
+     */
+    static final String NAN = "_nan_";
+    /** The prefix of a value field, which no Azure field name can take. */
+    static final String VALUE_PREFIX = "_v_";
+    /** The prefix under which child documents are nested in a Solr update. */
+    private static final String CHILD_PREFIX = "_n_";
     /** The configset each collection's own configset is copied from. */
     static final String BASE_CONFIG_SET = "floci-az-search";
 
     private static final String STANDARD = "standard.lucene";
+    private static final String STRING = "Edm.String";
+    private static final String COMPLEX = "Edm.ComplexType";
+    private static final String COMPLEX_COLLECTION = "Collection(Edm.ComplexType)";
     private static final String LUCENE = "org.apache.lucene.analysis.";
     private static final String STANDARD_CLASS = LUCENE + "standard.StandardAnalyzer";
     private static final String CLASSIC_SIMILARITY = "#Microsoft.Azure.Search.ClassicSimilarity";
@@ -89,7 +114,118 @@ final class SearchSolrSchema {
         }
     }
 
+    /**
+     * A filterable, sortable or facetable field as Solr holds it.
+     *
+     * @param path       the field's path in Azure's words, {@code rooms/type}
+     * @param solrName   the Solr value field, {@code _v_rooms.type}
+     * @param type       the EDM type of one value, {@code Edm.String} for a {@code Collection(Edm.String)}
+     * @param collection whether the field itself is a collection
+     * @param scope      the path of the innermost complex collection the field is under, or {@code ""}
+     * @param normalizer what a string value passes through
+     */
+    record ValueField(String path, String solrName, String type, boolean collection, String scope, boolean filterable,
+                      boolean sortable, boolean facetable, UnaryOperator<String> normalizer) {
+
+        /** Whether the Solr field holds several values: a collection, or a field of a complex collection's elements. */
+        boolean multiValued() {
+            return collection || !scope.isEmpty();
+        }
+
+        /** Whether a document has one value of it: neither a collection nor under one. */
+        boolean singleValued() {
+            return !multiValued();
+        }
+    }
+
+    /**
+     * A complex collection, whose elements are child documents.
+     *
+     * @param path   its Azure path, {@code rooms} or {@code rooms/beds}
+     * @param parent the path of the complex collection it is under, or {@code ""}
+     * @param depth  the depth of its elements' documents: 1 for a top-level collection
+     */
+    record Scope(String path, String parent, int depth) {
+    }
+
+    /** How an index is laid out in Solr: its text fields, value fields and complex collections. */
+    record Layout(List<TextField> textFields, List<ValueField> valueFields, List<Scope> scopes) {
+
+        Optional<ValueField> valueField(String path) {
+            return valueFields.stream().filter(field -> field.path().equals(path)).findFirst();
+        }
+
+        Optional<Scope> scope(String path) {
+            return scopes.stream().filter(scope -> scope.path().equals(path)).findFirst();
+        }
+    }
+
     private SearchSolrSchema() {
+    }
+
+    /** The layout of an index definition. */
+    static Layout layout(Map<String, Object> definition) {
+        List<ValueField> values = new ArrayList<>();
+        List<Scope> scopes = new ArrayList<>();
+        collectValues(fields(definition), "", "", 0, definition, values, scopes);
+        return new Layout(textFields(definition), List.copyOf(values), List.copyOf(scopes));
+    }
+
+    private static void collectValues(List<Map<String, Object>> fields, String prefix, String scope, int depth,
+                                      Map<String, Object> definition, List<ValueField> values, List<Scope> scopes) {
+        for (Map<String, Object> field : fields) {
+            String type = String.valueOf(field.get("type"));
+            String path = prefix + field.get("name");
+            if (COMPLEX_COLLECTION.equals(type)) {
+                scopes.add(new Scope(path, scope, depth + 1));
+                collectValues(fields(field), path + "/", path, depth + 1, definition, values, scopes);
+                continue;
+            }
+            if (COMPLEX.equals(type)) {
+                collectValues(fields(field), path + "/", scope, depth, definition, values, scopes);
+                continue;
+            }
+            boolean filterable = Boolean.TRUE.equals(field.get("filterable"));
+            boolean sortable = Boolean.TRUE.equals(field.get("sortable"));
+            boolean facetable = Boolean.TRUE.equals(field.get("facetable"));
+            boolean collection = type.startsWith("Collection(");
+            String element = collection ? type.substring("Collection(".length(), type.length() - 1) : type;
+            if (!(filterable || sortable || facetable) || solrType(element) == null) {
+                continue;
+            }
+            UnaryOperator<String> normalizer = STRING.equals(element)
+                    ? SearchNormalizers.of((String) field.get("normalizer"), definition) : UnaryOperator.identity();
+            values.add(new ValueField(path, VALUE_PREFIX + solrName(path), element, collection, scope, filterable,
+                    sortable, facetable, normalizer));
+        }
+    }
+
+    /** The field of an index definition at a path, {@code address/city}, or null when there is none. */
+    static Map<String, Object> definitionField(Map<String, Object> definition, String path) {
+        List<Map<String, Object>> candidates = fields(definition);
+        Map<String, Object> found = null;
+        for (String part : path.split("/")) {
+            found = candidates.stream().filter(field -> part.equals(field.get("name"))).findFirst().orElse(null);
+            if (found == null) {
+                return null;
+            }
+            candidates = fields(found);
+        }
+        return found;
+    }
+
+    /** The Solr type of a value of an EDM type, or null for one Solr does not hold (a vector's elements). */
+    static String solrType(String edmType) {
+        return switch (edmType) {
+            case STRING -> "string";
+            case "Edm.Int32" -> "pint";
+            case "Edm.Int64" -> "plong";
+            case "Edm.Double" -> "pdouble";
+            case "Edm.Boolean" -> "boolean";
+            case "Edm.DateTimeOffset" -> "pdate";
+            case "Edm.GeographyPoint" -> "location";
+            default -> null;
+        };
     }
 
     /**
@@ -148,7 +284,8 @@ final class SearchSolrSchema {
 
     /** The Schema API commands that add an index's field types and fields to its new collection. */
     static Map<String, Object> schema(Map<String, Object> definition) {
-        List<TextField> fields = textFields(definition);
+        Layout layout = layout(definition);
+        List<TextField> fields = layout.textFields();
         Map<String, Object> similarity = similarity(definition.get("similarity"));
         Map<String, Map<String, Object>> types = new LinkedHashMap<>();
         List<Map<String, Object>> solrFields = new ArrayList<>();
@@ -163,9 +300,21 @@ final class SearchSolrSchema {
             solrField.put("multiValued", field.multiValued());
             solrFields.add(solrField);
         }
+        for (ValueField field : layout.valueFields()) {
+            Map<String, Object> solrField = new LinkedHashMap<>();
+            solrField.put("name", field.solrName());
+            solrField.put("type", solrType(field.type()));
+            solrField.put("indexed", true);
+            solrField.put("stored", false);
+            solrField.put("docValues", true);
+            solrField.put("multiValued", field.multiValued());
+            solrFields.add(solrField);
+        }
         Map<String, Object> commands = new LinkedHashMap<>();
         if (!types.isEmpty()) {
             commands.put("add-field-type", List.copyOf(types.values()));
+        }
+        if (!solrFields.isEmpty()) {
             commands.put("add-field", solrFields);
         }
         return commands;
@@ -230,13 +379,15 @@ final class SearchSolrSchema {
     }
 
     /**
-     * The Solr document of a stored one: its key and the values of its searchable string fields. Values under a
-     * complex collection are gathered from every element.
+     * The Solr document of a stored one: its key, the values of its searchable string fields and of its value fields
+     * (those under a complex collection gathered from every element), and a child document per element of each
+     * complex collection.
      */
-    static Map<String, Object> document(List<TextField> fields, String key, Map<String, Object> stored) {
+    static Map<String, Object> document(Layout layout, String key, Map<String, Object> stored) {
         Map<String, Object> document = new LinkedHashMap<>();
         document.put(KEY, key);
-        for (TextField field : fields) {
+        document.put(DEPTH, 0);
+        for (TextField field : layout.textFields()) {
             List<Object> values = new ArrayList<>();
             gather(stored, field.path().split("/"), 0, values);
             if (values.isEmpty()) {
@@ -244,7 +395,103 @@ final class SearchSolrSchema {
             }
             document.put(field.solrName(), field.multiValued() ? values : values.getFirst());
         }
+        for (ValueField field : layout.valueFields()) {
+            putValues(document, field, stored, field.path(), field.multiValued());
+        }
+        // A document key never starts with '_', and its length makes the rest unambiguous.
+        addChildren(document, layout, "", "_" + key.length() + ":" + key, stored);
         return document;
+    }
+
+    /**
+     * The child documents of the elements of the complex collections directly under {@code scope}. A collection may
+     * sit inside plain complex fields of its scope ({@code address/rooms}), so it is found by its path relative to
+     * the scope, and its children are labelled by that path, which keeps {@code rooms} and {@code address/rooms}
+     * apart.
+     */
+    private static void addChildren(Map<String, Object> parent, Layout layout, String scope, String parentKey,
+                                    Map<String, Object> holder) {
+        for (Scope collection : layout.scopes()) {
+            if (!collection.parent().equals(scope)) {
+                continue;
+            }
+            String relative = collection.path().substring(scope.isEmpty() ? 0 : scope.length() + 1);
+            Object elements = holder;
+            for (String segment : relative.split("/")) {
+                elements = elements instanceof Map<?, ?> map ? map.get(segment) : null;
+            }
+            if (!(elements instanceof List<?> list) || list.isEmpty()) {
+                continue;
+            }
+            List<Map<String, Object>> children = new ArrayList<>();
+            for (int i = 0; i < list.size(); i++) {
+                if (!(list.get(i) instanceof Map<?, ?> element)) {
+                    continue;
+                }
+                Map<String, Object> elementValues = cast(element);
+                String childKey = parentKey + "#" + solrName(relative) + "." + i;
+                Map<String, Object> child = new LinkedHashMap<>();
+                child.put(KEY, childKey);
+                child.put(SCOPE, collection.path());
+                child.put(DEPTH, collection.depth());
+                for (ValueField field : layout.valueFields()) {
+                    if (field.scope().equals(collection.path())) {
+                        putValues(child, field, elementValues, field.path().substring(collection.path().length() + 1),
+                                field.collection());
+                    }
+                }
+                addChildren(child, layout, collection.path(), childKey, elementValues);
+                children.add(child);
+            }
+            if (!children.isEmpty()) {
+                parent.put(CHILD_PREFIX + solrName(relative), children);
+            }
+        }
+    }
+
+    private static void putValues(Map<String, Object> document, ValueField field, Map<String, Object> holder,
+                                  String relativePath, boolean multiValued) {
+        List<Object> raw = new ArrayList<>();
+        gather(holder, relativePath.split("/"), 0, raw);
+        List<Object> values = new ArrayList<>();
+        for (Object value : raw) {
+            Object converted = solrValue(field, value);
+            if (converted != null) {
+                values.add(converted);
+            } else if ("NaN".equals(value) && "Edm.Double".equals(field.type())) {
+                markNaN(document, field.solrName());
+            }
+        }
+        if (!values.isEmpty()) {
+            document.put(field.solrName(), multiValued ? values : values.getFirst());
+        }
+    }
+
+    /**
+     * A stored value as Solr takes it: a string normalized, a point as {@code lat,lon}, the infinities as Java
+     * writes them. {@code NaN} is left out, so it equals nothing and is not less or greater than anything, as Azure
+     * has it; {@link #NAN} marks that the field holds one.
+     */
+    static Object solrValue(ValueField field, Object value) {
+        return switch (value) {
+            case String text when STRING.equals(field.type()) -> field.normalizer().apply(text);
+            case String text when "Edm.Double".equals(field.type()) -> switch (text) {
+                case "INF" -> "Infinity";
+                case "-INF" -> "-Infinity";
+                default -> null;
+            };
+            case Map<?, ?> point when point.get("coordinates") instanceof List<?> coordinates
+                    && coordinates.size() == 2 -> coordinates.get(1) + "," + coordinates.get(0);
+            default -> value;
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void markNaN(Map<String, Object> document, String solrName) {
+        List<Object> marked = (List<Object>) document.computeIfAbsent(NAN, name -> new ArrayList<>());
+        if (!marked.contains(solrName)) {
+            marked.add(solrName);
+        }
     }
 
     private static void gather(Object value, String[] path, int depth, List<Object> values) {
@@ -266,8 +513,8 @@ final class SearchSolrSchema {
     }
 
     /**
-     * The configset every collection starts from: a mutable managed schema holding only the key and the fields
-     * SolrCloud needs, no field guessing, and the {@code /select} handler. The types and fields of an index are
+     * The configset every collection starts from: a mutable managed schema holding the key, the fields SolrCloud and
+     * child documents need and the types of value fields, no field guessing, and the {@code /select} handler. The types and fields of an index are
      * added with the Schema API.
      */
     static byte[] baseConfigSet() {
@@ -290,6 +537,11 @@ final class SearchSolrSchema {
                 .startAttr("schema", "name", "floci-az-search", "version", "1.7")
                 .selfClose("fieldType", "name", "string", "class", "solr.StrField")
                 .selfClose("fieldType", "name", "plong", "class", "solr.LongPointField")
+                .selfClose("fieldType", "name", "pint", "class", "solr.IntPointField")
+                .selfClose("fieldType", "name", "pdouble", "class", "solr.DoublePointField")
+                .selfClose("fieldType", "name", "pdate", "class", "solr.DatePointField")
+                .selfClose("fieldType", "name", "boolean", "class", "solr.BoolField")
+                .selfClose("fieldType", "name", "location", "class", "solr.LatLonPointSpatialField")
                 .selfClose("fieldType", "name", "_nest_path_", "class", "solr.NestPathField")
                 .selfClose("field", "name", KEY, "type", "string", "indexed", "true", "stored", "true",
                         "required", "true")
@@ -297,6 +549,12 @@ final class SearchSolrSchema {
                         "docValues", "true")
                 .selfClose("field", "name", "_root_", "type", "string", "indexed", "true", "stored", "false")
                 .selfClose("field", "name", "_nest_path_", "type", "_nest_path_")
+                .selfClose("field", "name", DEPTH, "type", "pint", "indexed", "true", "stored", "false",
+                        "docValues", "true")
+                .selfClose("field", "name", SCOPE, "type", "string", "indexed", "true", "stored", "false",
+                        "docValues", "true")
+                .selfClose("field", "name", NAN, "type", "string", "indexed", "true", "stored", "false",
+                        "multiValued", "true")
                 .elem("uniqueKey", KEY)
                 .end("schema")
                 .build();

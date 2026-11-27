@@ -1,6 +1,7 @@
 package io.floci.az.services.search;
 
 import io.floci.az.services.search.SearchSolrManager.Engine;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -30,8 +31,10 @@ import java.util.function.Supplier;
  *       similarity, rebuilds its collection, and so does a new container.</li>
  *   <li>Otherwise only the documents {@link SearchChanges} recorded since the last query are sent again, as they are
  *       now in storage: added, or deleted when storage no longer has them.</li>
- *   <li>The collections of deleted indexes are deleted on a background thread. One whose delete fails is tried
- *       again after the next query. An index deleted and created again is rebuilt by its next query.</li>
+ *   <li>The collections of deleted indexes are deleted on a background thread, started by the delete itself and
+ *       after each query, and only in a container already running: a delete never starts Solr. One whose delete
+ *       fails is tried again after the next query. An index deleted and created again is rebuilt by its next
+ *       query.</li>
  * </ul>
  *
  * <p>A query runs inside {@link #locked} for its index, which covers reading the definition, catching up and the
@@ -72,6 +75,8 @@ public class SearchIndexSync {
         return thread;
     });
     private final AtomicBoolean retirementScheduled = new AtomicBoolean();
+    /** Set by each request for a retirement, so one made while a retirement runs is not lost. */
+    private final AtomicBoolean retirementRequested = new AtomicBoolean();
     /** By collection name. Guarded by itself; an entry is deleted from Solr under its index's lock. */
     private final Map<String, Orphan> orphans = new HashMap<>();
 
@@ -156,6 +161,12 @@ public class SearchIndexSync {
     record Target(Engine engine, String collection) {
     }
 
+    /** A deleted index's collection is deleted without waiting for a query, which may never come. */
+    @PostConstruct
+    void listenForDrops() {
+        changes.onIndexesDropped(this::scheduleRetirement);
+    }
+
     @PreDestroy
     void shutdown() {
         retirer.shutdownNow();
@@ -170,19 +181,35 @@ public class SearchIndexSync {
         synchronized (orphans) {
             pending = !orphans.isEmpty();
         }
-        if ((pending || !changes.droppedIndexes().isEmpty()) && retirementScheduled.compareAndSet(false, true)) {
-            try {
-                retirer.execute(() -> {
-                    try {
+        if (!pending && changes.droppedIndexes().isEmpty()) {
+            return;
+        }
+        // Requested before it is scheduled: a retirement already running sees the request when it finishes.
+        retirementRequested.set(true);
+        startRetirement();
+    }
+
+    private void startRetirement() {
+        if (!retirementScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            retirer.execute(() -> {
+                try {
+                    while (retirementRequested.getAndSet(false)) {
                         manager.running().ifPresent(this::retireDropped);
-                    } finally {
-                        retirementScheduled.set(false);
                     }
-                });
-            } catch (RejectedExecutionException e) {
-                // Shutting down.
-                retirementScheduled.set(false);
-            }
+                } finally {
+                    retirementScheduled.set(false);
+                }
+                if (retirementRequested.get()) {
+                    // Requested after the loop's last check.
+                    startRetirement();
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // Shutting down.
+            retirementScheduled.set(false);
         }
     }
 
@@ -259,10 +286,10 @@ public class SearchIndexSync {
         if (!schema.isEmpty()) {
             client.schema(engine.baseUrl(), collection, schema);
         }
-        List<SearchSolrSchema.TextField> fields = SearchSolrSchema.textFields(definition);
+        SearchSolrSchema.Layout layout = SearchSolrSchema.layout(definition);
         List<Map<String, Object>> adds = new ArrayList<>();
         for (Map.Entry<String, Map<String, Object>> document : documents.stored(cloud, service, index).entrySet()) {
-            adds.add(SearchSolrSchema.document(fields, document.getKey(), document.getValue()));
+            adds.add(SearchSolrSchema.document(layout, document.getKey(), document.getValue()));
         }
         int count = adds.size();
         client.update(engine.baseUrl(), collection, adds, List.of());
@@ -279,12 +306,13 @@ public class SearchIndexSync {
         if (keys.isEmpty()) {
             return;
         }
-        List<SearchSolrSchema.TextField> fields = SearchSolrSchema.textFields(definition);
+        SearchSolrSchema.Layout layout = SearchSolrSchema.layout(definition);
         Map<String, Map<String, Object>> present = documents.stored(cloud, service, index, keys);
         List<Map<String, Object>> adds = new ArrayList<>();
         for (Map.Entry<String, Map<String, Object>> document : present.entrySet()) {
-            adds.add(SearchSolrSchema.document(fields, document.getKey(), document.getValue()));
+            adds.add(SearchSolrSchema.document(layout, document.getKey(), document.getValue()));
         }
+        // Deleting a document by its key deletes its child documents too, and adding it replaces them.
         Set<String> deletes = new HashSet<>(keys);
         deletes.removeAll(present.keySet());
         try {

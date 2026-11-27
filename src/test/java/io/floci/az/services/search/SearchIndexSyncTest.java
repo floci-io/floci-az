@@ -28,8 +28,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * How queries of indexes share the Solr collections, with Solr mocked: a query of an index waits for another of the
- * same index, never for one of another; the failed delete of a deleted index's collection is tried again without
- * failing a query; an index deleted and created again is rebuilt; and an engine lost midway fails no other query.
+ * same index, never for one of another; a deleted index's collection is deleted by the delete itself, in a running
+ * container only; the failed delete of a deleted index's collection is tried again without failing a query; an index deleted and created again is rebuilt; and an engine lost midway fails no other query.
  */
 @DisplayName("Azure AI Search: catching up the Solr collections")
 class SearchIndexSyncTest {
@@ -42,11 +42,12 @@ class SearchIndexSyncTest {
     private SearchChanges changes;
     private SearchIndexSync sync;
     private SearchSolrManager.Engine engine;
+    private SearchSolrManager manager;
 
     @BeforeEach
     void mockSolr() {
         engine = new SearchSolrManager.Engine("c1", BASE, 1);
-        SearchSolrManager manager = mock(SearchSolrManager.class);
+        manager = mock(SearchSolrManager.class);
         when(manager.await()).thenReturn(Optional.of(engine));
         when(manager.running()).thenReturn(Optional.of(engine));
         client = mock(SearchSolrClient.class);
@@ -95,6 +96,24 @@ class SearchIndexSyncTest {
         query("b");
         verify(client, after(300).times(3)).deleteCollection(BASE, dropped);
         verify(client, times(1)).createCollection(eq(BASE), eq(SearchSolrSchema.collection("c", "svc", "b")), any());
+    }
+
+    @Test
+    void aDeletedIndexsCollectionGoesWithoutAnotherQueryButADeleteNeverStartsSolr() {
+        String a = SearchSolrSchema.collection("c", "svc", "a");
+        String b = SearchSolrSchema.collection("c", "svc", "b");
+        query("a");
+        query("b");
+        sync.listenForDrops();
+
+        changes.indexesDropped(List.of(SearchChanges.indexId("c", "svc", "a")));
+        // Once by its own build, once by the delete.
+        verify(client, timeout(5000).times(2)).deleteCollection(BASE, a);
+
+        when(manager.running()).thenReturn(Optional.empty());
+        changes.indexesDropped(List.of(SearchChanges.indexId("c", "svc", "b")));
+        verify(client, after(300).times(1)).deleteCollection(BASE, b);
+        verify(manager, times(2)).await();
     }
 
     @Test

@@ -10,13 +10,33 @@ import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 
 /**
- * How a full-syntax query is rewritten before Solr parses it: a plain function, no Solr needed. {@code SearchSolrTest}
- * runs the searches themselves.
+ * How a search is written for Solr before Solr parses it: plain functions, no Solr needed.
+ * {@code SearchSolrDockerTest} runs the searches themselves.
  */
-@DisplayName("Azure AI Search: a full-syntax query as Solr reads it")
+@DisplayName("Azure AI Search: a search as Solr reads it")
 class SearchQueriesTest {
+
+    @Test
+    void aHighlightFieldWithADashAndANumberAnswersThatManyHighlights() throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> hotels = new ObjectMapper().readValue("""
+                {"name": "hotels", "fields": [
+                  {"name": "id", "type": "Edm.String", "key": true, "searchable": false},
+                  {"name": "title", "type": "Edm.String", "searchable": true},
+                  {"name": "tags", "type": "Collection(Edm.String)", "searchable": true}]}""", Map.class);
+
+        List<Map.Entry<String, String>> params = SearchQueries.plan(
+                Map.of("search", "x", "highlight", "title-3, tags"), hotels).params();
+
+        assertThat(params, hasItem(Map.entry("hl.fl", "title,tags")));
+        assertThat(params, hasItem(Map.entry("hl.snippets", "5")));
+        assertThat(params, hasItem(Map.entry("f.title.hl.snippets", "3")));
+        assertThat(params.stream().map(Map.Entry::getKey).toList(), not(hasItem("f.tags.hl.snippets")));
+    }
 
     @Test
     void theFullSyntaxWritesFieldPathsAsSolrNamesAndSpreadsALoneRegexOverTheFieldsButLeavesPhrasesAlone() throws IOException {

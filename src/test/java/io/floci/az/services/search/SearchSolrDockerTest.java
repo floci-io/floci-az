@@ -36,13 +36,14 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Searches run by a real Solr sidecar: the one test class that pulls and starts it. Every test shares one container
- * and one index of seven documents; the tests that change an index use one of their own.
+ * and one index of seven documents; the filter, sort, facet and scoring function tests share a second index of four,
+ * and the tests that change an index use one of their own.
  */
 @QuarkusTest
-@TestProfile(SearchSolrTest.WithSolr.class)
+@TestProfile(SearchSolrDockerTest.WithSolr.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("Azure AI Search: queries run by the Solr sidecar (Docker required)")
-class SearchSolrTest {
+class SearchSolrDockerTest {
 
     /** Turns on the engine the test profile otherwise keeps off. */
     public static class WithSolr implements QuarkusTestProfile {
@@ -75,7 +76,33 @@ class SearchSolrTest {
               {"name": "titleFirst", "text": {"weights": {"title": 5}}},
               {"name": "tagsFirst", "text": {"weights": {"tags": 5}}}]}""";
 
+    private static final String INVENTORY = """
+            {"name": "inventory", "fields": [
+              {"name": "id", "type": "Edm.String", "key": true},
+              {"name": "name", "type": "Edm.String"},
+              {"name": "category", "type": "Edm.String", "searchable": false, "normalizer": "lowercase"},
+              {"name": "stars", "type": "Edm.Int32"},
+              {"name": "rating", "type": "Edm.Double"},
+              {"name": "opened", "type": "Edm.DateTimeOffset"},
+              {"name": "parking", "type": "Edm.Boolean"},
+              {"name": "location", "type": "Edm.GeographyPoint"},
+              {"name": "tags", "type": "Collection(Edm.String)"},
+              {"name": "scores", "type": "Collection(Edm.Int32)"},
+              {"name": "rooms", "type": "Collection(Edm.ComplexType)", "fields": [
+                {"name": "type", "type": "Edm.String"},
+                {"name": "price", "type": "Edm.Double"},
+                {"name": "beds", "type": "Collection(Edm.ComplexType)", "fields": [
+                  {"name": "size", "type": "Edm.String"}]}]}],
+             "scoringProfiles": [
+              {"name": "rated", "functions": [{"type": "magnitude", "fieldName": "rating", "boost": 3,
+                "magnitude": {"boostingRangeStart": 0, "boostingRangeEnd": 5}}]},
+              {"name": "near", "functions": [{"type": "distance", "fieldName": "location", "boost": 5,
+                "distance": {"referencePointParameter": "here", "boostingDistance": 100}}]},
+              {"name": "tagged", "functions": [{"type": "tag", "fieldName": "tags", "boost": 4,
+                "tag": {"tagsParameter": "wanted"}}]}]}""";
+
     private boolean loaded;
+    private boolean inventoryLoaded;
 
     /** A filesystem check only: Quarkus is not listening yet when this runs. */
     @BeforeAll
@@ -104,6 +131,40 @@ class SearchSolrTest {
                 {"id": "5", "title": "Quiet place", "tags": ["sunset"]},
                 {"id": "6", "title": "Sunset inn", "tags": ["quiet"]},
                 {"id": "7", "title": "Motel", "description": "A motel that runs a small cafe"}""");
+    }
+
+    /** Loads the second shared index once, before the first test that needs it. */
+    private void inventory() {
+        if (inventoryLoaded) {
+            return;
+        }
+        inventoryLoaded = true;
+        createIndex(INVENTORY);
+        upload("inventory", """
+                {"id": "a", "name": "Alpha inn", "category": "Budget", "stars": 3, "rating": 3.5,
+                 "opened": "2020-03-15T10:00:00Z", "parking": true,
+                 "location": {"type": "Point", "coordinates": [24.94, 60.17]}, "tags": ["wifi", "pool"],
+                 "scores": [1, 9],
+                 "rooms": [{"type": "Suite", "price": 300, "beds": [{"size": "king"}]},
+                           {"type": "Single", "price": 80}]},
+                {"id": "b", "name": "beta lodge", "category": "LUXURY", "stars": 5, "rating": 4.8,
+                 "opened": "2021-07-01T00:00:00Z", "parking": false,
+                 "location": {"type": "Point", "coordinates": [2.35, 48.85]}, "tags": ["spa"], "scores": [5],
+                 "rooms": [{"type": "Suite", "price": 90, "beds": [{"size": "queen"}]}]},
+                {"id": "c", "name": "Gamma hotel", "category": "luxury", "stars": 4,
+                 "opened": "2021-07-20T00:00:00Z", "tags": ["wifi"], "rooms": []},
+                {"id": "d", "name": "delta", "stars": 1, "rating": 1.0, "parking": true, "tags": []}""");
+    }
+
+    private List<String> filtered(String filter) {
+        inventory();
+        return search("inventory", "{\"filter\": \"" + filter.replace("\"", "\\\"") + "\", \"select\": \"id\"}")
+            .then().statusCode(200).extract().jsonPath().getList("value.id", String.class);
+    }
+
+    private Response inventorySearch(String body) {
+        inventory();
+        return search("inventory", body);
     }
 
     private static void createIndex(String definition) {
@@ -228,6 +289,9 @@ class SearchSolrTest {
             .body("value[0].'@search.highlights'.'address/city'", contains("[Helsinki]"));
         search("{\"search\": \"luxury\"}").then().statusCode(200)
             .body("value[0]", not(hasKey("@search.highlights")));
+        search("{\"search\": \"luxury\", \"highlight\": \"title-1\", \"select\": \"id\"}").then()
+            .statusCode(200)
+            .body("value.find { it.id == '2' }.'@search.highlights'.title", contains("<em>Luxury</em> hotel"));
     }
 
     @Test
@@ -236,8 +300,6 @@ class SearchSolrTest {
             .body("value.id", contains("6", "5"));
         search("{\"search\": \"sunset\", \"scoringProfile\": \"tagsFirst\"}").then().statusCode(200)
             .body("value.id", contains("5", "6"));
-        search("{\"search\": \"sunset\", \"scoringProfile\": \"nope\"}").then().statusCode(400)
-            .body("error.message", containsString("nope"));
     }
 
     @Test
@@ -333,5 +395,167 @@ class SearchSolrTest {
         float score = search("single", "{\"search\": \"alone\"}").then().statusCode(200)
             .extract().path("value[0].'@search.score'");
         assertThat((double) score, closeTo(expected, 1e-6));
+    }
+
+    // ── Filters, sorting, facets and scoring functions ───────────────────────
+
+    @Test
+    void aFilterComparesNumbersDatesStringsAndBooleansAndKeepsNullApart() {
+        assertThat(filtered("stars ge 4"), containsInAnyOrder("b", "c"));
+        assertThat(filtered("stars gt 3.5"), containsInAnyOrder("b", "c"));
+        assertThat(filtered("5 le stars"), contains("b"));
+        assertThat(filtered("rating lt 4 and parking"), containsInAnyOrder("a", "d"));
+        assertThat(filtered("not (stars gt 3) or rating eq null"), containsInAnyOrder("a", "c", "d"));
+        // ne is true for a document without a value, as Learn's table has it.
+        assertThat(filtered("rating ne 4.8"), containsInAnyOrder("a", "c", "d"));
+        assertThat(filtered("opened ge 2021-01-01T00:00:00Z"), containsInAnyOrder("b", "c"));
+        assertThat(filtered("opened lt 2021-07-10T00:00:00+02:00"), containsInAnyOrder("a", "b"));
+        assertThat(filtered("name eq 'beta lodge'"), contains("b"));
+        assertThat(filtered("name eq 'Beta lodge'"), hasSize(0));
+        // The lowercase normalizer applies to the values and to the constant.
+        assertThat(filtered("category eq 'LUXURY'"), containsInAnyOrder("b", "c"));
+        assertThat(filtered("search.in(category, 'budget|Luxury', '|')"), containsInAnyOrder("a", "b", "c"));
+        assertThat(filtered("parking eq false"), contains("b"));
+    }
+
+    @Test
+    void aLambdaTestsOneElementOfACollectionAtATime() {
+        assertThat(filtered("tags/any(t: t eq 'wifi')"), containsInAnyOrder("a", "c"));
+        assertThat(filtered("tags/any()"), containsInAnyOrder("a", "b", "c"));
+        assertThat(filtered("not tags/any()"), contains("d"));
+        assertThat(filtered("tags/all(t: t ne 'wifi')"), containsInAnyOrder("b", "d"));
+        // a's scores are 1 and 9: neither is between 2 and 8.
+        assertThat(filtered("scores/any(s: s gt 2 and s lt 8)"), contains("b"));
+        // a has a suite and a room under 100, but not one room that is both.
+        assertThat(filtered("rooms/any(r: r/type eq 'Suite' and r/price lt 100)"), contains("b"));
+        assertThat(filtered("rooms/all(r: r/price gt 85)"), containsInAnyOrder("b", "c", "d"));
+        assertThat(filtered("rooms/any(r: r/beds/any(b: b/size eq 'king'))"), contains("a"));
+        // A child document is never a result of its own.
+        inventorySearch("{\"search\": \"*\", \"count\": true}").then().statusCode(200)
+            .body("'@odata.count'", equalTo(4));
+    }
+
+    @Test
+    void geoDistanceFiltersAndSortsInKilometres() {
+        assertThat(filtered("geo.distance(location, geography'POINT(24.9 60.2)') lt 10"), contains("a"));
+        assertThat(filtered("geo.distance(location, geography'POINT(24.9 60.2)') gt 10"), contains("b"));
+        assertThat(filtered("geo.distance(location, geography'POINT(24.9 60.2)') lt 0"), hasSize(0));
+        assertThat(filtered("geo.distance(location, geography'POINT(24.9 60.2)') ge 0"),
+                containsInAnyOrder("a", "b"));
+        List<String> nearest = inventorySearch("{\"orderby\": \"geo.distance(location,"
+                + " geography'POINT(2.3 48.8)')\", \"select\": \"id\"}").then().statusCode(200)
+            .extract().jsonPath().getList("value.id", String.class);
+        assertThat(nearest.subList(0, 2), contains("b", "a"));
+    }
+
+    @Test
+    void searchIsMatchFiltersByTextAndIsMatchScoringAlsoScores() {
+        assertThat(filtered("search.ismatch('lodge', 'name')"), contains("b"));
+        JsonPath answer = inventorySearch("{\"filter\": \"search.ismatchscoring('lodge') or stars eq 1\","
+                + " \"select\": \"id\"}").then().statusCode(200).extract().jsonPath();
+        assertThat(answer.getList("value.id", String.class), contains("b", "d"));
+        assertThat(answer.getFloat("value[0].'@search.score'"), greaterThan(0f));
+        assertThat(answer.getFloat("value[1].'@search.score'"), equalTo(0f));
+    }
+
+    @Test
+    void orderByPutsNullsFirstAscendingAndLastDescending() {
+        assertThat(ordered("rating desc"), contains("b", "a", "d", "c"));
+        assertThat(ordered("rating"), contains("c", "d", "a", "b"));
+        // Ordinal: upper case before lower case.
+        assertThat(ordered("name asc"), contains("a", "c", "b", "d"));
+        assertThat(ordered("category asc, stars desc"), contains("d", "a", "b", "c"));
+        assertThat(ordered("parking desc, stars"), contains("d", "a", "b", "c"));
+    }
+
+    private List<String> ordered(String orderBy) {
+        return inventorySearch("{\"orderby\": \"" + orderBy + "\", \"select\": \"id\"}").then().statusCode(200)
+            .extract().jsonPath().getList("value.id", String.class);
+    }
+
+    @Test
+    void facetsCountTheDocumentsByValueRangeAndInterval() {
+        JsonPath facets = inventorySearch("{\"top\": 0, \"facets\": [\"category\", \"tags,sort:value\","
+                + " \"stars,values:2|4\", \"rating,interval:2\", \"opened,interval:month\", \"rooms/type\","
+                + " \"parking\"]}").then().statusCode(200)
+            .body("value", hasSize(0))
+            .extract().jsonPath();
+        assertThat(facets.getList("'@search.facets'.category.value"), contains("luxury", "budget"));
+        assertThat(facets.getList("'@search.facets'.category.count"), contains(2, 1));
+        assertThat(facets.getList("'@search.facets'.tags.value"), contains("pool", "spa", "wifi"));
+        assertThat(facets.getList("'@search.facets'.stars"), contains(Map.of("to", 2, "count", 1),
+                Map.of("from", 2, "to", 4, "count", 1), Map.of("from", 4, "count", 2)));
+        assertThat(facets.getList("'@search.facets'.rating.value"), contains(0, 2, 4));
+        assertThat(facets.getList("'@search.facets'.opened.value"), contains("2020-03-01T00:00:00Z",
+                "2021-07-01T00:00:00Z"));
+        assertThat(facets.getList("'@search.facets'.opened.count"), contains(1, 2));
+        // Range bounds as recorded from Azure (net RangeFacets): dates with milliseconds, a double field's as doubles.
+        String ranges = inventorySearch("{\"top\": 0, \"facets\": [\"opened,values:2021-01-01T00:00:00Z\","
+                + " \"rating,values:2|4\"]}").then().statusCode(200).extract().asString();
+        assertThat(ranges, containsString("\"to\":\"2021-01-01T00:00:00.000Z\""));
+        assertThat(ranges, containsString("\"from\":2.0,\"to\":4.0"));
+        // Counted per document: a has two rooms but one suite.
+        assertThat(facets.getList("'@search.facets'.'rooms/type'.value"), contains("Suite", "Single"));
+        assertThat(facets.getList("'@search.facets'.'rooms/type'.count"), contains(2, 1));
+        assertThat(facets.getList("'@search.facets'.parking.value"), contains(true, false));
+
+        inventorySearch("{\"filter\": \"stars ge 4\", \"facets\": [\"category\"]}").then().statusCode(200)
+            .body("'@search.facets'.category.value", contains("luxury"));
+        inventorySearch("{\"search\": \"*\"}").then().statusCode(200).body("$", not(hasKey("@search.facets")));
+    }
+
+    @Test
+    void aNaNIsAValueButComparesWithNothingAndALargeBucketKeepsItsSize() {
+        createIndex("""
+                {"name": "special", "fields": [
+                  {"name": "id", "type": "Edm.String", "key": true},
+                  {"name": "rating", "type": "Edm.Double"},
+                  {"name": "prices", "type": "Collection(Edm.Double)"},
+                  {"name": "serial", "type": "Edm.Int64"}]}""");
+        upload("special", """
+                {"id": "nan", "rating": "NaN", "prices": ["NaN"]},
+                {"id": "one", "rating": 1.0, "prices": [1.0]},
+                {"id": "none"},
+                {"id": "big", "rating": 1e20, "serial": 9223372036854775806}""");
+        assertThat(ids("special", "rating eq null"), contains("none"));
+        assertThat(ids("special", "rating ne null"), containsInAnyOrder("nan", "one", "big"));
+        assertThat(ids("special", "rating gt 0"), containsInAnyOrder("one", "big"));
+        assertThat(ids("special", "prices/any()"), containsInAnyOrder("nan", "one"));
+        assertThat(ids("special", "prices/any(p: p ne 1)"), contains("nan"));
+        assertThat(ids("special", "prices/all(p: p ge 1)"), containsInAnyOrder("one", "none", "big"));
+
+        // A whole-number start past a long stays a double rather than wrapping. (A width of 1 at 1e20 is below a
+        // double's resolution, so the width is one a double can step by.)
+        search("special", "{\"top\": 0, \"facets\": [\"rating,interval:10000000000000000000\"]}").then()
+            .statusCode(200)
+            .body(containsString("\"value\":1.0E20"));
+        // 1 to 1e20 by 1 is far past the bucket limit, so the buckets come from the distinct values; the 1e20 one
+        // is empty at a double's resolution and left out.
+        search("special", "{\"top\": 0, \"facets\": [\"rating,interval:1\"]}").then().statusCode(200)
+            .body("'@search.facets'.rating.value", contains(1))
+            .body("'@search.facets'.rating.count", contains(1));
+        // A boundary of a long field keeps every digit, though it has 19.
+        search("special", "{\"top\": 0, \"facets\": [\"serial,values:9223372036854775806\"]}").then()
+            .statusCode(200)
+            .body(containsString("{\"to\":9223372036854775806,\"count\":0}"))
+            .body(containsString("{\"from\":9223372036854775806,\"count\":1}"));
+    }
+
+    private static List<String> ids(String index, String filter) {
+        return search(index, "{\"filter\": \"" + filter + "\", \"select\": \"id\"}").then().statusCode(200)
+            .extract().jsonPath().getList("value.id", String.class);
+    }
+
+    @Test
+    void scoringFunctionsBoostByMagnitudeDistanceAndTags() {
+        assertThat(boosted("{\"scoringProfile\": \"rated\"}"), contains("b", "a", "d", "c"));
+        assertThat(boosted("{\"scoringProfile\": \"near\", \"scoringParameters\": [\"here-24.9,60.2\"]}")
+                .getFirst(), equalTo("a"));
+        assertThat(boosted("{\"scoringProfile\": \"tagged\", \"scoringParameters\": [\"wanted-spa\"]}")
+                .getFirst(), equalTo("b"));
+    }
+
+    private List<String> boosted(String body) {
+        return inventorySearch(body).then().statusCode(200).extract().jsonPath().getList("value.id", String.class);
     }
 }

@@ -12,7 +12,8 @@ import static org.hamcrest.Matchers.equalTo;
 
 /**
  * A search request as the data plane reads and checks it, before Solr runs it: the unit tests keep the Solr sidecar
- * off, so a request that passes every check answers 503 here. {@code SearchSolrTest} runs the searches themselves.
+ * off, so a request that passes every check answers 503 here. {@code SearchSolrDockerTest} runs the searches
+ * themselves.
  */
 @QuarkusTest
 @DisplayName("Azure AI Search: search requests")
@@ -30,7 +31,13 @@ class SearchQueryTest {
               {"name": "title", "type": "Edm.String"},
               {"name": "rating", "type": "Edm.Double"},
               {"name": "secret", "type": "Edm.String", "retrievable": false},
-              {"name": "code", "type": "Edm.String", "searchable": false}]}""";
+              {"name": "code", "type": "Edm.String", "searchable": false},
+              {"name": "spot", "type": "Edm.GeographyPoint"},
+              {"name": "opened", "type": "Edm.DateTimeOffset"},
+              {"name": "note", "type": "Edm.String", "filterable": false, "sortable": false, "facetable": false}],
+             "scoringProfiles": [
+              {"name": "near", "functions": [{"type": "distance", "fieldName": "spot", "boost": 5,
+                "distance": {"referencePointParameter": "here", "boostingDistance": 100}}]}]}""";
 
     @BeforeEach
     void createTheIndex() {
@@ -61,9 +68,9 @@ class SearchQueryTest {
 
     @Test
     void whatIsNotServedYetIsRefused() {
-        for (String body : new String[] {"{\"filter\": \"rating gt 3\"}", "{\"orderby\": \"rating desc\"}",
-                "{\"facets\": [\"title\"]}", "{\"queryType\": \"semantic\"}",
-                "{\"vectorQueries\": [{\"kind\": \"vector\"}]}", "{\"answers\": \"extractive\"}"}) {
+        for (String body : new String[] {"{\"queryType\": \"semantic\"}",
+                "{\"vectorQueries\": [{\"kind\": \"vector\"}]}", "{\"answers\": \"extractive\"}",
+                "{\"filter\": \"geo.intersects(spot, geography'POLYGON((1 1, 2 1, 2 2, 1 1))')\"}"}) {
             search(body).then().statusCode(400).body("error.code", equalTo("FeatureNotSupportedInService"));
         }
     }
@@ -79,12 +86,62 @@ class SearchQueryTest {
             .body("error.message", containsString("Parameter name: highlight"));
         search("{\"search\": \"x\", \"highlight\": \"secret\"}").then().statusCode(400)
             .body("error.message", containsString("'secret' is not a retrievable field"));
+        // Learn, "Hit highlighting": a dash and a number set the field's limit.
+        search("{\"search\": \"x\", \"highlight\": \"title-3\"}").then().statusCode(503);
+        search("{\"search\": \"x\", \"highlight\": \"title-x\"}").then().statusCode(400)
+            .body("error.message", containsString("Could not find a property named 'title-x'"));
     }
 
     @Test
-    void anUnknownScoringProfileIsRefused() {
+    void aFilterSortOrFacetIsCheckedBeforeSolrRunsIt() {
+        search("{\"filter\": \"rating gt 3\"}").then().statusCode(503);
+        search("{\"filter\": \"note eq 'x'\"}").then().statusCode(400)
+            .body("error.message", containsString("'note' is not a filterable field"))
+            .body("error.message", containsString("Parameter name: $filter"));
+        given().when().get(DOCS + API + "&$filter=rating%20gt").then().statusCode(400)
+            .body("error.message", containsString("Syntax error"));
+        search("{\"orderby\": \"rating desc, title\"}").then().statusCode(503);
+        search("{\"orderby\": \"note\"}").then().statusCode(400)
+            .body("error.message", containsString("Parameter name: $orderby"));
+        search("{\"facets\": [\"rating,interval:1\"]}").then().statusCode(503);
+        search("{\"facets\": [\"note\"]}").then().statusCode(400)
+            .body("error.message", containsString("'note' is not a facetable field"));
+        search("{\"facets\": [\"rating,interval:0.5\"]}").then().statusCode(400)
+            .body("error.message", containsString("must be an integer greater than zero"));
+        search("{\"facets\": [\"title,sort:sideways\"]}").then().statusCode(400);
+        search("{\"facets\": [\"spot\"]}").then().statusCode(400);
+        search("{\"facets\": [\"rating,count:2,values:1|2\"]}").then().statusCode(400);
+        given().when().get(DOCS + API + "&facet=rating,values:5|1").then().statusCode(400)
+            .body("error.message", containsString("ascending"));
+    }
+
+    @Test
+    void aNumberOrOffsetOutOfRangeIsReadWithoutExpandingItOrFailingTheServer() {
+        // An exponent is read as the double it denotes, never written out in full.
+        search("{\"facets\": [\"rating,values:1e1000000000\"]}").then().statusCode(400)
+            .body("error.message", containsString("is not a value of type Edm.Double"));
+        search("{\"facets\": [\"rating,values:1e-1000000000|1\"]}").then().statusCode(503);
+        search("{\"facets\": [\"rating,interval:1e300\"]}").then().statusCode(503);
+        search("{\"filter\": \"rating gt 1e1000000000\"}").then().statusCode(503);
+        search("{\"filter\": \"rating gt 1e-1000000000\"}").then().statusCode(503);
+        search("{\"facets\": [\"opened,interval:day,timeoffset:+99:00\"]}").then().statusCode(400)
+            .body("error.message", containsString("outside -18:00 to +18:00"));
+        search("{\"facets\": [\"opened,interval:day,timeoffset:+02:00\"]}").then().statusCode(503);
+    }
+
+    @Test
+    void anUnknownScoringProfileOrOneWithoutItsParametersIsRefused() {
         search("{\"search\": \"x\", \"scoringProfile\": \"nope\"}").then().statusCode(400)
             .body("error.message", containsString("'nope'"));
+        search("{\"search\": \"x\", \"scoringProfile\": \"near\"}").then().statusCode(400)
+            .body("error.message", containsString("'here'"));
+        search("{\"search\": \"x\", \"scoringProfile\": \"near\", \"scoringParameters\": [\"here-24.9,60.2\"]}")
+            .then().statusCode(503);
+        for (String point : new String[] {"here-24.9,200", "here-NaN,60"}) {
+            search("{\"search\": \"x\", \"scoringProfile\": \"near\", \"scoringParameters\": [\"" + point + "\"]}")
+                .then().statusCode(400)
+                .body("error.message", containsString("must be a longitude and a latitude"));
+        }
     }
 
     @Test

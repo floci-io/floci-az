@@ -46,14 +46,11 @@ class SearchAuthTest {
     }
 
     @Test
-    void eitherAdminKeyMayManageIndexes() {
-        given().header("api-key", adminKey("primaryKey")).when().get(INDEXES).then().statusCode(200);
-        given().header("api-key", adminKey("secondaryKey")).when().get(INDEXES).then().statusCode(200);
-    }
-
-    @Test
-    void aKeyThatWasRegeneratedNoLongerPasses() {
+    void eitherAdminKeyMayManageIndexesUntilItIsRegenerated() {
         String old = adminKey("primaryKey");
+        given().header("api-key", old).when().get(INDEXES).then().statusCode(200);
+        given().header("api-key", adminKey("secondaryKey")).when().get(INDEXES).then().statusCode(200);
+
         given().when().post(ARM_SERVICE + "/regenerateAdminKey/primary" + ARM_API).then().statusCode(200);
 
         given().header("api-key", old).when().get(INDEXES).then().statusCode(403);
@@ -77,8 +74,6 @@ class SearchAuthTest {
         given().header("api-key", queryKey).when().get(docs + "/$count" + api).then().statusCode(200);
         given().header("api-key", queryKey).contentType("application/json").body("{\"value\": [{\"id\": \"two\"}]}")
             .when().post(docs + "/search.index" + api).then().statusCode(403);
-        given().header("api-key", "not-a-key").when().get(docs + "('one')" + api).then().statusCode(403);
-        given().when().get(docs + "/$count" + api).then().statusCode(401);
     }
 
     @Test

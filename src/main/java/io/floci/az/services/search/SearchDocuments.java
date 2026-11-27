@@ -493,7 +493,12 @@ public class SearchDocuments {
                     message + " Parameters: actions"));
         }
         if (items.size() > MAX_ACTIONS) {
-            throw new Refused(tooLarge());
+            // As the SDK recordings show (net SimpleIndexing): a 400, not a 413.
+            String message = "Too many indexing actions found in the request: " + items.size()
+                    + ". Please include between 1 and " + MAX_ACTIONS + " indexing actions in your request.";
+            throw new Refused(SearchErrors.error(400, "LimitExceeded",
+                    SearchErrors.INVALID_PREFIX + "actions : " + message, "IndexDocumentsActionCountExceeded",
+                    message + " Parameters: actions"));
         }
 
         String apiVersion = req.queryParams().get("api-version");
@@ -734,7 +739,10 @@ public class SearchDocuments {
     private static Map<String, Object> point(Object value) {
         if (value instanceof Map<?, ?> sent && "Point".equals(sent.get("type"))
                 && sent.get("coordinates") instanceof List<?> coordinates && coordinates.size() == 2
-                && coordinates.stream().allMatch(c -> finiteDouble(c).isPresent())) {
+                && coordinates.stream().allMatch(c -> finiteDouble(c).isPresent())
+                // A longitude and a latitude on the globe, or Solr could not index the document.
+                && Math.abs(finiteDouble(coordinates.get(0)).orElseThrow()) <= 180
+                && Math.abs(finiteDouble(coordinates.get(1)).orElseThrow()) <= 90) {
             Map<String, Object> point = new LinkedHashMap<>();
             point.put("type", "Point");
             point.put("coordinates", coordinates.stream().map(c -> finiteDouble(c).orElseThrow()).toList());
@@ -908,10 +916,10 @@ public class SearchDocuments {
         }
     }
 
-    /** A batch over the limits: {@code 413}, which the SDKs answer by splitting it. Not recorded. */
+    /** A batch body over 16 MB: {@code 413}, which the SDKs answer by splitting it. The words are floci-az's. */
     private static Response tooLarge() {
         return SearchErrors.error(413, SearchErrors.NO_CODE, "The request is too large. A batch may hold at most "
-                + MAX_ACTIONS + " actions and " + MAX_BODY_BYTES + " bytes.");
+                + MAX_BODY_BYTES + " bytes.");
     }
 
     private static String indexUrl(String serviceUrl, Map<String, Object> definition) {

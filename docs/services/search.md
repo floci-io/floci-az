@@ -8,9 +8,9 @@ search services with their admin and query API keys, the index definitions of ea
 documents of each index, and full-text search over them. The other `az search` command groups are not
 served yet: see [Notes & limitations](#notes-limitations).
 
-> **Full-text search, not yet filters.** A search runs the simple or full Lucene syntax with Azure's
-> analyzers, BM25 scores, highlights, scoring-profile weights and paging. `$filter`, `$orderby`,
-> facets, suggestions, autocomplete, vector and semantic queries are not served yet.
+> **Full-text search, filters, sorting and facets.** A search runs the simple or full Lucene syntax
+> with Azure's analyzers, BM25 scores, highlights, scoring profiles and paging, and takes `$filter`,
+> `$orderby` and facets. Suggestions, autocomplete, vector and semantic queries are not served yet.
 
 > **Queries run in a Solr sidecar.** The first search service pulls and starts one shared
 > `solr:10.1.0-slim` container, `floci-az-search-default`, and deleting the last one removes it.
@@ -180,7 +180,7 @@ With `floci-az.parity-overrides.strict-search-keys` (on from `parity: strict`):
   `403` with Azure's message, "The given API key doesn't match service's internal, primary or
   secondary keys." A query key may look up and count documents, the read-only access the spec gives
   it, and is refused with `403` everywhere else: index management and a document batch need an admin
-  key. How Azure answers a query key was not recorded
+  key. Azure does not document how it answers a query key, so these answers are floci-az's
 - a service whose ARM resource has `disableLocalAuth: true` refuses every `api-key` with `403`
 - an `Authorization: Bearer` token passes only when the service takes tokens: its `authOptions` is
   `aadOrApiKey`, or it has `disableLocalAuth: true`. A service with the default `apiKeyOnly` refuses
@@ -231,7 +231,7 @@ codes, error `code` values, `details` and messages below are Azure's, word for w
   `compressions`; a profile gains a `null` `vectorizer` and `compression`, and an `hnsw` algorithm the
   default `hnswParameters` (`metric: cosine`, `m: 4`, `efConstruction: 400`, `efSearch: 500`, each
   only where the request left it out) and a `null` `exhaustiveKnnParameters`. An `exhaustiveKnn`
-  algorithm gains `metric: cosine` and a `null` `hnswParameters`; that one is not recorded
+  algorithm gains `metric: cosine` and a `null` `hnswParameters`, floci-az's reading of the spec
 
 A value that does not fit the model, such as `"fields": "id"`, a `synonymMaps` entry that is not a
 name, or a body that is not a JSON object, is refused with `400` and an empty `code`. Azure's reader
@@ -329,7 +329,9 @@ Values are kept and answered as Azure answers them:
 - an `Edm.DateTimeOffset` comes back in UTC with a `Z`, to the millisecond, with no fraction when there
   is none: `2026-01-02T12:00:00+02:00` is answered as `2026-01-02T10:00:00Z`
 - an `Edm.GeographyPoint` is GeoJSON. Azure accepts one with any `crs` or none, and answers it with
-  WGS 84's (`"crs": {"type": "name", "properties": {"name": "EPSG:4326"}}`), the coordinates unchanged
+  WGS 84's (`"crs": {"type": "name", "properties": {"name": "EPSG:4326"}}`), the coordinates unchanged.
+  A longitude outside -180 to 180 or a latitude outside -90 to 90 is refused, as in a filter, a sort or a
+  scoring parameter
 
 A lookup, `GET docs('{key}')`, answers every retrievable field in the order of the index. A field the
 document does not have is `null`, an empty collection `[]`. A field with `retrievable: false`, such as
@@ -354,8 +356,11 @@ Lookups and `$count` do not need the engine.
 | `queryType: full` | The full Lucene syntax: `field:term`, `address/city:term`, `AND`/`OR`/`NOT`, fuzzy `term~1`, proximity `"a b"~3`, boosts `^2`, wildcards and `/regex/`. A field must be searchable |
 | `searchMode` | `any` (the default) or `all`. As on Azure, `wifi -luxury` in `any` mode matches what has `wifi` or lacks `luxury` |
 | `searchFields` | Searchable fields to search, `address/city` for a sub-field, also in complex collections |
-| `scoringProfile` | Its text `weights` boost the fields. The index's `defaultScoringProfile` applies when none is named. Functions are not served yet |
-| `highlight`, `highlightPreTag`, `highlightPostTag` | `@search.highlights` per field, `<em>` and `</em>` by default; custom tags are set together; a highlighted field must be searchable and retrievable |
+| `$filter` | OData filters: see [Filters](#filters) |
+| `$orderby` | Up to 32 clauses of sortable fields, `search.score()` and `geo.distance(field, geography'POINT(lon lat)')`, each `asc` (the default) or `desc`. Ties are broken by score, highest first. A null sorts first ascending and last descending |
+| `facets` | See [Facets](#facets). `facets: []` asks for none |
+| `scoringProfile`, `scoringParameters` | Text `weights` boost the fields, and `freshness`, `magnitude`, `distance` and `tag` functions boost the score: see [Scoring functions](#scoring-functions). The index's `defaultScoringProfile` applies when none is named |
+| `highlight`, `highlightPreTag`, `highlightPostTag` | `@search.highlights` per field, `<em>` and `</em>` by default; custom tags are set together; a highlighted field must be searchable and retrievable. Up to five highlights per field, or as many as a suffix says: `description-10` |
 | `$top`, `$skip`, `$count`, `$select` | 50 results by default and 1000 at most, `$skip` up to 100000. Past 1000, or under a `$top` larger than a page, the response carries `@search.nextPageParameters` (POST) or `@odata.nextLink` (GET), which the SDKs follow, up to the `$skip` limit |
 | `minimumCoverage` | From 0 to 100; answered with `@search.coverage: 100` |
 | `sessionId`, `scoringStatistics` | Accepted |
@@ -370,14 +375,73 @@ Scores are Lucene's BM25 with the index's `k1` and `b`, or the classic similarit
 
 Refused with `400`:
 
-- `$filter`, `$orderby`, `facets`, `vectorQueries`, `queryType: semantic`, `semanticConfiguration`,
-  and `answers`, `captions` or `debug` other than `none`: `FeatureNotSupportedInService`, until a
-  later release serves them
+- `vectorQueries`, `queryType: semantic`, `semanticConfiguration`, `geo.intersects` in a filter, and
+  `answers`, `captions` or `debug` other than `none`: `FeatureNotSupportedInService`
 - a field in `searchFields` or `highlight` that does not exist or is not searchable, a `$select`
-  field that is not retrievable, an unknown scoring profile, a value of the wrong type or out of range,
-  and a query the full syntax cannot parse
+  field that is not retrievable, an unknown scoring profile, a missing scoring parameter, a value of
+  the wrong type or out of range, and a query the full syntax cannot parse
+- a `$filter` or `$orderby` that does not parse, names a field that does not exist or is not
+  filterable or sortable, or breaks a rule below: Azure's `Invalid expression: ...` message, ending with
+  `Parameter name: $filter` (or `$orderby`), and an empty `code`
+- a facet on a field that is not facetable, or with a parameter Azure does not take
 
 A document is searchable as soon as its batch answers: there is no indexing delay.
+
+### Filters
+
+A `$filter` is OData as Azure reads it: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not` and
+parentheses, where `not` binds tighter than a comparison and `and` tighter than `or`. A field must be
+`filterable`; `address/city` names a sub-field. A filter takes up to 1000 comparisons and 100 levels
+of parentheses, `not` and lambdas; Learn warns of a limit at hundreds of clauses without naming it, so
+these numbers and their messages are floci-az's.
+
+- **Constants:** `'text'` (with `''` for a quote), numbers, `true`/`false`, `null`, dates such as
+  `2026-01-02T10:00:00Z` or with an offset, `INF`, `-INF`, `NaN` and `geography'POINT(lon lat)'`. The
+  constant may stand on either side
+- **Strings** compare the whole value, letter for letter, after the field's `normalizer`
+  (`standard`, `lowercase`, `uppercase`, `asciifolding`, `elision`, or a custom one's token filters
+  of these names); `gt` and the others compare ordinally. A bare boolean field is a test of itself
+- **Null:** `eq null` matches a document without a value, and `ne` is true for one, so
+  `rating ne 4` matches it. Only `eq` and `ne` take `null`. A `NaN` is a value, so `ne null` finds it,
+  but it equals nothing and is neither less nor greater than anything
+- **Collections** are tested with `any` and `all`: `tags/any(t: t eq 'wifi')`, `tags/any()` for a
+  non-empty one, `rooms/any(r: r/type eq 'Suite' and r/price lt 100)`, which needs one room that is
+  both, and lambdas inside lambdas. Azure's rules for what a lambda may hold apply, with its messages:
+  strings take `eq` and `search.in` joined by `or` in `any`, and `ne`, `not eq` and `not search.in`
+  joined by `and` in `all`; numbers and dates take any comparison in Disjunctive Normal Form in `any`
+  and Conjunctive Normal Form in `all`; `geo.distance` takes `lt`/`le` with `or` in `any` and
+  `gt`/`ge` with `and` in `all`
+- **Functions:** `search.in(field, 'a, b')` (space and comma delimit, or the third argument),
+  `search.ismatch(text, fields, queryType, searchMode)`, which filters by a full-text query, and
+  `search.ismatchscoring`, which also adds to the score; `geo.distance(field, point)` in kilometres
+
+### Facets
+
+A facet expression is a facetable field and its parameters, `"rating,interval:1"`; the GET form
+repeats `facet=`. The response carries `@search.facets`, with one list of buckets per expression.
+
+- **Values:** `{"count": n, "value": v}`, the 10 most frequent first; `count:N` asks for more (`0`
+  for all), and `sort:count`, `-count`, `value` or `-value` orders them
+- **Ranges:** `values:2|4` gives `{"to": 2}`, `{"from": 2, "to": 4}` and `{"from": 4}`, each `from`
+  included and each `to` excluded; the values must ascend. A date bound is written with milliseconds
+  (`2000-01-01T00:00:00.000Z`) and a bound on a `Double` field as a double (`2.0`), as Azure writes them
+- **Intervals:** `interval:N` for a number, a whole number greater than zero, or `minute`, `hour`, `day`, `week`, `month`, `quarter`
+  or `year` for a date, with `timeoffset:+02:00` to bucket in another offset. Only buckets that hold
+  a document are answered, as `{"count": n, "value": start}`
+- `count` and `sort` do not combine with `values` or `interval`. A sub-field of a complex
+  collection, such as `rooms/type`, counts each document once per value
+
+### Scoring functions
+
+A scoring profile's `functions` multiply the text score. Each one maps its field's value to a
+closeness between 0 and 1 (`freshness`: 1 now, 0 at `boostingDuration`; `magnitude`: 0 at
+`boostingRangeStart`, 1 at `boostingRangeEnd`, beyond it 1 with `constantBoostBeyondRange`;
+`distance`: 1 at the point of the `referencePointParameter`, 0 at `boostingDistance` km; `tag`: 1 when
+the field holds one of the tags of the `tagsParameter`), shapes it by the `interpolation`, and
+contributes `boost - 1` times that. `functionAggregation` combines the contributions (`sum`,
+`average`, `minimum`, `maximum` or `firstMatching`), and the score is multiplied by one plus the
+result. A document without a value keeps its score. `scoringParameters` are `name-value`, a point
+`here--122.1,47.6` as longitude and latitude.
 
 ### The Solr sidecar
 
@@ -462,18 +526,26 @@ its data, but its resource group answers `404`.
 
 ## Notes & limitations
 
-- **Not served yet:** `$filter`, `$orderby`, facets and scoring functions in a search; suggestions,
-  autocomplete, synonym maps, indexers, data sources, skillsets, vector and semantic queries; and
+- **Not served yet:** suggestions, autocomplete, synonym maps, indexers, data sources, skillsets, vector and semantic queries; and
   `search.analyze`. Index aliases, a stable operation from api-version `2026-04-01`, are not served
   either.
 - **Searches need Docker.** They run in the Solr sidecar and answer `503` without it. The `503` and its
   message are floci-az's: Azure has no equivalent.
 - **Scores are close to Azure's, not equal.** Both are Lucene BM25, but how Azure combines the
-  scores of several fields was not recorded. floci-az adds them up, so the numbers may differ, and so
+  scores of several fields is not documented. floci-az adds them up, so the numbers may differ, and so
   may the order of near ties.
 - **Analyzers.** `xx.microsoft` analyzers run the Lucene analyzer of their language. Languages Lucene
   has no analyzer for (`pl.lucene`, among others), and custom analyzers, run the standard analyzer.
   Chinese runs Lucene's CJK bigram analyzer.
+- **Scoring functions are approximate.** Learn gives no formula for how a function's boost and
+  interpolation combine with the text score; the one under [Scoring functions](#scoring-functions) is
+  floci-az's. The order they give follows Azure's intent, the numbers may differ.
+- **`geo.intersects` is refused.** The Solr image has no polygon support, so a filter with it answers
+  `400 FeatureNotSupportedInService`. `geo.distance` is served.
+- **Facet counts are exact.** Azure may count approximately on large indexes; floci-az counts every
+  document. A `week` interval starts on Monday, and a value facet of a normalized field answers the
+  normalized values. Learn states neither, so both are floci-az's choices, as are the words of the
+  refusals of an unknown, non-filterable, non-sortable or non-facetable field.
 - **Highlights** are up to five fragments per field from Lucene's unified highlighter. Azure's
   fragment boundaries may differ.
 - **Document statistics are counted at once and sized roughly.** Azure counts new documents a little
@@ -481,14 +553,14 @@ its data, but its resource group answers `404`.
   alone. Azure's also counts its index structures, so it is far larger (two small documents took 6222
   bytes on the recorded service), and
   `vectorIndexSize` is the size of their vectors' elements.
-- **A batch over the limits answers `413`.** A batch of more than 32000 actions, the limit Azure's own
-  message names, or of more than 16 MB is refused with `413`, which the SDKs answer by splitting the
-  batch. Azure's answer to either was not recorded: 1001 actions were accepted.
-- **Some document errors are not recorded.** The refusals of a value that is not a string, a boolean, a
+- **A batch body over 16 MB answers `413`.** The SDKs answer it by splitting the batch. Azure does not
+  document its answer to an oversized body. A batch of more than 32000 actions answers Azure's own
+  `400 LimitExceeded`.
+- **Some document error texts are floci-az's.** The refusals of a value that is not a string, a boolean, a
   date or a point, of a complex field that is not an object, and of a property inside a complex field
-  that the index does not have, take the shape of the recorded ones, but their words are floci-az's.
+  that the index does not have, take the shape of Azure's document errors, but their words are floci-az's.
   So do a `413`, and a batch whose body is not JSON. Whether `allowUnsafeKeys` also lifts the rule on a
-  leading underscore was not recorded; floci-az keeps that rule.
+  leading underscore is not documented; floci-az keeps that rule.
 - **A key holding `/` or `?` cannot be looked up.** With `allowUnsafeKeys` a key may hold either, but
   a lookup reads the path after decoding it, so such a key is not found.
 - **Index sections are stored, not checked.** Scoring profiles, analyzers, tokenizers, suggesters, CORS
@@ -500,7 +572,6 @@ its data, but its resource group answers `404`.
   the sections:
   - `analyzer` only on a searchable field, never together with `searchAnalyzer` or `indexAnalyzer`
   - `searchAnalyzer` and `indexAnalyzer` set together, and neither naming a language analyzer
-  - `normalizer` only on a field that is `filterable`, `sortable` or `facetable`
   - `synonymMaps` only on a searchable field, with at most one map
   - a suggester's required `searchMode` and `sourceFields`, and its source fields being searchable
   - the required `allowedOrigins` of `corsOptions`
@@ -512,8 +583,8 @@ its data, but its resource group answers `404`.
   `Authorization: Bearer` and any token is served. With `strict-search-keys` the service must take
   tokens, but the token itself is still not checked, and no Search role (such as Search Service
   Contributor) is required.
-- **Some data-plane errors are not recorded.** The codes and messages of the index operations above
-  are Azure's. The rest are descriptive and not verified against Azure: the refusals of a definition
+- **Some data-plane error texts are floci-az's.** The codes and messages of the index operations above
+  are Azure's. The rest are descriptive and written by floci-az: the refusals of a definition
   that break a rule (`OperationNotAllowed`, with Azure's code but floci-az's words, apart from the
   missing key field), a missing `api-version` (`MissingRequiredParameter`), an unserved path
   (`ResourceNotFound`), a wrong method (`MethodNotAllowed`), and the `403` for a query key, an
@@ -524,7 +595,7 @@ its data, but its resource group answers `404`.
   service's ARM delete can finish after it, and leave that index behind for a service of the same
   name. Under the default lenient mode an index can be written to a service ARM does not hold anyway.
 - **An update without `similarity` keeps the stored one.** Whether Azure treats a missing `similarity`
-  on an existing index as no change or refuses it is not verified.
+  on an existing index as no change or refuses it is not documented.
 - **An ETag changes only on a write.** After an update with `allowIndexDowntime=true`, the recorded
   service later answered the index under a new ETag that no request explains, presumably as the index
   came back online. floci-az takes nothing offline, so its tag stays until the next write.
@@ -558,7 +629,7 @@ its data, but its resource group answers `404`.
   `2026-05-01-preview` and in a stable version newer than `2026-04-01`. A real `2025-09-01` service
   answers without them. The `@odata.context` of `search.stats` and `servicestats` names the
   api-version's model (`$metadata#Microsoft.Azure.Search.V2025_09_01.ServiceStatistics`); a preview's
-  is written `V2025_11_01_Preview`, which is not recorded.
+  is written `V2025_11_01_Preview`, following the stable form.
 - **Deleting a service deletes its indexes.** A resource-group delete does too when it cascades
   (`resource-group-delete`, on from `parity: azure`). Indexes belong to the cloud the request
   addressed, so a service of the same name in another cloud keeps its own.

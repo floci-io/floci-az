@@ -18,6 +18,7 @@ import com.azure.search.documents.indexes.models.SearchServiceStatistics;
 import com.azure.search.documents.indexes.models.SearchSuggester;
 import com.azure.search.documents.indexes.models.VectorSearch;
 import com.azure.search.documents.indexes.models.VectorSearchProfile;
+import com.azure.search.documents.models.FacetResult;
 import com.azure.search.documents.models.IndexAction;
 import com.azure.search.documents.models.IndexActionType;
 import com.azure.search.documents.models.IndexDocumentsBatch;
@@ -141,52 +142,40 @@ class SearchCompatibilityTest {
     }
 
     @Test
-    @DisplayName("creating a name that is taken is a 400, as on Azure, and a missing index a 404")
-    void takenNamesAndMissingIndexesAnswerTheirStatus() {
+    @DisplayName("creating a name that is taken is a 400, as on Azure")
+    void aTakenNameIsABadRequest() {
         client.createIndex(hotels("hotels-twice"));
 
         assertEquals(400, assertThrows(HttpResponseException.class,
                 () -> client.createIndex(hotels("hotels-twice"))).getResponse().getStatusCode());
-        assertEquals(404, assertThrows(HttpResponseException.class,
-                () -> client.getIndex("hotels-missing")).getResponse().getStatusCode());
     }
 
     @Test
-    @DisplayName("createOrUpdate adds a field, and refuses to change an existing one")
-    void anUpdateAddsAFieldButCannotChangeOne() {
-        SearchIndex index = client.createOrUpdateIndex(hotels("hotels-update"));
-
-        List<SearchField> more = new ArrayList<>(index.getFields());
-        more.add(new SearchField("stars", SearchFieldDataType.INT32).setFilterable(true));
-        SearchIndex updated = client.createOrUpdateIndex(new SearchIndex("hotels-update", more)
-                .setVectorSearch(index.getVectorSearch()));
-        assertEquals(7, updated.getFields().size());
-        assertNotEquals(index.getETag(), updated.getETag());
-
-        List<SearchField> changed = new ArrayList<>(more);
-        changed.set(2, new SearchField("rating", SearchFieldDataType.INT32));
-        assertEquals(400, assertThrows(HttpResponseException.class,
-                () -> client.createOrUpdateIndex(new SearchIndex("hotels-update", changed)
-                        .setVectorSearch(index.getVectorSearch()))).getResponse().getStatusCode());
-    }
-
-    @Test
-    @DisplayName("If-Match guards an update and a delete with the index's ETag")
-    void theEtagGuardsAnUpdateAndADelete() {
+    @DisplayName("createOrUpdate adds a field under If-Match, refuses to change one, and the ETag guards a delete")
+    void anUpdateAddsAFieldUnderItsEtagButCannotChangeOne() {
         SearchIndex first = client.createIndex(hotels("hotels-etag"));
         // An update that changes nothing keeps the ETag, as on Azure, so this one adds a field.
         List<SearchField> more = new ArrayList<>(first.getFields());
         more.add(new SearchField("stars", SearchFieldDataType.INT32).setFilterable(true));
         SearchIndex changed = new SearchIndex("hotels-etag", more).setVectorSearch(first.getVectorSearch());
         SearchIndex second = client.createOrUpdateIndexWithResponse(changed, ifMatch(first.getETag())).getValue();
+        assertEquals(7, second.getFields().size());
         assertNotEquals(first.getETag(), second.getETag());
 
+        // The first copy is stale now.
         assertEquals(412, assertThrows(HttpResponseException.class,
                 () -> client.createOrUpdateIndexWithResponse(first, ifMatch(first.getETag())))
                 .getResponse().getStatusCode());
         assertEquals(412, assertThrows(HttpResponseException.class,
                 () -> client.deleteIndex("hotels-etag", new MatchConditions().setIfMatch(first.getETag())))
                 .getResponse().getStatusCode());
+
+        // An existing field cannot change its type.
+        List<SearchField> retyped = new ArrayList<>(more);
+        retyped.set(2, new SearchField("rating", SearchFieldDataType.INT32));
+        assertEquals(400, assertThrows(HttpResponseException.class,
+                () -> client.createOrUpdateIndex(new SearchIndex("hotels-etag", retyped)
+                        .setVectorSearch(first.getVectorSearch()))).getResponse().getStatusCode());
 
         client.deleteIndex("hotels-etag", new MatchConditions().setIfMatch(second.getETag()));
         assertEquals(404, assertThrows(HttpResponseException.class,
@@ -264,13 +253,24 @@ class SearchCompatibilityTest {
 
     /** The index the query test searches, with three hotels and sixty more to page through. */
     private SearchClient loadQueryIndex() {
-        client.createIndex(hotels("hotels-query"));
+        SearchIndex index = hotels("hotels-query");
+        List<SearchField> fields = new ArrayList<>(index.getFields());
+        fields.add(new SearchField("opened", SearchFieldDataType.DATE_TIME_OFFSET).setFilterable(true)
+                .setSortable(true).setFacetable(true));
+        fields.add(new SearchField("location", SearchFieldDataType.GEOGRAPHY_POINT).setFilterable(true)
+                .setSortable(true));
+        client.createIndex(new SearchIndex("hotels-query", fields).setVectorSearch(index.getVectorSearch()));
         SearchClient docs = client.getSearchClient("hotels-query");
         List<IndexAction> actions = new ArrayList<>(List.of(
-                action(IndexActionType.UPLOAD, "hotelId", "1", "hotelName", "Fancy seaside hotel",
-                        "tags", List.of("pool", "wifi"), "address", Map.of("street", "Harbour road")),
-                action(IndexActionType.UPLOAD, "hotelId", "2", "hotelName", "Plain hotel"),
-                action(IndexActionType.UPLOAD, "hotelId", "3", "hotelName", "Fancy resort")));
+                action(IndexActionType.UPLOAD, "hotelId", "1", "hotelName", "Fancy seaside hotel", "rating", 4.5,
+                        "tags", List.of("pool", "wifi"), "address", Map.of("street", "Harbour road"),
+                        "opened", "2020-05-01T00:00:00Z",
+                        "location", Map.of("type", "Point", "coordinates", List.of(24.94, 60.17))),
+                action(IndexActionType.UPLOAD, "hotelId", "2", "hotelName", "Plain hotel", "rating", 2.0,
+                        "tags", List.of("wifi"), "opened", "2021-06-01T00:00:00Z"),
+                action(IndexActionType.UPLOAD, "hotelId", "3", "hotelName", "Fancy resort", "rating", 5.0,
+                        "tags", List.of("spa"), "opened", "2022-07-01T00:00:00Z",
+                        "location", Map.of("type", "Point", "coordinates", List.of(2.35, 48.85)))));
         for (int i = 0; i < 60; i++) {
             actions.add(action(IndexActionType.UPLOAD, "hotelId", "p" + i, "hotelName", "Paged inn"));
         }
@@ -310,6 +310,19 @@ class SearchCompatibilityTest {
                 .setIncludeTotalCount(true));
         assertEquals(60L, paged.iterableByPage().iterator().next().getCount());
         assertEquals(60, ids(paged).size());
+
+        assertEquals(List.of("1"), ids(docs.search(new SearchOptions().setSearchText("*")
+                .setFilter("rating ge 4 and tags/any(t: t eq 'pool')"))));
+        assertEquals(List.of("3", "2", "1"), ids(docs.search(new SearchOptions().setSearchText("*")
+                .setFilter("opened ne null").setOrderBy("opened desc"))));
+        assertEquals(List.of("1"), ids(docs.search(new SearchOptions().setSearchText("*")
+                .setFilter("geo.distance(location, geography'POINT(24.9 60.2)') lt 10"))));
+        Map<String, List<FacetResult>> facets = docs.search(new SearchOptions().setSearchText("*").setTop(0)
+                .setFacets("rating,values:3", "opened,interval:year")).iterableByPage().iterator().next()
+                .getFacets();
+        assertEquals(List.of(1L, 2L), facets.get("rating").stream().map(FacetResult::getCount).toList());
+        assertEquals(3.0, ((Number) facets.get("rating").get(1).getAdditionalProperties().get("from")).doubleValue());
+        assertEquals(List.of(1L, 1L, 1L), facets.get("opened").stream().map(FacetResult::getCount).toList());
     }
 
     /** An action of {@code type} on a document of the given names and values. */

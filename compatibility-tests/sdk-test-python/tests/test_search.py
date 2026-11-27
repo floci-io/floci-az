@@ -141,39 +141,23 @@ def test_create_get_list_and_delete_an_index(index_client):
         index_client.get_index("hotels-another")
 
 
-def test_a_taken_name_is_a_bad_request_and_a_missing_index_is_not_found(index_client):
+def test_a_taken_name_is_a_bad_request(index_client):
     index_client.create_index(hotels("hotels-twice"))
     # Azure answers 400 ResourceNameAlreadyInUse here, not 409.
     with pytest.raises(HttpResponseError) as taken:
         index_client.create_index(hotels("hotels-twice"))
     assert taken.value.status_code == 400
-    with pytest.raises(ResourceNotFoundError):
-        index_client.get_index("hotels-missing")
 
 
 
-def test_create_or_update_adds_a_field_but_cannot_change_one(index_client):
-    index = index_client.create_or_update_index(hotels("hotels-update"))
-    index.fields.append(SimpleField(name="stars", type=SearchFieldDataType.INT32, filterable=True))
-
-    updated = index_client.create_or_update_index(index)
-
-    assert [field.name for field in updated.fields][-1] == "stars"
-    assert updated.e_tag != index.e_tag
-    assert len(index_client.get_index("hotels-update").fields) == 7
-
-    updated.fields[2] = SimpleField(name="rating", type=SearchFieldDataType.INT32)
-    with pytest.raises(HttpResponseError) as refused:
-        index_client.create_or_update_index(updated)
-    assert refused.value.status_code == 400
-
-
-def test_etag_conditions(index_client):
+def test_create_or_update_adds_a_field_under_its_etag_but_cannot_change_one(index_client):
     first = index_client.create_index(hotels("hotels-etag"))
     # An update that changes nothing keeps the ETag, as on Azure, so this one adds a field.
     first.fields.append(SimpleField(name="stars", type=SearchFieldDataType.INT32, filterable=True))
     second = index_client.create_or_update_index(first, match_condition=MatchConditions.IfNotModified)
+    assert [field.name for field in second.fields][-1] == "stars"
     assert second.e_tag != first.e_tag
+    assert len(index_client.get_index("hotels-etag").fields) == 7
 
     # The first copy is stale now.
     with pytest.raises(ResourceModifiedError):
@@ -181,10 +165,16 @@ def test_etag_conditions(index_client):
     with pytest.raises(ResourceModifiedError):
         index_client.delete_index(first, match_condition=MatchConditions.IfNotModified)
 
-    index_client.delete_index(second, match_condition=MatchConditions.IfNotModified)
+    # An existing field cannot change its type.
+    second.fields[2] = SimpleField(name="rating", type=SearchFieldDataType.INT32)
+    with pytest.raises(HttpResponseError) as refused:
+        index_client.create_or_update_index(second)
+    assert refused.value.status_code == 400
+
+    current = index_client.get_index("hotels-etag")
+    index_client.delete_index(current, match_condition=MatchConditions.IfNotModified)
     with pytest.raises(ResourceNotFoundError):
         index_client.get_index("hotels-etag")
-
 
 
 def test_statistics(index_client):
@@ -281,13 +271,21 @@ def test_buffered_sender_flushes_documents(index_client):
 @pytest.fixture(scope="module")
 def query_client(index_client):
     """One index for every query test, loaded once."""
-    index_client.create_index(hotels("hotels-query"))
+    index = hotels("hotels-query")
+    index.fields += [
+        SimpleField(name="opened", type=SearchFieldDataType.DATE_TIME_OFFSET, filterable=True, sortable=True,
+                    facetable=True),
+        SimpleField(name="location", type=SearchFieldDataType.GEOGRAPHY_POINT, filterable=True, sortable=True),
+    ]
+    index_client.create_index(index)
     client = index_client.get_search_client("hotels-query")
     client.upload_documents([
         {"hotelId": "1", "hotelName": "Fancy seaside hotel", "rating": 4.5, "tags": ["pool", "wifi"],
-         "address": {"street": "Harbour road", "city": "Helsinki"}},
-        {"hotelId": "2", "hotelName": "Plain hotel", "rating": 2.0, "tags": ["wifi"]},
-        {"hotelId": "3", "hotelName": "Fancy resort", "rating": 5.0, "tags": ["spa"]},
+         "address": {"street": "Harbour road", "city": "Helsinki"}, "opened": "2020-05-01T00:00:00Z",
+         "location": {"type": "Point", "coordinates": [24.94, 60.17]}},
+        {"hotelId": "2", "hotelName": "Plain hotel", "rating": 2.0, "tags": ["wifi"], "opened": "2021-06-01T00:00:00Z"},
+        {"hotelId": "3", "hotelName": "Fancy resort", "rating": 5.0, "tags": ["spa"], "opened": "2022-07-01T00:00:00Z",
+         "location": {"type": "Point", "coordinates": [2.35, 48.85]}},
     ] + [{"hotelId": f"p{i}", "hotelName": "Paged inn"} for i in range(60)])
     return client
 
@@ -311,3 +309,18 @@ def test_search_ranks_highlights_and_pages(query_client):
     paged = query_client.search("paged", include_total_count=True)
     assert len(list(paged)) == 60
     assert paged.get_count() == 60
+
+
+def test_search_filters_sorts_and_facets(query_client):
+    ids = [hit["hotelId"] for hit in query_client.search("*", filter="rating ge 4 and tags/any(t: t eq 'pool')")]
+    assert ids == ["1"]
+    ordered = query_client.search("*", filter="opened ne null", order_by=["opened desc"])
+    assert [hit["hotelId"] for hit in ordered] == ["3", "2", "1"]
+    near = query_client.search("*", filter="geo.distance(location, geography'POINT(24.9 60.2)') lt 10")
+    assert [hit["hotelId"] for hit in near] == ["1"]
+    assert [hit["hotelId"] for hit in query_client.search("*", filter="opened lt 2021-01-01T00:00:00Z")] == ["1"]
+
+    faceted = query_client.search("*", facets=["rating,values:3", "opened,interval:year"], top=0)
+    facets = faceted.get_facets()
+    assert [(b.get("from"), b.get("to"), b["count"]) for b in facets["rating"]] == [(None, 3, 1), (3, None, 2)]
+    assert [b["count"] for b in facets["opened"]] == [1, 1, 1]

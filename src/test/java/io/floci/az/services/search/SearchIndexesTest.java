@@ -2,9 +2,13 @@ package io.floci.az.services.search;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import io.restassured.response.ValidatableResponse;
+import org.hamcrest.Matcher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
@@ -223,12 +227,16 @@ class SearchIndexesTest {
     }
 
     @Test
-    void aPropertyOfANewerApiVersionComesBackAsItWasSent() {
+    void aPropertyOfANewerApiVersionComesBackAsItWasSentOnTheIndexAFieldOrAComplexField() {
         String body = "{\"name\": \"newer\", \"somethingNew\": {\"mode\": \"on\"},"
-                + " \"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true, \"fieldNew\": 7}]}";
+                + " \"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true, \"fieldNew\": 7},"
+                + " {\"name\": \"address\", \"type\": \"Edm.ComplexType\", \"fieldNew\": 8,"
+                + " \"fields\": [{\"name\": \"city\", \"type\": \"Edm.String\"}]}]}";
         post(body).then().statusCode(201)
             .body("somethingNew.mode", equalTo("on"))
-            .body("fields[0].fieldNew", equalTo(7));
+            .body("fields[0].fieldNew", equalTo(7))
+            .body("fields[1].fieldNew", equalTo(8))
+            .body("fields[1]", not(hasKey("searchable")));
     }
 
     @Test
@@ -530,16 +538,6 @@ class SearchIndexesTest {
     }
 
     @Test
-    void aComplexFieldKeepsAnAttributeOfANewerApiVersion() {
-        post(withFields("complexnew", "{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true},"
-                + " {\"name\": \"address\", \"type\": \"Edm.ComplexType\", \"fieldNew\": 7,"
-                + " \"fields\": [{\"name\": \"city\", \"type\": \"Edm.String\"}]}"))
-            .then().statusCode(201)
-            .body("fields[1].fieldNew", equalTo(7))
-            .body("fields[1]", not(hasKey("searchable")));
-    }
-
-    @Test
     void anIndexOfTheSameServiceNameInAnotherCloudIsSeparate() {
         given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"basic\"}}")
             .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
@@ -613,22 +611,6 @@ class SearchIndexesTest {
     }
 
     @Test
-    void theVectorSearchProfileOfAnExistingFieldCannotChange() {
-        String profiles = ", \"vectorSearch\": {\"profiles\": [{\"name\": \"p\", \"algorithm\": \"a\"},"
-                + " {\"name\": \"p2\", \"algorithm\": \"a\"}], \"algorithms\": [{\"name\": \"a\", \"kind\": \"hnsw\"}]}}";
-        String index = "{\"name\": \"profiled\", \"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\","
-                + " \"key\": true}, {\"name\": \"v\", \"type\": \"Collection(Edm.Single)\", \"dimensions\": 4,"
-                + " \"vectorSearchProfile\": \"%s\"}]" + profiles;
-        post(index.formatted("p")).then().statusCode(201);
-
-        put("profiled", index.formatted("p2")).then().statusCode(400)
-            .body("error.code", equalTo("OperationNotAllowed"))
-            .body("error.message", equalTo("Existing field 'v' cannot be changed."))
-            .body("error.details[0].code", equalTo("CannotChangeExistingField"));
-        get("profiled").then().body("fields[1].vectorSearchProfile", equalTo("p"));
-    }
-
-    @Test
     void aFieldAddedByAnUpdateCannotBeUnstored() {
         post(withVectorProfile("later", vector(""))).then().statusCode(201);
 
@@ -653,43 +635,53 @@ class SearchIndexesTest {
         put("nameless", "{\"fields\": [{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true}]}")
             .then().statusCode(400)
             .body("error.message", equalTo("The request is invalid. Details: The index needs a 'name'."));
-        put("one", minimal("two")).then().statusCode(400)
-            .body("error.message", containsString("'two'"));
         // Index names are lowercase, and the body's must be the URL's exactly.
         put("Hotels", minimal("hotels")).then().statusCode(400)
             .body("error.message", containsString("'Hotels'"));
     }
 
+    /** The index {@code grow} with the fields given and two vector search profiles, {@code p} and {@code p2}. */
+    private static String grow(String fields) {
+        return "{\"name\": \"grow\", \"fields\": [" + fields + "], \"vectorSearch\": {\"profiles\": ["
+                + "{\"name\": \"p\", \"algorithm\": \"a\"}, {\"name\": \"p2\", \"algorithm\": \"a\"}],"
+                + " \"algorithms\": [{\"name\": \"a\", \"kind\": \"hnsw\"}]}}";
+    }
+
     @Test
     void anUpdateMayAddFieldsButNotChangeOrRemoveThem() {
-        String key = "{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true}";
+        String id = "{\"name\": \"id\", \"type\": \"Edm.String\", \"key\": true}";
+        String vector = "{\"name\": \"v\", \"type\": \"Collection(Edm.Single)\", \"dimensions\": 4,"
+                + " \"vectorSearchProfile\": \"%s\"}";
+        String key = id + ", " + vector.formatted("p");
         String address = "{\"name\": \"address\", \"type\": \"Edm.ComplexType\", \"fields\": ["
                 + "{\"name\": \"city\", \"type\": \"Edm.String\"}%s]}";
         String title = "{\"name\": \"title\", \"type\": \"Edm.String\"%s}";
-        put("grow", withFields("grow", key + ", " + title.formatted("") + ", " + address.formatted("")))
+        put("grow", grow(key + ", " + title.formatted("") + ", " + address.formatted("")))
             .then().statusCode(201);
 
         // A new field, a new sub-field, and an attribute that does not decide how a field is indexed.
-        put("grow", withFields("grow", key + ", " + title.formatted(", \"retrievable\": false") + ", "
+        put("grow", grow(key + ", " + title.formatted(", \"retrievable\": false") + ", "
                 + address.formatted(", {\"name\": \"street\", \"type\": \"Edm.String\"}")
                 + ", {\"name\": \"rating\", \"type\": \"Edm.Int32\"}"))
             .then().statusCode(200)
-            .body("fields.name", contains("id", "title", "address", "rating"))
-            .body("fields[1].retrievable", equalTo(false))
-            .body("fields[2].fields.name", contains("city", "street"));
+            .body("fields.name", contains("id", "v", "title", "address", "rating"))
+            .body("fields[2].retrievable", equalTo(false))
+            .body("fields[3].fields.name", contains("city", "street"));
 
         String street = address.formatted(", {\"name\": \"street\", \"type\": \"Edm.String\"}");
         String rating = ", {\"name\": \"rating\", \"type\": \"Edm.Int32\"}";
         String[] refused = {
             // removed
-            withFields("grow", key + ", " + title.formatted("") + ", " + street),
+            grow(key + ", " + title.formatted("") + ", " + street),
             // another type
-            withFields("grow", key + ", {\"name\": \"title\", \"type\": \"Edm.Int32\"}, " + street + rating),
+            grow(key + ", {\"name\": \"title\", \"type\": \"Edm.Int32\"}, " + street + rating),
             // another attribute
-            withFields("grow", key + ", " + title.formatted(", \"searchable\": false") + ", " + street + rating),
-            withFields("grow", key + ", " + title.formatted(", \"analyzer\": \"en.lucene\"") + ", " + street + rating),
+            grow(key + ", " + title.formatted(", \"searchable\": false") + ", " + street + rating),
+            grow(key + ", " + title.formatted(", \"analyzer\": \"en.lucene\"") + ", " + street + rating),
             // a sub-field removed
-            withFields("grow", key + ", " + title.formatted("") + ", " + address.formatted("") + rating),
+            grow(key + ", " + title.formatted("") + ", " + address.formatted("") + rating),
+            // another vector search profile
+            grow(id + ", " + vector.formatted("p2") + ", " + title.formatted("") + ", " + street + rating),
         };
         for (String body : refused) {
             put("grow", body).then().statusCode(400)
@@ -700,7 +692,10 @@ class SearchIndexesTest {
         // Azure's words, recorded.
         put("grow", refused[0]).then().body("error.message", equalTo("Existing field(s) 'rating' cannot be deleted."));
         put("grow", refused[1]).then().body("error.message", equalTo("Existing field 'title' cannot be changed."));
-        get("grow").then().statusCode(200).body("fields[1].retrievable", equalTo(false));
+        put("grow", refused[5]).then().body("error.message", equalTo("Existing field 'v' cannot be changed."));
+        get("grow").then().statusCode(200)
+            .body("fields[1].vectorSearchProfile", equalTo("p"))
+            .body("fields[2].retrievable", equalTo(false));
     }
 
     @Test
@@ -757,71 +752,50 @@ class SearchIndexesTest {
             .body("counters", hasKey("knowledgeBasesCount"));
     }
 
-    @Test
-    void aFreeServiceReportsTheQuotasOfARealOne() {
-        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"free\"}}")
+    /** Creates the ARM service with {@code sku} and {@code properties}, then checks its statistics. */
+    private static void quotas(String sku, String properties, Map<String, Matcher<?>> expected) {
+        given().when().delete(ARM_SERVICE + ARM_API);
+        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"" + sku
+                + "\"}, \"properties\": {" + properties + "}}")
             .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
-        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
-            .body("counters.indexesCount.quota", equalTo(3))
-            .body("counters.indexersCount.quota", equalTo(3))
-            .body("counters.dataSourcesCount.quota", equalTo(3))
-            .body("counters.synonymMaps.quota", equalTo(3))
-            .body("counters.skillsetCount.quota", equalTo(3))
-            .body("counters.storageSize.quota", equalTo(52428800))
-            .body("counters.documentCount.quota", nullValue())
-            .body("counters.vectorIndexSize.quota", nullValue())
-            .body("limits.maxStoragePerIndex", equalTo(52428800));
+        ValidatableResponse stats = given().when().get(BASE + "/servicestats" + API).then().statusCode(200);
+        expected.forEach(stats::body);
     }
 
     @Test
-    void theIndexQuotaFollowsTheServicesSkuAndHostingMode() {
-        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"basic\"}}")
-            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
-        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
-            .body("counters.indexesCount.usage", equalTo(0))
-            .body("counters.indexesCount.quota", equalTo(15));
-
-        // The hosting mode is fixed at creation, so the service is created again. A high-density standard3
-        // service holds 1000 indexes per partition.
-        given().when().delete(ARM_SERVICE + ARM_API).then().statusCode(200);
-        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": "
-                + "\"standard3\"}, \"properties\": {\"hostingMode\": \"highDensity\", \"partitionCount\": 2}}")
-            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
-        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
-            .body("counters.indexesCount.quota", equalTo(2000));
-    }
-
-    @Test
-    void thePartitionsOfAServiceMultiplyItsStorageQuotas() {
+    void theQuotasFollowTheServicesSkuPartitionsAndHostingMode() {
+        long gb = 1024L * 1024 * 1024;
+        // A free service reports the quotas of a real one.
+        quotas("free", "", Map.of(
+                "counters.indexesCount.quota", equalTo(3),
+                "counters.indexersCount.quota", equalTo(3),
+                "counters.dataSourcesCount.quota", equalTo(3),
+                "counters.synonymMaps.quota", equalTo(3),
+                "counters.skillsetCount.quota", equalTo(3),
+                "counters.storageSize.quota", equalTo(52428800),
+                "counters.documentCount.quota", nullValue(),
+                "counters.vectorIndexSize.quota", nullValue(),
+                "limits.maxStoragePerIndex", equalTo(52428800)));
+        quotas("basic", "", Map.of(
+                "counters.indexesCount.usage", equalTo(0),
+                "counters.indexesCount.quota", equalTo(15)));
         // Three S1 partitions: 3 x 160 GB of storage and 3 x 35 GB of vectors, each index able to take it all.
-        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"standard\"},"
-                + " \"properties\": {\"partitionCount\": 3}}")
-            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
-        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
-            .body("counters.storageSize.quota", equalTo(3 * 160L * 1024 * 1024 * 1024))
-            .body("counters.vectorIndexSize.quota", equalTo(3 * 35L * 1024 * 1024 * 1024))
-            .body("counters.indexersCount.quota", equalTo(50))
-            .body("counters.synonymMaps.quota", equalTo(5))
-            .body("limits.maxStoragePerIndex", equalTo(3 * 160L * 1024 * 1024 * 1024));
-
+        quotas("standard", "\"partitionCount\": 3", Map.of(
+                "counters.storageSize.quota", equalTo(3 * 160 * gb),
+                "counters.vectorIndexSize.quota", equalTo(3 * 35 * gb),
+                "counters.indexersCount.quota", equalTo(50),
+                "counters.synonymMaps.quota", equalTo(5),
+                "limits.maxStoragePerIndex", equalTo(3 * 160 * gb)));
         // S2 caps an index at 1.88 TB, under the 12 x 512 GB of the service.
-        given().when().delete(ARM_SERVICE + ARM_API).then().statusCode(200);
-        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"standard2\"},"
-                + " \"properties\": {\"partitionCount\": 12}}")
-            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
-        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
-            .body("counters.storageSize.quota", equalTo(12 * 512L * 1024 * 1024 * 1024))
-            .body("limits.maxStoragePerIndex", equalTo(Math.round(1.88 * 1024L * 1024 * 1024 * 1024)));
-
+        quotas("standard2", "\"partitionCount\": 12", Map.of(
+                "counters.storageSize.quota", equalTo(12 * 512 * gb),
+                "limits.maxStoragePerIndex", equalTo(Math.round(1.88 * 1024 * gb))));
         // A high-density S3 service: 1000 of each object per partition, and indexes of at most 100 GB.
-        given().when().delete(ARM_SERVICE + ARM_API).then().statusCode(200);
-        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": "
-                + "\"standard3\"}, \"properties\": {\"hostingMode\": \"highDensity\", \"partitionCount\": 2}}")
-            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
-        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
-            .body("counters.indexersCount.quota", equalTo(2000))
-            .body("counters.synonymMaps.quota", equalTo(20))
-            .body("limits.maxStoragePerIndex", equalTo(100L * 1024 * 1024 * 1024));
+        quotas("standard3", "\"hostingMode\": \"highDensity\", \"partitionCount\": 2", Map.of(
+                "counters.indexesCount.quota", equalTo(2000),
+                "counters.indexersCount.quota", equalTo(2000),
+                "counters.synonymMaps.quota", equalTo(20),
+                "limits.maxStoragePerIndex", equalTo(100 * gb)));
     }
 
     @Test

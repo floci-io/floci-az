@@ -127,36 +127,29 @@ test("an index is created, read back with its fields and sections, listed and de
   expect(await statusOf(client.getIndex("hotels-another"))).toBe(404);
 });
 
-test("creating a name that is taken is a 400, and a missing index a 404", async () => {
+test("creating a name that is taken is a 400", async () => {
   await client.createIndex(hotels("hotels-twice"));
 
   // Azure answers 400 ResourceNameAlreadyInUse here, not 409.
   expect(await statusOf(client.createIndex(hotels("hotels-twice")))).toBe(400);
-  expect(await statusOf(client.getIndex("hotels-missing"))).toBe(404);
 });
 
-test("createOrUpdate adds a field, and refuses to change an existing one", async () => {
-  const index = await client.createOrUpdateIndex(hotels("hotels-update"));
-
-  index.fields.push({ name: "stars", type: "Edm.Int32", filterable: true });
-  const updated = await client.createOrUpdateIndex(index);
-  expect(updated.fields).toHaveLength(7);
-  expect(updated.etag).not.toBe(index.etag);
-
-  updated.fields[2] = { name: "rating", type: "Edm.Int32" };
-  expect(await statusOf(client.createOrUpdateIndex(updated))).toBe(400);
-});
-
-test("onlyIfUnchanged guards an update and a delete with the index's ETag", async () => {
+test("createOrUpdate adds a field under onlyIfUnchanged, refuses to change one, and the ETag guards a delete", async () => {
   const first = await client.createIndex(hotels("hotels-etag"));
   // An update that changes nothing keeps the ETag, as on Azure, so this one adds a field.
   first.fields.push({ name: "stars", type: "Edm.Int32", filterable: true });
   const second = await client.createOrUpdateIndex(first, { onlyIfUnchanged: true });
+  expect(second.fields).toHaveLength(7);
   expect(second.etag).not.toBe(first.etag);
 
   // The first copy is stale now.
   expect(await statusOf(client.createOrUpdateIndex(first, { onlyIfUnchanged: true }))).toBe(412);
   expect(await statusOf(client.deleteIndex(first, { onlyIfUnchanged: true }))).toBe(412);
+
+  // An existing field cannot change its type.
+  const retyped = { ...second, fields: [...second.fields] };
+  retyped.fields[2] = { name: "rating", type: "Edm.Int32" };
+  expect(await statusOf(client.createOrUpdateIndex(retyped))).toBe(400);
 
   await client.deleteIndex(second, { onlyIfUnchanged: true });
   expect(await statusOf(client.getIndex("hotels-etag"))).toBe(404);
@@ -183,6 +176,8 @@ interface Hotel {
   tags?: string[];
   address?: { street?: string | null; city?: string | null } | null;
   embedding?: number[];
+  opened?: string | Date | null;
+  location?: { type: string; coordinates: number[] } | null;
 }
 
 test("documents are uploaded, read back, selected and counted", async () => {
@@ -234,14 +229,21 @@ test("a merge keeps what it does not send, and a missing key fails alone with 20
 describe("queries", () => {
   // One index for every query test, loaded once.
   beforeAll(async () => {
-    await client.createIndex(hotels("hotels-query"));
+    const index = hotels("hotels-query");
+    index.fields.push(
+      { name: "opened", type: "Edm.DateTimeOffset", filterable: true, sortable: true, facetable: true },
+      { name: "location", type: "Edm.GeographyPoint", filterable: true, sortable: true },
+    );
+    await client.createIndex(index);
     const docs = client.getSearchClient<Hotel>("hotels-query");
     const paged: Hotel[] = Array.from({ length: 60 }, (_, i) => ({ hotelId: `p${i}`, hotelName: "Paged inn" }));
     await docs.uploadDocuments([
       { hotelId: "1", hotelName: "Fancy seaside hotel", rating: 4.5, tags: ["pool", "wifi"],
-        address: { street: "Harbour road", city: "Helsinki" } },
-      { hotelId: "2", hotelName: "Plain hotel", rating: 2.0, tags: ["wifi"] },
-      { hotelId: "3", hotelName: "Fancy resort", rating: 5.0, tags: ["spa"] },
+        address: { street: "Harbour road", city: "Helsinki" }, opened: "2020-05-01T00:00:00Z",
+        location: { type: "Point", coordinates: [24.94, 60.17] } },
+      { hotelId: "2", hotelName: "Plain hotel", rating: 2.0, tags: ["wifi"], opened: "2021-06-01T00:00:00Z" },
+      { hotelId: "3", hotelName: "Fancy resort", rating: 5.0, tags: ["spa"], opened: "2022-07-01T00:00:00Z",
+        location: { type: "Point", coordinates: [2.35, 48.85] } },
       ...paged,
     ]);
     // The first query waits for the Solr sidecar, which a cold Docker may still be pulling.
@@ -278,5 +280,19 @@ describe("queries", () => {
     const paged = await docs.search("paged", { includeTotalCount: true });
     expect(paged.count).toBe(60);
     expect(await ids(paged.results)).toHaveLength(60);
+  });
+
+  test("a search filters, sorts and facets", async () => {
+    const docs = client.getSearchClient<Hotel>("hotels-query");
+    const pool = await docs.search("*", { filter: "rating ge 4 and tags/any(t: t eq 'pool')" });
+    expect(await ids(pool.results)).toEqual(["1"]);
+    const ordered = await docs.search("*", { filter: "opened ne null", orderBy: ["opened desc"] });
+    expect(await ids(ordered.results)).toEqual(["3", "2", "1"]);
+    const near = await docs.search("*", { filter: "geo.distance(location, geography'POINT(24.9 60.2)') lt 10" });
+    expect(await ids(near.results)).toEqual(["1"]);
+
+    const faceted = await docs.search("*", { facets: ["rating,values:3", "opened,interval:year"], top: 0 });
+    expect(faceted.facets?.rating.map((b) => [b.from, b.to, b.count])).toEqual([[undefined, 3, 1], [3, undefined, 2]]);
+    expect(faceted.facets?.opened.map((b) => b.count)).toEqual([1, 1, 1]);
   });
 });
