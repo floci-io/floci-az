@@ -20,9 +20,9 @@ import static org.hamcrest.Matchers.not;
  *
  * <p>Azure's blob endpoint multiplexes many operations onto {@code PUT /{container}/{blob}},
  * discriminated by {@code comp} (lease, snapshot, properties, tier, tags, page) or by
- * a header ({@code x-ms-copy-source}). None of those are implemented here. Before this guard they
- * were all routed to {@code putBlob}, which <em>replaced the blob with the request body</em> —
- * usually empty — and answered {@code 201 Created}. The SDK saw success while the data was gone.
+ * a header ({@code x-ms-copy-source}). Before this guard unimplemented operations
+ * were routed to {@code putBlob}, which <em>replaced the blob with the request body</em>,
+ * usually empty, and answered {@code 201 Created}. The SDK saw success while the data was gone.
  *
  * <p>These tests pin the two invariants that matter: an unimplemented operation must (1) not be
  * mistaken for a PutBlob, and (2) leave existing content untouched. Implementing any of these
@@ -61,7 +61,7 @@ public class BlobCompDispatchTest {
      */
     @ParameterizedTest
     @ValueSource(strings = {
-            "tier", "page", "undelete", "expiry", "seal"
+            "page", "undelete", "expiry", "seal"
     })
     void unimplementedBlobCompIsNotMistakenForPutBlob(String comp) {
         given()

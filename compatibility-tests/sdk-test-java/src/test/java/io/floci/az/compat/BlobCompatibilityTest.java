@@ -1,5 +1,6 @@
 package io.floci.az.compat;
 
+import com.azure.core.credential.AccessToken;
 import com.azure.core.http.rest.PagedResponse;
 import com.azure.core.util.BinaryData;
 import com.azure.core.util.Context;
@@ -9,6 +10,7 @@ import com.azure.storage.blob.BlobClientBuilder;
 import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
+import com.azure.storage.blob.models.AccessTier;
 import com.azure.storage.blob.models.BlobCopyInfo;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobHttpHeaders;
@@ -27,6 +29,7 @@ import com.azure.storage.blob.models.ListBlobsOptions;
 import com.azure.storage.blob.models.TaggedBlobItem;
 import com.azure.storage.blob.options.BlobInputStreamOptions;
 import com.azure.storage.blob.options.BlobParallelUploadOptions;
+import com.azure.storage.blob.options.BlobSetAccessTierOptions;
 import com.azure.storage.blob.sas.BlobSasPermission;
 import com.azure.storage.blob.sas.BlobServiceSasSignatureValues;
 import com.azure.storage.blob.specialized.BlobLeaseClient;
@@ -35,9 +38,11 @@ import com.azure.storage.blob.specialized.BlockBlobClient;
 import com.azure.storage.common.StorageSharedKeyCredential;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import reactor.core.publisher.Mono;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -54,6 +59,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -116,6 +122,99 @@ class BlobCompatibilityTest {
         assertEquals(0, container.listBlobs().stream().count());
 
         client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("blob access tiers: explicit, inferred and updated tiers in listings")
+    void accessTiersInListings() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        try {
+            BlobClient explicit = container.getBlobClient("explicit");
+            BlobClient inferred = container.getBlobClient("inferred");
+            explicit.uploadWithResponse(new BlobParallelUploadOptions(BinaryData.fromString("tiered"))
+                .setTier(AccessTier.COOL), null, Context.NONE);
+            inferred.upload(BinaryData.fromString("default"));
+            Map<String, BlobItem> listed = container.listBlobs().stream()
+                .collect(Collectors.toMap(BlobItem::getName, item -> item));
+
+            assertEquals(AccessTier.COOL, listed.get("explicit").getProperties().getAccessTier());
+            assertEquals(AccessTier.HOT, listed.get("inferred").getProperties().getAccessTier());
+            assertEquals(Boolean.TRUE, listed.get("inferred").getProperties().isAccessTierInferred());
+            assertEquals(AccessTier.HOT, inferred.getProperties().getAccessTier());
+
+            BlobClient append = container.getBlobClient("append");
+            append.getAppendBlobClient().create();
+            BlobStorageException unsupportedType = assertThrows(BlobStorageException.class,
+                () -> append.setAccessTier(AccessTier.COOL));
+            assertEquals(400, unsupportedType.getStatusCode());
+            assertEquals(BlobErrorCode.fromString("AccessTierNotSupportedForBlobType"), unsupportedType.getErrorCode());
+
+            explicit.setAccessTier(AccessTier.HOT);
+            BlobItem updated = container.listBlobs().stream()
+                .filter(item -> item.getName().equals("explicit")).findFirst().orElseThrow();
+            assertEquals(AccessTier.HOT, updated.getProperties().getAccessTier());
+            assertEquals(AccessTier.HOT, explicit.getProperties().getAccessTier());
+            assertEquals("tiered", explicit.downloadContent().toString());
+
+            BlobServiceSasSignatureValues readOnly = new BlobServiceSasSignatureValues(
+                OffsetDateTime.now().plusHours(1), new BlobSasPermission().setReadPermission(true));
+            BlobClient readOnlyBlob = new BlobClientBuilder().endpoint(explicit.getBlobUrl())
+                .sasToken(explicit.generateSas(readOnly)).buildClient();
+            BlobStorageException denied = assertThrows(BlobStorageException.class,
+                () -> readOnlyBlob.setAccessTier(AccessTier.COOL));
+            assertEquals(403, denied.getStatusCode());
+            assertEquals(AccessTier.HOT, explicit.getProperties().getAccessTier());
+
+            BlobServiceSasSignatureValues writable = new BlobServiceSasSignatureValues(
+                OffsetDateTime.now().plusHours(1), new BlobSasPermission().setWritePermission(true));
+            BlobClient writableBlob = new BlobClientBuilder().endpoint(explicit.getBlobUrl())
+                .sasToken(explicit.generateSas(writable)).buildClient();
+            writableBlob.setAccessTier(AccessTier.COOL);
+            assertEquals(AccessTier.COOL, explicit.getProperties().getAccessTier());
+
+            explicit.setTags(Map.of("env", "prod"));
+            BlobSetAccessTierOptions conditional = new BlobSetAccessTierOptions(AccessTier.HOT)
+                .setTagsConditions("\"env\" = 'prod'");
+            BlobStorageException tagsDenied = assertThrows(BlobStorageException.class,
+                () -> writableBlob.setAccessTierWithResponse(conditional, null, Context.NONE));
+            assertEquals(403, tagsDenied.getStatusCode());
+            BlobServiceSasSignatureValues writeAndTags = new BlobServiceSasSignatureValues(
+                OffsetDateTime.now().plusHours(1),
+                new BlobSasPermission().setWritePermission(true).setTagsPermission(true));
+            BlobClient tagsBlob = new BlobClientBuilder().endpoint(explicit.getBlobUrl())
+                .sasToken(explicit.generateSas(writeAndTags)).buildClient();
+            tagsBlob.setAccessTierWithResponse(conditional, null, Context.NONE);
+            assertEquals(AccessTier.HOT, explicit.getProperties().getAccessTier());
+        } finally {
+            client.deleteBlobContainer(name);
+        }
+    }
+
+    @Test
+    @DisplayName("blob access tiers in token-backed listings over TLS")
+    void accessTiersInTokenBackedListings() throws Exception {
+        HttpRequest certRequest = HttpRequest.newBuilder(URI.create(EmulatorConfig.httpBase() + "/_floci/tls-cert"))
+            .GET().build();
+        int status = HttpClient.newHttpClient().send(certRequest, HttpResponse.BodyHandlers.discarding()).statusCode();
+        Assumptions.assumeTrue(status == 200, "Emulator TLS certificate is not available");
+        EmulatorConfig.installEmulatorTlsCert();
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        try {
+            container.getBlobClient("explicit").uploadWithResponse(
+                new BlobParallelUploadOptions(BinaryData.fromString("tiered")).setTier(AccessTier.COOL),
+                null, Context.NONE);
+            BlobServiceClient tokenClient = new BlobServiceClientBuilder()
+                .endpoint(EmulatorConfig.httpBase().replaceFirst("^http://", "https://")
+                    + "/" + EmulatorConfig.ACCOUNT)
+                .credential(request -> Mono.just(new AccessToken("fake-token", OffsetDateTime.now().plusHours(1))))
+                .buildClient();
+            assertEquals(AccessTier.COOL, tokenClient.getBlobContainerClient(name).listBlobs().iterator()
+                .next().getProperties().getAccessTier());
+        } finally {
+            client.deleteBlobContainer(name);
+        }
     }
 
     @Test
