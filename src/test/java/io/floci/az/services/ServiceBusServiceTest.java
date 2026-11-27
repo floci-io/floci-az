@@ -523,6 +523,49 @@ public class ServiceBusServiceTest {
     }
 
     @Test
+    void aQueueWhoseNameHasASlashIsReachedThroughAnyCasing() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/default/queues/team/slash-jobs")
+                .then().statusCode(201);
+
+        given().when().get(BASE + "/default/queues/TEAM/Slash-Jobs")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">team/slash-jobs</title>"));
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/default/queues/TEAM/SLASH-JOBS")
+                .then().statusCode(409);
+        given().when().delete(BASE + "/default/queues/Team/Slash-Jobs").then().statusCode(200);
+        given().when().get(BASE + "/default/queues/team/slash-jobs").then().statusCode(404);
+    }
+
+    @Test
+    void concurrentCreatesInDifferentCasingsLetExactlyOneSucceed() throws Exception {
+        List<String> spellings = List.of("race-case", "RACE-CASE", "Race-Case", "race-CASE", "RACE-case", "rAcE-cAsE");
+        ExecutorService pool = Executors.newFixedThreadPool(spellings.size());
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Integer>> statuses = new ArrayList<>();
+            for (String spelling : spellings) {
+                statuses.add(pool.submit(() -> {
+                    start.await();
+                    return given().body(queueDescription("PT30S", 3))
+                            .when().put(BASE + "/" + spelling).statusCode();
+                }));
+            }
+            start.countDown();
+            List<Integer> answered = new ArrayList<>();
+            for (Future<Integer> status : statuses) {
+                answered.add(status.get(30, TimeUnit.SECONDS));
+            }
+            assertEquals(1, Collections.frequency(answered, 201), "exactly one create wins: " + answered);
+            assertEquals(spellings.size() - 1, Collections.frequency(answered, 409),
+                    "the rest are conflicts: " + answered);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void aQueueIsReachedThroughAnyCasingOfItsName() {
         given().body(queueDescription("PT30S", 3))
                 .when().put(BASE + "/case-queue")

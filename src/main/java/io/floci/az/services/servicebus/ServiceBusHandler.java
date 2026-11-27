@@ -308,7 +308,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             return isUpdate(req)
                     ? handleUpdateTopic(account, ns, entityName, duplicateDetection, lifetime, metadata,
                             ServiceBusEntityXml.parseFixedSettings(body))
-                    : createUnlessExists(topicKey(account, ns, entityName), entityName,
+                    : createUnlessExists(topicPrefix(account, ns), entityName, entityName,
                             () -> handleCreateTopic(account, ns, entityName, duplicateDetection, lifetime, metadata));
         }
         // Default to queue (empty body, QueueDescription, or ambiguous)
@@ -316,7 +316,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             return handleUpdateQueue(account, ns, entityName, requiresSession, duplicateDetection,
                     lifetime, delivery, metadata, ServiceBusEntityXml.parseFixedSettings(body));
         }
-        return createUnlessExists(queueKey(account, ns, entityName), entityName, () -> handleCreateQueue(
+        return createUnlessExists(queuePrefix(account, ns), entityName, entityName, () -> handleCreateQueue(
                 account, ns, entityName, requiresSession, duplicateDetection, lifetime, delivery, metadata));
     }
 
@@ -529,7 +529,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                             ? handleUpdateQueue(account, namespace, queueName, requiresSession,
                                     duplicateDetection, lifetime, delivery, metadata,
                                     ServiceBusEntityXml.parseFixedSettings(body))
-                            : createUnlessExists(queueKey(account, namespace, queueName), queueName,
+                            : createUnlessExists(queuePrefix(account, namespace), queueName, queueName,
                                     () -> handleCreateQueue(account, namespace, queueName, requiresSession,
                                             duplicateDetection, lifetime, delivery, metadata));
                 } catch (IllegalArgumentException e) {
@@ -687,7 +687,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                     yield isUpdate(req)
                             ? handleUpdateTopic(account, namespace, topicName, duplicateDetection,
                                     lifetime, metadata, ServiceBusEntityXml.parseFixedSettings(body))
-                            : createUnlessExists(topicKey(account, namespace, topicName), topicName,
+                            : createUnlessExists(topicPrefix(account, namespace), topicName, topicName,
                                     () -> handleCreateTopic(account, namespace, topicName, duplicateDetection,
                                             lifetime, metadata));
                 } catch (IllegalArgumentException e) {
@@ -840,7 +840,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                 lifetime, delivery, ServiceBusEntityXml.parseMetadata(body),
                                 ServiceBusEntityXml.parseFixedSettings(body));
                     }
-                    yield createUnlessExists(subKey(account, namespace, topicName, subName),
+                    yield createUnlessExists(subPrefix(account, namespace, topicName), subName,
                             topicName + "/Subscriptions/" + subName,
                             () -> handleCreateSubscription(account, namespace, topicName, subName,
                                     requiresSession, body, lifetime, delivery));
@@ -1035,9 +1035,12 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
      * MessagingEntityAlreadyExists from the status alone. Only the Atom requests go through here: the topology loader
      * and the ARM plane call the create methods directly and keep their 200 for an existing entity. The check and the
      * create run under the handler's lock, the one the create methods take, so two concurrent creates cannot both pass.
+     * The existence check matches names ignoring case under that lock too, so a create of {@code JOBS} racing one of
+     * {@code jobs} cannot store both.
      */
-    private synchronized Response createUnlessExists(String key, String entityPath, Supplier<Response> create) {
-        if (store.get(key).isPresent()) {
+    private synchronized Response createUnlessExists(String prefix, String name, String entityPath,
+                                                     Supplier<Response> create) {
+        if (store.get(prefix + storedName(prefix, name)).isPresent()) {
             return errorAtom(409, "The messaging entity '" + entityPath + "' already exists.");
         }
         return create.get();
@@ -1611,7 +1614,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (store.get(prefix + requested).isPresent()) {
             return requested;
         }
-        for (StoredObject object : scanDirectChildren(prefix)) {
+        // Every key under the prefix, not only direct children: a queue name may contain '/'. A child of another
+        // entity (a topic's subscriptions) has a longer remainder and never equals the requested name.
+        for (StoredObject object : store.scan(k -> k.startsWith(prefix))) {
             String stored = object.key().substring(prefix.length());
             if (stored.equalsIgnoreCase(requested)) {
                 return stored;
