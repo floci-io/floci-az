@@ -74,15 +74,23 @@ public class ServiceBusEntities {
                 .or(() -> queues(namespace).stream().filter(q -> q.name().equalsIgnoreCase(name)).findFirst());
     }
 
-    /** Creates the queue, or answers the stored one unchanged when it exists. */
-    QueueEntity createQueue(String namespace, String name, boolean requiresSession,
-                            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
-                            ServiceBusEntityXml.MessageLifetimeSettings lifetime,
-                            ServiceBusEntityXml.DeliverySettings delivery,
-                            ServiceBusEntityXml.EntityMetadata metadata) {
+    /**
+     * Creates the queue, or applies the settings to the one that exists through the Atom update path (#702), which
+     * refuses a change to RequiresSession or RequiresDuplicateDetection as Azure does.
+     */
+    QueueEntity createOrUpdateQueue(String namespace, String name, boolean requiresSession,
+                                    ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+                                    ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                    ServiceBusEntityXml.DeliverySettings delivery,
+                                    ServiceBusEntityXml.EntityMetadata metadata,
+                                    ServiceBusEntityXml.FixedSettings fixed) {
         Optional<QueueEntity> existing = queue(namespace, name);
         if (existing.isPresent()) {
-            return existing.get();
+            String stored = existing.get().name();
+            accepted(handler.handleUpdateQueue(ACCOUNT, namespace, stored, requiresSession, duplicateDetection,
+                    lifetime, delivery, metadata, fixed));
+            return queue(namespace, stored)
+                    .orElseThrow(() -> new Refused(500, "The queue '" + name + "' was not stored."));
         }
         accepted(handler.handleCreateQueue(ACCOUNT, namespace, name, requiresSession, duplicateDetection, lifetime,
                 delivery, metadata));
@@ -106,14 +114,19 @@ public class ServiceBusEntities {
                 .or(() -> topics(namespace).stream().filter(t -> t.name().equalsIgnoreCase(name)).findFirst());
     }
 
-    /** Creates the topic, or answers the stored one unchanged when it exists. */
-    TopicEntity createTopic(String namespace, String name,
-                            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
-                            ServiceBusEntityXml.MessageLifetimeSettings lifetime,
-                            ServiceBusEntityXml.EntityMetadata metadata) {
+    /** Creates the topic, or applies the settings to the one that exists; RequiresDuplicateDetection is fixed. */
+    TopicEntity createOrUpdateTopic(String namespace, String name,
+                                    ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+                                    ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                    ServiceBusEntityXml.EntityMetadata metadata,
+                                    ServiceBusEntityXml.FixedSettings fixed) {
         Optional<TopicEntity> existing = topic(namespace, name);
         if (existing.isPresent()) {
-            return existing.get();
+            String stored = existing.get().name();
+            accepted(handler.handleUpdateTopic(ACCOUNT, namespace, stored, duplicateDetection, lifetime, metadata,
+                    fixed));
+            return topic(namespace, stored)
+                    .orElseThrow(() -> new Refused(500, "The topic '" + name + "' was not stored."));
         }
         accepted(handler.handleCreateTopic(ACCOUNT, namespace, name, duplicateDetection, lifetime, metadata));
         return topic(namespace, name).orElseThrow(() -> new Refused(500, "The topic '" + name + "' was not stored."));
@@ -139,16 +152,22 @@ public class ServiceBusEntities {
     }
 
     /**
-     * Creates the subscription with a {@code $Default} rule that accepts every message, or answers the stored one
-     * unchanged when it exists. {@code topic} is the stored topic name.
+     * Creates the subscription with a {@code $Default} rule that accepts every message, or applies the settings to the
+     * one that exists, keeping its rules; RequiresSession is fixed. {@code topic} is the stored topic name.
      */
-    SubscriptionEntity createSubscription(String namespace, String topic, String name, boolean requiresSession,
-                                          ServiceBusEntityXml.MessageLifetimeSettings lifetime,
-                                          ServiceBusEntityXml.DeliverySettings delivery,
-                                          ServiceBusEntityXml.EntityMetadata metadata) {
+    SubscriptionEntity createOrUpdateSubscription(String namespace, String topic, String name,
+                                                  boolean requiresSession,
+                                                  ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                                  ServiceBusEntityXml.DeliverySettings delivery,
+                                                  ServiceBusEntityXml.EntityMetadata metadata,
+                                                  ServiceBusEntityXml.FixedSettings fixed) {
         Optional<SubscriptionEntity> existing = subscription(namespace, topic, name);
         if (existing.isPresent()) {
-            return existing.get();
+            String stored = existing.get().name();
+            accepted(handler.handleUpdateSubscription(ACCOUNT, namespace, topic, stored, lifetime, delivery, metadata,
+                    fixed));
+            return subscription(namespace, topic, stored)
+                    .orElseThrow(() -> new Refused(500, "The subscription '" + name + "' was not stored."));
         }
         accepted(handler.handleCreateSubscription(ACCOUNT, namespace, topic, name, requiresSession, lifetime, delivery,
                 metadata, RuleEntity.trueFilter(topic, name, "$Default")));

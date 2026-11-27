@@ -607,11 +607,11 @@ public class ServiceBusArmService implements StoreIndexSource, GlobalNameSource,
         };
     }
 
-    /** {@code Queues_CreateOrUpdate}; a queue that exists answers unchanged, with what was sent stored beside it. */
+    /** {@code Queues_CreateOrUpdate}: creates the queue or updates the one that exists, storing what was sent. */
     private Response putQueue(Scope scope, String name) {
         Map<String, Object> sent = sentProperties(scope.req());
-        QueueEntity queue = entities.createQueue(scope.broker(), name, bool(sent, "requiresSession", false),
-                duplicateDetection(sent), lifetime(sent), delivery(sent), metadata(sent, false));
+        QueueEntity queue = entities.createOrUpdateQueue(scope.broker(), name, bool(sent, "requiresSession", false),
+                duplicateDetection(sent), lifetime(sent), delivery(sent), metadata(sent, false), fixed(sent));
         queueProperties.put(new ArmProperties(scope.childId("queues", queue.name()), sent));
         return ok(queueBody(scope, queue, brokers.getMessageCounts(scope.broker(), queue.name())));
     }
@@ -664,8 +664,8 @@ public class ServiceBusArmService implements StoreIndexSource, GlobalNameSource,
                     .orElseGet(() -> entityNotFound("topic", name, broker));
             case "PUT" -> {
                 Map<String, Object> sent = sentProperties(scope.req());
-                TopicEntity topic = entities.createTopic(broker, name, duplicateDetection(sent), lifetime(sent),
-                        metadata(sent, true));
+                TopicEntity topic = entities.createOrUpdateTopic(broker, name, duplicateDetection(sent),
+                        lifetime(sent), metadata(sent, true), fixed(sent));
                 topicProperties.put(new ArmProperties(scope.childId("topics", topic.name()), sent));
                 yield ok(topicBody(scope, topic));
             }
@@ -735,8 +735,9 @@ public class ServiceBusArmService implements StoreIndexSource, GlobalNameSource,
                     .orElseGet(() -> entityNotFound("subscription", name, topicName));
             case "PUT" -> {
                 Map<String, Object> sent = sentProperties(scope.req());
-                SubscriptionEntity sub = entities.createSubscription(broker, topicName, name,
-                        bool(sent, "requiresSession", false), lifetime(sent), delivery(sent), metadata(sent, false));
+                SubscriptionEntity sub = entities.createOrUpdateSubscription(broker, topicName, name,
+                        bool(sent, "requiresSession", false), lifetime(sent), delivery(sent), metadata(sent, false),
+                        fixed(sent));
                 subscriptionProperties.put(new ArmProperties(subscriptionId(scope, sub), sent));
                 yield ok(subscriptionBody(scope, sub));
             }
@@ -1175,6 +1176,13 @@ public class ServiceBusArmService implements StoreIndexSource, GlobalNameSource,
         if (value != null) {
             map.put(key, value);
         }
+    }
+
+    /** The settings Azure fixes at creation, as sent; an absent one leaves the stored value alone. */
+    private static ServiceBusEntityXml.FixedSettings fixed(Map<String, Object> sent) {
+        return new ServiceBusEntityXml.FixedSettings(
+                sent.containsKey("requiresSession") ? bool(sent, "requiresSession", false) : null,
+                sent.containsKey("requiresDuplicateDetection") ? bool(sent, "requiresDuplicateDetection", false) : null);
     }
 
     private static boolean bool(Map<String, Object> map, String key, boolean fallback) {
