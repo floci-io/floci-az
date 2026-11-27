@@ -523,6 +523,100 @@ public class ServiceBusServiceTest {
     }
 
     @Test
+    void aQueueWhoseNameHasASlashIsReachedThroughAnyCasing() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/default/queues/team/slash-jobs")
+                .then().statusCode(201);
+
+        given().when().get(BASE + "/default/queues/TEAM/Slash-Jobs")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">team/slash-jobs</title>"));
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/default/queues/TEAM/SLASH-JOBS")
+                .then().statusCode(409);
+        given().when().delete(BASE + "/default/queues/Team/Slash-Jobs").then().statusCode(200);
+        given().when().get(BASE + "/default/queues/team/slash-jobs").then().statusCode(404);
+    }
+
+    @Test
+    void concurrentCreatesInDifferentCasingsLetExactlyOneSucceed() throws Exception {
+        List<String> spellings = List.of("race-case", "RACE-CASE", "Race-Case", "race-CASE", "RACE-case", "rAcE-cAsE");
+        ExecutorService pool = Executors.newFixedThreadPool(spellings.size());
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Integer>> statuses = new ArrayList<>();
+            for (String spelling : spellings) {
+                statuses.add(pool.submit(() -> {
+                    start.await();
+                    return given().body(queueDescription("PT30S", 3))
+                            .when().put(BASE + "/" + spelling).statusCode();
+                }));
+            }
+            start.countDown();
+            List<Integer> answered = new ArrayList<>();
+            for (Future<Integer> status : statuses) {
+                answered.add(status.get(30, TimeUnit.SECONDS));
+            }
+            assertEquals(1, Collections.frequency(answered, 201), "exactly one create wins: " + answered);
+            assertEquals(spellings.size() - 1, Collections.frequency(answered, 409),
+                    "the rest are conflicts: " + answered);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void aQueueIsReachedThroughAnyCasingOfItsName() {
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/case-queue")
+                .then().statusCode(201);
+
+        given().when().get(BASE + "/CASE-Queue")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-queue</title>"));
+        given().body(queueDescription("PT30S", 3))
+                .when().put(BASE + "/CASE-QUEUE")
+                .then().statusCode(409);
+        given().header("If-Match", "*").body(queueDescription("PT50S", 7))
+                .when().put(BASE + "/default/queues/Case-Queue")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-queue</title>"))
+                .body(containsString("<MaxDeliveryCount>7</MaxDeliveryCount>"));
+        given().when().get(BASE + "/$Resources/queues")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-queue</title>"))
+                .body(not(containsString("CASE-QUEUE")))
+                .body(not(containsString("Case-Queue")));
+
+        given().when().delete(BASE + "/CASE-QUEUE").then().statusCode(200);
+        given().when().get(BASE + "/case-queue").then().statusCode(404);
+    }
+
+    @Test
+    void aTopicAndItsSubscriptionAreReachedThroughAnyCasing() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/case-topic")
+                .then().statusCode(201);
+        given().when().put(BASE + "/CASE-TOPIC/subscriptions/case-sub")
+                .then().statusCode(201)
+                .body(containsString("<title type=\"text\">case-sub</title>"));
+
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/Case-Topic")
+                .then().statusCode(409);
+        given().when().get(BASE + "/case-topic/subscriptions/CASE-SUB")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-sub</title>"));
+        given().when().put(BASE + "/default/topics/CASE-topic/subscriptions/Case-Sub")
+                .then().statusCode(409);
+        given().when().get(BASE + "/case-topic/subscriptions")
+                .then().statusCode(200)
+                .body(containsString("<title type=\"text\">case-sub</title>"))
+                .body(not(containsString("CASE-SUB")))
+                .body(not(containsString("Case-Sub")));
+    }
+
+    @Test
     void creatingATopicThatExistsAnswers409() {
         given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
                 .when().put(BASE + "/recreate-topic")
