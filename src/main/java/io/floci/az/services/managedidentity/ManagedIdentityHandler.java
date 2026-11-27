@@ -133,7 +133,7 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
             if (ArmPaths.indexOfIgnoreCase(path, PROVIDER_MARKER + "identities/default") >= 0) {
                 return getSystemAssignedIdentity(req, path, method);
             }
-            if (path.contains("/federatedIdentityCredentials")) {
+            if (ArmPaths.containsIgnoreCase(path, "/federatedIdentityCredentials")) {
                 return handleFederatedCredential(req, path, method);
             }
             if (ArmPaths.indexOfIgnoreCase(path, PROVIDER_MARKER + "userAssignedIdentities") >= 0) {

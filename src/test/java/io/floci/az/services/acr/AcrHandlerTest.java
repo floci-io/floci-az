@@ -236,4 +236,28 @@ public class AcrHandlerTest {
                 .then().statusCode(200)
                 .body("value.find { it.name == 'acridx' }.type", is("Microsoft.ContainerRegistry/registries"));
     }
+
+    @Test
+    void typeAndResourceGroupSegmentsMatchInAnyCase() {
+        String lowered = "/subscriptions/" + SUB + "/resourcegroups/" + RG + "/providers/Microsoft.ContainerRegistry";
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"sku\":{\"name\":\"Basic\"}}")
+                .when().put(lowered + "/REGISTRIES/acrlower" + API)
+                .then().statusCode(201)
+                .body("name", is("acrlower"))
+                .body("type", is("Microsoft.ContainerRegistry/registries"));
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"sku\":{\"name\":\"Basic\"}}")
+                .when().put("/subscriptions/" + SUB + "/resourceGroups/other-rg/providers/Microsoft.ContainerRegistry"
+                        + "/registries/acrother" + API)
+                .then().statusCode(201);
+
+        given().when().get(registry("acrlower") + API)
+                .then().statusCode(200)
+                .body("name", is("acrlower"));
+        given().when().get(lowered + "/registries" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", is("acrlower"));
+    }
 }

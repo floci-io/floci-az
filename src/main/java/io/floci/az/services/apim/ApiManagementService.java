@@ -101,10 +101,10 @@ public class ApiManagementService implements GlobalNameSource {
         }
         String rg = group.get();
 
-        if (parts.length == 1 && "service".equals(parts[0])) {
+        if (parts.length == 1 && "service".equalsIgnoreCase(parts[0])) {
             return Response.ok(Map.of("value", listServices(sub, rg))).build();
         }
-        if (parts.length < 2 || !"service".equals(parts[0])) {
+        if (parts.length < 2 || !"service".equalsIgnoreCase(parts[0])) {
             return notFound(path);
         }
 
@@ -245,30 +245,30 @@ public class ApiManagementService implements GlobalNameSource {
         String rg = service.resourceGroup();
         String serviceName = service.name();
 
-        if (parts.length >= 3 && "policies".equals(parts[2])) {
+        if (parts.length >= 3 && "policies".equalsIgnoreCase(parts[2])) {
             return handlePolicy(request, method, serviceKey(sub, rg, serviceName),
                     "/subscriptions/" + sub + "/resourceGroups/" + rg
                             + "/providers/Microsoft.ApiManagement/service/" + serviceName,
                     "Microsoft.ApiManagement/service/policies", parts);
         }
 
-        if (parts.length >= 3 && "products".equals(parts[2])) {
+        if (parts.length >= 3 && "products".equalsIgnoreCase(parts[2])) {
             return handleProducts(request, method, sub, rg, serviceName, parts);
         }
 
-        if (parts.length >= 3 && "subscriptions".equals(parts[2])) {
+        if (parts.length >= 3 && "subscriptions".equalsIgnoreCase(parts[2])) {
             return handleSubscriptions(request, method, sub, rg, serviceName, parts);
         }
 
-        if (parts.length >= 3 && "namedValues".equals(parts[2])) {
+        if (parts.length >= 3 && "namedValues".equalsIgnoreCase(parts[2])) {
             return handleNamedValues(request, method, sub, rg, serviceName, parts);
         }
 
-        if (parts.length >= 3 && "backends".equals(parts[2])) {
+        if (parts.length >= 3 && "backends".equalsIgnoreCase(parts[2])) {
             return handleBackends(request, method, sub, rg, serviceName, parts);
         }
 
-        if (parts.length >= 3 && "apis".equals(parts[2])) {
+        if (parts.length >= 3 && "apis".equalsIgnoreCase(parts[2])) {
             if (parts.length == 3) {
                 return Response.ok(Map.of("value", listApis(sub, rg, serviceName))).build();
             }
@@ -284,13 +284,13 @@ public class ApiManagementService implements GlobalNameSource {
                     default -> Response.status(405).build();
                 };
             }
-            if (parts.length >= 5 && "policies".equals(parts[4])) {
+            if (parts.length >= 5 && "policies".equalsIgnoreCase(parts[4])) {
                 return handlePolicy(request, method, apiKey(sub, rg, serviceName, apiId),
                         "/subscriptions/" + sub + "/resourceGroups/" + rg
                                 + "/providers/Microsoft.ApiManagement/service/" + serviceName + "/apis/" + apiId,
                         "Microsoft.ApiManagement/service/apis/policies", parts);
             }
-            if (parts.length >= 5 && "operations".equals(parts[4])) {
+            if (parts.length >= 5 && "operations".equalsIgnoreCase(parts[4])) {
                 if (parts.length == 5) {
                     return Response.ok(Map.of("value", listOperations(sub, rg, serviceName, apiId))).build();
                 }
@@ -307,7 +307,7 @@ public class ApiManagementService implements GlobalNameSource {
                         default -> Response.status(405).build();
                     };
                 }
-                if (parts.length >= 7 && "policies".equals(parts[6])) {
+                if (parts.length >= 7 && "policies".equalsIgnoreCase(parts[6])) {
                     return handlePolicy(request, method, operationKey(sub, rg, serviceName, apiId, operationId),
                             "/subscriptions/" + sub + "/resourceGroups/" + rg
                                     + "/providers/Microsoft.ApiManagement/service/" + serviceName
@@ -635,10 +635,10 @@ public class ApiManagementService implements GlobalNameSource {
 
     private Response handlePolicy(AzureRequest request, String method, String parentKey, String parentId,
                                   String type, String[] parts) {
-        if (parts.length < 1 || !"policies".equals(parts[parts.length - 1]) && parts.length < 2) {
+        if (parts.length < 1 || !"policies".equalsIgnoreCase(parts[parts.length - 1]) && parts.length < 2) {
             return notFound(parentId + "/policies");
         }
-        if ("policies".equals(parts[parts.length - 1])) {
+        if ("policies".equalsIgnoreCase(parts[parts.length - 1])) {
             List<Map<String, Object>> items = policies.values().stream()
                     .filter(p -> parentKey.equals(p.get("_parent")))
                     .map(ApiManagementService::stripInternal)
@@ -709,7 +709,7 @@ public class ApiManagementService implements GlobalNameSource {
                 default -> Response.status(405).build();
             };
         }
-        if (parts.length >= 5 && "policies".equals(parts[4])) {
+        if (parts.length >= 5 && "policies".equalsIgnoreCase(parts[4])) {
             if (products.get(productKey(sub, rg, serviceName, productId)) == null) {
                 return notFound("products/" + productId);
             }
@@ -718,7 +718,7 @@ public class ApiManagementService implements GlobalNameSource {
                             + "/providers/Microsoft.ApiManagement/service/" + serviceName + "/products/" + productId,
                     "Microsoft.ApiManagement/service/products/policies", parts);
         }
-        if (parts.length >= 5 && "apis".equals(parts[4])) {
+        if (parts.length >= 5 && "apis".equalsIgnoreCase(parts[4])) {
             if (parts.length == 5) {
                 List<Map<String, Object>> items = productApis.entrySet().stream()
                         .filter(e -> e.getKey().startsWith(productKey(sub, rg, serviceName, productId) + "/apis/"))

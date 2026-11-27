@@ -60,10 +60,13 @@ public final class ArmPaths {
         return segmentAfter(path, segment, true).orElse(fallback);
     }
 
-    /** First path segment captured after {@code /{resourceType}/}. */
+    /**
+     * First path segment captured after {@code /{resourceType}/}, the type matched in any case: ARM resolves resource
+     * types case-insensitively. The captured name keeps the request's spelling.
+     */
     public static Optional<String> resourceName(String path, String resourceType) {
         Pattern p = RESOURCE_NAME_PATTERNS.computeIfAbsent(resourceType,
-                t -> Pattern.compile("/" + Pattern.quote(t) + "/([^/?]+)"));
+                t -> Pattern.compile("/" + Pattern.quote(t) + "/([^/?]+)", Pattern.CASE_INSENSITIVE));
         Matcher m = p.matcher(path);
         return m.find() ? Optional.of(m.group(1)) : Optional.empty();
     }
@@ -72,9 +75,9 @@ public final class ArmPaths {
         return resourceName(path, resourceType).orElse(fallback);
     }
 
-    /** Remainder after the last occurrence of {@code marker}, query string stripped. */
+    /** Remainder after the last occurrence of {@code marker}, compared ignoring case, query string stripped. */
     public static String afterSegment(String path, String marker, String fallback) {
-        int idx = path == null ? -1 : path.lastIndexOf(marker);
+        int idx = lastIndexOfIgnoreCase(path, marker);
         if (idx < 0) {
             return fallback;
         }
@@ -104,6 +107,27 @@ public final class ArmPaths {
             }
         }
         return -1;
+    }
+
+    /** Index of the last occurrence of {@code marker} in {@code path}, compared ignoring case, or -1. */
+    public static int lastIndexOfIgnoreCase(String path, String marker) {
+        if (path == null || marker == null) {
+            return -1;
+        }
+        for (int i = path.length() - marker.length(); i >= 0; i--) {
+            if (path.regionMatches(true, i, marker, 0, marker.length())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * True when {@code path} contains {@code marker}, compared ignoring case. For segment markers such as
+     * {@code /resourceGroups/} that a client may spell in any case.
+     */
+    public static boolean containsIgnoreCase(String path, String marker) {
+        return indexOfIgnoreCase(path, marker) >= 0;
     }
 
     /** True when {@code path} carries a {@code /providers/{namespace}/} segment, the namespace in any case. */

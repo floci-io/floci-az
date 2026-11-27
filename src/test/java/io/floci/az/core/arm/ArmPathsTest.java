@@ -93,4 +93,32 @@ class ArmPathsTest {
         assertEquals("default", ArmPaths.segmentAfter("no/match/here", "subscriptions", "default"));
         assertEquals("default", ArmPaths.segmentAfter(null, "subscriptions", "default"));
     }
+
+    @Test
+    void resourceNameMatchesTheTypeInAnyCaseAndKeepsTheNameSpelling() {
+        String lowered = "subscriptions/s/resourcegroups/rg/providers/microsoft.cache/REDIS/Cache1?x=1";
+        assertEquals("Cache1", ArmPaths.resourceName(lowered, "redis", "unknown"));
+        assertEquals("Cache1", ArmPaths.resourceName(PATH.replace("cache1", "Cache1"), "Redis", "unknown"));
+    }
+
+    @Test
+    void afterSegmentMatchesTheMarkerInAnyCaseAtItsLastOccurrence() {
+        assertEquals("redis/cache1", ArmPaths.afterSegment(PATH, "/providers/microsoft.cache/", "unknown"));
+        assertEquals("op-2", ArmPaths.afterSegment("a/operationResults/op-1/OPERATIONRESULTS/op-2?x=1",
+                "/operationresults/", "unknown"));
+        assertEquals("unknown", ArmPaths.afterSegment(null, "/x/", "unknown"));
+    }
+
+    @Test
+    void containsIgnoreCaseFindsALowercasedResourceGroupsSegment() {
+        assertTrue(ArmPaths.containsIgnoreCase("subscriptions/s/resourcegroups/rg/providers/x", "/resourceGroups/"));
+        assertFalse(ArmPaths.containsIgnoreCase("subscriptions/s/providers/x/redis", "/resourceGroups/"));
+        assertFalse(ArmPaths.containsIgnoreCase(null, "/resourceGroups/"));
+    }
+
+    @Test
+    void lastIndexOfIgnoreCaseFindsTheLastOccurrence() {
+        assertEquals(10, ArmPaths.lastIndexOfIgnoreCase("a/b/c/x/y/X/z", "x/z"));
+        assertEquals(-1, ArmPaths.lastIndexOfIgnoreCase("short", "longer-marker"));
+    }
 }

@@ -413,4 +413,28 @@ class AksHandlerTest {
                 .then().statusCode(200)
                 .body("value.find { it.name == 'aks-idx' }.type", equalTo("Microsoft.ContainerService/managedClusters"));
     }
+
+    @Test
+    @DisplayName("Type and resourceGroups segments match in any case")
+    void typeAndResourceGroupSegmentsMatchInAnyCase() {
+        String lowered = "/subscriptions/" + SUB + "/resourcegroups/" + RG + "/providers/Microsoft.ContainerService";
+        String body = "{\"location\":\"eastus\",\"properties\":{\"kubernetesVersion\":\"1.30\"}}";
+        given().contentType("application/json").body(body)
+            .when().put(lowered + "/managedclusters/aks-lower?api-version=2024-04-01")
+            .then().statusCode(201)
+            .body("name", equalTo("aks-lower"))
+            .body("type", equalTo("Microsoft.ContainerService/managedClusters"));
+        given().contentType("application/json").body(body)
+            .when().put("/subscriptions/" + SUB + "/resourceGroups/other-rg/providers/Microsoft.ContainerService"
+                    + "/managedClusters/aks-other?api-version=2024-04-01")
+            .then().statusCode(201);
+
+        given().when().get(BASE + "/managedClusters/aks-lower?api-version=2024-04-01")
+            .then().statusCode(200)
+            .body("name", equalTo("aks-lower"));
+        given().when().get(lowered + "/managedclusters?api-version=2024-04-01")
+            .then().statusCode(200)
+            .body("value", hasSize(1))
+            .body("value[0].name", equalTo("aks-lower"));
+    }
 }

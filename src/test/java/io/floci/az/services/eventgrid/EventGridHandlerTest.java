@@ -580,4 +580,24 @@ class EventGridHandlerTest {
         assertTrue(!notifications.isEmpty(), "expected a delivered notification within the timeout");
         return notifications.get(0);
     }
+
+    @Test
+    @DisplayName("The topics type segment matches in any case")
+    void theTopicsTypeSegmentMatchesInAnyCase() {
+        given()
+            .contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{}}")
+            .when().put("/subscriptions/" + SUB + "/resourceGroups/" + RG + "/providers/Microsoft.EventGrid/Topics/"
+                    + TOPIC + API)
+            .then().statusCode(201)
+            .body("name", equalTo(TOPIC))
+            .body("type", equalTo("Microsoft.EventGrid/topics"));
+
+        given().when().get(TOPIC_BASE + API)
+            .then().statusCode(200)
+            .body("name", equalTo(TOPIC));
+        given().when().get("/subscriptions/" + SUB + "/providers/Microsoft.EventGrid/TOPICS" + API)
+            .then().statusCode(200)
+            .body("value[0].name", equalTo(TOPIC));
+    }
 }

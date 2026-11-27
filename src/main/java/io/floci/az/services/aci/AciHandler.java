@@ -251,12 +251,13 @@ public class AciHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         }
 
         // ── List in subscription ───────────────────────────────────────────────
-        if (tail.matches("containerGroups(?:[?].*)?") && !fullPath.contains("/resourceGroups/")) {
+        if (tail.matches("(?i:containerGroups)(?:[?].*)?")
+                && !ArmPaths.containsIgnoreCase(fullPath, "/resourceGroups/")) {
             return handleList(extractSubscriptionId(fullPath), null);
         }
 
         // ── List in resource group ─────────────────────────────────────────────
-        if (tail.matches("containerGroups(?:[?].*)?") && "GET".equals(method)) {
+        if (tail.matches("(?i:containerGroups)(?:[?].*)?") && "GET".equals(method)) {
             return handleList(extractSubscriptionId(fullPath), extractResourceGroup(fullPath));
         }
 
@@ -264,28 +265,28 @@ public class AciHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         String rg = extractResourceGroup(fullPath);
 
         // ── Container sub-resources: logs / exec / attach ──────────────────────
-        if (tail.matches("containerGroups/[^/]+/containers/[^/]+/logs(?:[?].*)?") && "GET".equals(method)) {
+        if (tail.matches("(?i:containerGroups)/[^/]+/(?i:containers)/[^/]+/logs(?:[?].*)?") && "GET".equals(method)) {
             return handleLogs(sub, rg, segment(tail, 1), segment(tail, 3), req);
         }
-        if (tail.matches("containerGroups/[^/]+/containers/[^/]+/(exec|attach)(?:[?].*)?") && "POST".equals(method)) {
+        if (tail.matches("(?i:containerGroups)/[^/]+/(?i:containers)/[^/]+/(exec|attach)(?:[?].*)?") && "POST".equals(method)) {
             return ArmErrors.error(501, "NotImplemented",
                     "Container " + segment(tail, 4) + " is not supported by the floci-az emulator.");
         }
 
         // ── outboundNetworkDependenciesEndpoints — always an empty array per spec ──
-        if (tail.matches("containerGroups/[^/]+/outboundNetworkDependenciesEndpoints(?:[?].*)?") && "GET".equals(method)) {
+        if (tail.matches("(?i:containerGroups)/[^/]+/outboundNetworkDependenciesEndpoints(?:[?].*)?") && "GET".equals(method)) {
             return getGroup(groupId(sub, rg, segment(tail, 1)))
                     .map(group -> Response.ok(List.of()).type("application/json").build())
                     .orElseGet(() -> groupNotFound(rg, segment(tail, 1)));
         }
 
         // ── Actions ────────────────────────────────────────────────────────────
-        if (tail.matches("containerGroups/[^/]+/(start|stop|restart)(?:[?].*)?") && "POST".equals(method)) {
+        if (tail.matches("(?i:containerGroups)/[^/]+/(start|stop|restart)(?:[?].*)?") && "POST".equals(method)) {
             return handleAction(req, sub, rg, segment(tail, 1), segment(tail, 2));
         }
 
         // ── Single group CRUD ──────────────────────────────────────────────────
-        if (tail.matches("containerGroups/[^/]+(?:[?].*)?")) {
+        if (tail.matches("(?i:containerGroups)/[^/]+(?:[?].*)?")) {
             String name = segment(tail, 1);
             return switch (method) {
                 case "GET"    -> handleGet(sub, rg, name);

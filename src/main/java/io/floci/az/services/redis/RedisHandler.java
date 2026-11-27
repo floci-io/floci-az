@@ -197,7 +197,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, StoreIndex
         }
 
         // ── LIST all caches in subscription ────────────────────────────────
-        if (tail.equalsIgnoreCase("redis") && !fullPath.contains("/resourceGroups/")) {
+        if (tail.equalsIgnoreCase("redis") && !ArmPaths.containsIgnoreCase(fullPath, "/resourceGroups/")) {
             return handleListSubscription(fullPath);
         }
 
