@@ -16,8 +16,12 @@ import java.util.Map;
 final class SignalRTokens {
     private static final ObjectMapper JSON = new ObjectMapper();
     record Claims(List<Map.Entry<String, String>> values) {
+        // The Azure SignalR SDK writes asrs.s.uid only when the app's IUserIdProvider
+        // returns a user ID. Otherwise it keeps the caller's first "sub" claim, which
+        // the service then uses as the user ID (see ClaimsUtility.BuildJwtClaims).
         String userId() {
-            return value("asrs.s.uid");
+            String userId = value("asrs.s.uid");
+            return userId.isEmpty() ? value("sub") : userId;
         }
         String value(String name) {
             return values.stream().filter(value -> value.getKey().equals(name))
