@@ -8,8 +8,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Base64;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -341,6 +343,34 @@ class PolicyEvaluationTest {
     }
 
     @Test
+    void identityExemptionsLiftTheAssignmentForTheNamedCallersOnly() {
+        definition("tls", TLS_RULE.formatted("deny"), "Secure transfer");
+        assign("tls-assign", DEFINITIONS + "/tls", "{}");
+        identityExemption("""
+                {"name": "users", "selectors": [{"kind": "userPrincipalId", "in": ["user-1"]}]},
+                {"name": "groups", "selectors": [{"kind": "groupPrincipalId", "in": ["group-1"]}]}""");
+
+        storageAccountAs("{\"oid\": \"user-1\"}", "sauser").statusCode(admitted());
+        storageAccountAs("{\"oid\": \"user-2\", \"groups\": [\"group-0\", \"group-1\"]}", "sagroup").statusCode(admitted());
+        storageAccountAs("{\"oid\": \"user-2\", \"groups\": [\"group-0\"]}", "saother").statusCode(403);
+        storageAccount("saanonymous", "TLS1_0").statusCode(403);
+    }
+
+    @Test
+    void identityExemptionsWithNotInExemptEveryoneButTheNamedCallers() {
+        definition("tls", TLS_RULE.formatted("deny"), "Secure transfer");
+        assign("tls-assign", DEFINITIONS + "/tls", "{}");
+        identityExemption("""
+                {"name": "targets", "selectors": [
+                    {"kind": "userPrincipalId", "notIn": ["user-1"]},
+                    {"kind": "groupPrincipalId", "notIn": ["group-1"]}]}""");
+
+        storageAccountAs("{\"oid\": \"user-2\", \"groups\": [\"group-0\"]}", "saexempt").statusCode(admitted());
+        storageAccountAs("{\"oid\": \"user-1\"}", "sauser").statusCode(403);
+        storageAccountAs("{\"oid\": \"user-2\", \"groups\": [\"group-1\"]}", "sagroup").statusCode(403);
+    }
+
+    @Test
     void excludedScopesAndDoNotEnforceSkipEnforcement() {
         definition("tls", TLS_RULE.formatted("deny"), "Secure transfer");
         putJson(SUB_SCOPE + AUTH + "/policyAssignments/sub-wide", """
@@ -487,6 +517,23 @@ class PolicyEvaluationTest {
                 {"properties": {"policyAssignmentId": "%s", "exemptionCategory": "Waiver", "expiresOn": "%s"}}"""
                 .formatted(ASSIGNMENTS + "/tls-assign", expiresOn), "?api-version=2022-07-01-preview")
                 .statusCode(201);
+    }
+
+    private static void identityExemption(String resourceSelectors) {
+        putJson(RG_SCOPE + AUTH + "/policyExemptions/callers", """
+                {"properties": {"policyAssignmentId": "%s", "exemptionCategory": "Waiver", "resourceSelectors": [%s]}}"""
+                .formatted(ASSIGNMENTS + "/tls-assign", resourceSelectors), "?api-version=2022-07-01-preview")
+                .statusCode(201);
+    }
+
+    private static ValidatableResponse storageAccountAs(String claims, String name) {
+        Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
+        String token = encoder.encodeToString("{\"alg\":\"RS256\"}".getBytes(StandardCharsets.UTF_8)) + "."
+                + encoder.encodeToString(claims.getBytes(StandardCharsets.UTF_8)) + ".sig";
+        return given().header("Authorization", "Bearer " + token).contentType("application/json")
+                .body(storageBody("TLS1_0", "eastus"))
+                .when().put(RG_SCOPE + "/providers/Microsoft.Storage/storageAccounts/" + name + STORAGE_API)
+                .then();
     }
 
     private static ValidatableResponse storageAccount(String name, String tls) {

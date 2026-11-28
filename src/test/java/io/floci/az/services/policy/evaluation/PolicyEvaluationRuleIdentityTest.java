@@ -25,8 +25,10 @@ class PolicyEvaluationRuleIdentityTest {
     @Test
     void keepsArrayClaimsAsArraysAndFillsTheDerivedOnes() {
         Map<String, Object> identity = PolicyEvaluationRule.identity(BearerClaims.parse(bearer(
-            "{\"oid\": \"o1\", \"azp\": \"a1\", \"tid\": \"t1\", \"acrs\": [\"c1\", \"c2\"], \"roles\": [\"r\"]}")));
+            "{\"oid\": \"o1\", \"azp\": \"a1\", \"tid\": \"t1\", \"acrs\": [\"c1\", \"c2\"], \"roles\": [\"r\"],"
+                + " \"groups\": [\"g1\", \"g2\"]}")));
         assertEquals(List.of("c1", "c2"), identity.get("acrs"));
+        assertEquals(List.of("g1", "g2"), identity.get("groups"), "the groups an identity based exemption selects on");
         assertEquals("a1", identity.get("appid"));
         assertEquals("app", identity.get("idtyp"));
         assertEquals("o1", identity.get("http://schemas.microsoft.com/identity/claims/objectidentifier"));

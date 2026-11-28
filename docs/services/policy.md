@@ -196,7 +196,9 @@ receives a PATCH.
 1. The assignments whose scope covers the resource are collected: the resource itself, its parents,
    its resource group, its subscription and any management group. `notScopes` and `resourceSelectors`
    narrow them, and an unexpired exemption for the assignment (matching the reference id when it names
-   one) removes it.
+   one) removes it. An exemption's `userPrincipalId` and `groupPrincipalId` selectors exempt a caller
+   rather than a resource: they are matched against the `oid` and the `groups` claim of the request's
+   bearer token.
 2. Each assigned definition, or each member of an assigned set definition, has its parameters resolved
    (assignment values, then set-definition values, then declared defaults) and its effect resolved:
    an `overrides` entry of kind `policyEffect` wins over the definition's `then.effect`, which may
@@ -360,6 +362,10 @@ floci-az:
   parameter schema.
 - **Exemption scope is not validated** against the assignment's scope (`assignmentScopeValidation` is
   stored and echoed only).
+- **Identity based exemptions read the token, not the directory.** `groupPrincipalId` matches the
+  groups the token's `groups` claim lists; memberships held only in the emulator's Entra directory are
+  not looked up. A compliance scan has no caller, so `triggerEvaluation` does not apply such an
+  exemption and records the resource by the rule alone.
 - **Definition versions are not implemented.** `versions` sub-resources answer `404`; `version` and
   `definitionVersion` are stored and echoed as plain strings.
 - **`systemData` and `metadata` audit fields** name the caller of the request the way Resource

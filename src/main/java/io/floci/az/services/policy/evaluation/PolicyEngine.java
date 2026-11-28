@@ -209,7 +209,7 @@ public class PolicyEngine {
                         || (request.tagsOnly() && !inspectsTags(candidate, base))) {
                     continue;
                 }
-                if (isExempt(candidate, resourceKey, content, resourceType)) {
+                if (isExempt(candidate, resourceKey, content, resourceType, request.identity())) {
                     evaluations.add(evaluation(candidate, false, true));
                     continue;
                 }
@@ -284,7 +284,8 @@ public class PolicyEngine {
                 }
             }
         }
-        return selectorsAdmit(properties(assignment).get("resourceSelectors"), content, resourceType);
+        // The identity selectors belong to exemptions: on an assignment they select nothing.
+        return selectorsAdmit(properties(assignment).get("resourceSelectors"), content, resourceType, Map.of());
     }
 
     /** A scope covers a resource at or below it; a management group covers every subscription (no hierarchy). */
@@ -299,7 +300,8 @@ public class PolicyEngine {
     }
 
     /** Resource selectors admit a resource when any selector set matches it in full; none means all resources. */
-    static boolean selectorsAdmit(Object resourceSelectors, Map<String, Object> content, String resourceType) {
+    static boolean selectorsAdmit(Object resourceSelectors, Map<String, Object> content, String resourceType,
+                                  Map<String, Object> identity) {
         if (!(resourceSelectors instanceof List<?> sets) || sets.isEmpty()) {
             return true;
         }
@@ -313,7 +315,7 @@ public class PolicyEngine {
             }
             boolean all = true;
             for (Object selector : list) {
-                if (!(selector instanceof Map<?, ?> s) || !selectorMatches(s, content, resourceType)) {
+                if (!(selector instanceof Map<?, ?> s) || !selectorMatches(s, content, resourceType, identity)) {
                     all = false;
                     break;
                 }
@@ -325,21 +327,25 @@ public class PolicyEngine {
         return false;
     }
 
-    private static boolean selectorMatches(Map<?, ?> selector, Map<String, Object> content, String resourceType) {
+    private static boolean selectorMatches(Map<?, ?> selector, Map<String, Object> content, String resourceType,
+                                           Map<String, Object> identity) {
         String kind = String.valueOf(ResourceFields.get(selector, "kind")).toLowerCase(Locale.ROOT);
         Object in = ResourceFields.get(selector, "in");
         Object notIn = ResourceFields.get(selector, "notIn");
-        String subject = switch (kind) {
+        Object subject = switch (kind) {
             case "resourcelocation" -> ResourceFields.normalizeLocation(content.get("location"));
             case "resourcetype" -> resourceType;
             case "resourcewithoutlocation" -> content.get("location") == null ? "subscriptionLevelResources" : null;
+            case "userprincipalid" -> identity.get("oid");
+            case "groupprincipalid" -> identity.get("groups");
             default -> null;
         };
+        List<?> subjects = subject instanceof List<?> several ? several : subject == null ? List.of() : List.of(subject);
         if (in instanceof List<?> allowed) {
-            return subject != null && containsIgnoreCase(allowed, kind.equals("resourcelocation") ? subject : subject);
+            return subjects.stream().anyMatch(s -> containsIgnoreCase(allowed, String.valueOf(s)));
         }
         if (notIn instanceof List<?> blocked) {
-            return subject == null || !containsIgnoreCase(blocked, subject);
+            return subjects.stream().noneMatch(s -> containsIgnoreCase(blocked, String.valueOf(s)));
         }
         return true;
     }
@@ -355,7 +361,8 @@ public class PolicyEngine {
         return false;
     }
 
-    private boolean isExempt(Candidate candidate, String resourceKey, Map<String, Object> content, String resourceType) {
+    private boolean isExempt(Candidate candidate, String resourceKey, Map<String, Object> content, String resourceType,
+                             Map<String, Object> identity) {
         String assignmentId = String.valueOf(candidate.assignment().get("id")).toLowerCase(Locale.ROOT);
         for (Map<String, Object> exemption : store.listExemptions()) {
             Map<String, Object> properties = properties(exemption);
@@ -373,7 +380,7 @@ public class PolicyEngine {
                     && (candidate.referenceId() == null || !containsIgnoreCase(ids, candidate.referenceId()))) {
                 continue;
             }
-            if (!selectorsAdmit(properties.get("resourceSelectors"), content, resourceType)) {
+            if (!selectorsAdmit(properties.get("resourceSelectors"), content, resourceType, identity)) {
                 continue;
             }
             return true;
