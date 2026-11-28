@@ -641,7 +641,7 @@ setup() {
 }
 
 @test "OpenTofu: a plan after apply leaves the function app, its plan and the application insights component unchanged" {
-    cd "$TF_DIR"
+    cd "$TOFU_DIR"
     run tofu plan -input=false -no-color -detailed-exitcode \
         -target=azurerm_service_plan.func -target=azurerm_application_insights.appi \
         -target=azurerm_linux_function_app.func
