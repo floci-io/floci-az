@@ -9,11 +9,13 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.StringReader;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -85,7 +87,8 @@ public class ApiManagementGateway {
                 operation.map(o -> String.valueOf(o.get("name"))).orElse(null),
                 serviceUrl,
                 policy.headers(),
-                policy.queryParams());
+                policy.queryParams(),
+                List.copyOf(policy.responseHeaders()));
         return proxy.invoke(request, proxyRequest);
     }
 
@@ -186,6 +189,11 @@ public class ApiManagementGateway {
                 .ifPresent(xml -> applyPolicyXml(context, xml));
     }
 
+    /**
+     * Applies one scope's policy document section by section, as the real gateway does: {@code <inbound>} and
+     * {@code <backend>} act on the request forwarded to the backend, and {@code <outbound>} on the response returned
+     * to the caller. {@code <on-error>} is not interpreted.
+     */
     private void applyPolicyXml(PolicyContext context, String xml) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
@@ -194,22 +202,71 @@ public class ApiManagementGateway {
             factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
             factory.setExpandEntityReferences(false);
             Document doc = factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
-            applySetBackendService(context, doc);
-            applyRewriteUri(context, doc);
-            applySetHeaders(context, doc);
-            applySetQueryParameters(context, doc);
-            applyReturnResponse(context, doc);
+            Element root = doc.getDocumentElement();
+            Element inbound = section(root, "inbound");
+            Element backend = section(root, "backend");
+            Element outbound = section(root, "outbound");
+            applySetBackendService(context, inbound);
+            applySetBackendService(context, backend);
+            applyRewriteUri(context, inbound);
+            applyRequestHeaders(context, inbound);
+            applyRequestHeaders(context, backend);
+            applySetQueryParameters(context, inbound);
+            applySetQueryParameters(context, backend);
+            applyReturnResponse(context, inbound);
+            applyReturnResponse(context, backend);
+            collectResponseHeaders(context, outbound);
         } catch (Exception e) {
             LOG.warnf("Ignoring unsupported APIM policy XML: %s", e.getMessage());
         }
     }
 
-    private void applySetBackendService(PolicyContext context, Document doc) {
-        NodeList nodes = doc.getElementsByTagName("set-backend-service");
-        if (nodes.getLength() == 0) {
+    /** The {@code <policies>} child section named {@code name}, or null when the document has none. */
+    private static Element section(Element root, String name) {
+        NodeList children = root.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (children.item(i) instanceof Element element && name.equals(element.getTagName())) {
+                return element;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The {@code tag} policies of a section, in document order, leaving out those nested in a
+     * {@code <return-response>}: those shape the response it returns, not the request.
+     */
+    private static List<Element> policies(Element section, String tag) {
+        List<Element> result = new ArrayList<>();
+        if (section == null) {
+            return result;
+        }
+        NodeList nodes = section.getElementsByTagName(tag);
+        for (int i = 0; i < nodes.getLength(); i++) {
+            Element element = (Element) nodes.item(i);
+            if (!insideReturnResponse(element, section)) {
+                result.add(element);
+            }
+        }
+        return result;
+    }
+
+    private static boolean insideReturnResponse(Element element, Element section) {
+        for (Node parent = element.getParentNode(); parent != null && parent != section;
+             parent = parent.getParentNode()) {
+            if (parent instanceof Element e && "return-response".equals(e.getTagName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void applySetBackendService(PolicyContext context, Element section) {
+        List<Element> nodes = policies(section, "set-backend-service");
+        if (nodes.isEmpty()) {
             return;
         }
-        Element element = (Element) nodes.item(nodes.getLength() - 1);
+        Element element = nodes.getLast();
         String backendId = element.getAttribute("backend-id");
         if (!backendId.isBlank()) {
             resolveBackendUrl(context.scope(), resolveNamedValues(context.scope(), backendId))
@@ -222,51 +279,82 @@ public class ApiManagementGateway {
         }
     }
 
-    private void applyRewriteUri(PolicyContext context, Document doc) {
-        NodeList nodes = doc.getElementsByTagName("rewrite-uri");
-        if (nodes.getLength() == 0) {
+    private void applyRewriteUri(PolicyContext context, Element section) {
+        List<Element> nodes = policies(section, "rewrite-uri");
+        if (nodes.isEmpty()) {
             return;
         }
-        Element element = (Element) nodes.item(nodes.getLength() - 1);
-        String template = element.getAttribute("template");
+        String template = nodes.getLast().getAttribute("template");
         if (!template.isBlank()) {
             context.suffix(trimSlashes(resolveNamedValues(context.scope(), template)));
         }
     }
 
-    private void applySetHeaders(PolicyContext context, Document doc) {
-        NodeList nodes = doc.getElementsByTagName("set-header");
-        for (int i = 0; i < nodes.getLength(); i++) {
-            Element element = (Element) nodes.item(i);
+    private void applyRequestHeaders(PolicyContext context, Element section) {
+        for (Element element : policies(section, "set-header")) {
+            applySetHeader(context, context.headers(), element);
+        }
+    }
+
+    private void applySetHeader(PolicyContext context, Map<String, String> headers, Element element) {
+        String name = element.getAttribute("name");
+        if (name.isBlank()) {
+            return;
+        }
+        String action = element.getAttribute("exists-action");
+        if ("delete".equalsIgnoreCase(action)) {
+            headers.remove(name);
+            return;
+        }
+        if ("skip".equalsIgnoreCase(action) && headers.containsKey(name)) {
+            return;
+        }
+        String value = lastValue(context, element);
+        if (value == null) {
+            return;
+        }
+        if ("append".equalsIgnoreCase(action) && headers.containsKey(name)) {
+            headers.put(name, headers.get(name) + "," + value);
+        } else {
+            headers.put(name, value);
+        }
+    }
+
+    /**
+     * Records the {@code <outbound>} set-header policies; they apply to the backend's response in the proxy, after
+     * every scope's request-side policies have run, in scope order.
+     */
+    private void collectResponseHeaders(PolicyContext context, Element section) {
+        for (Element element : policies(section, "set-header")) {
             String name = element.getAttribute("name");
             if (name.isBlank()) {
                 continue;
             }
             String action = element.getAttribute("exists-action");
-            if ("delete".equalsIgnoreCase(action)) {
-                context.headers().remove(name);
-                continue;
-            }
-            if ("skip".equalsIgnoreCase(action) && context.headers().containsKey(name)) {
-                continue;
-            }
-            NodeList values = element.getElementsByTagName("value");
-            if (values.getLength() > 0) {
-                String value = resolveNamedValues(context.scope(),
-                        values.item(values.getLength() - 1).getTextContent());
-                if ("append".equalsIgnoreCase(action) && context.headers().containsKey(name)) {
-                    context.headers().put(name, context.headers().get(name) + "," + value);
-                } else {
-                    context.headers().put(name, value);
-                }
-            }
+            context.responseHeaders().add(new ApiManagementProxy.ResponseHeaderAction(name,
+                    action.isBlank() ? "override" : action.toLowerCase(Locale.ROOT), allValues(context, element)));
         }
     }
 
-    private void applySetQueryParameters(PolicyContext context, Document doc) {
-        NodeList nodes = doc.getElementsByTagName("set-query-parameter");
-        for (int i = 0; i < nodes.getLength(); i++) {
-            Element element = (Element) nodes.item(i);
+    private List<String> allValues(PolicyContext context, Element element) {
+        NodeList values = element.getElementsByTagName("value");
+        List<String> resolved = new ArrayList<>();
+        for (int i = 0; i < values.getLength(); i++) {
+            resolved.add(resolveNamedValues(context.scope(), values.item(i).getTextContent()));
+        }
+        return resolved;
+    }
+
+    private String lastValue(PolicyContext context, Element element) {
+        NodeList values = element.getElementsByTagName("value");
+        if (values.getLength() == 0) {
+            return null;
+        }
+        return resolveNamedValues(context.scope(), values.item(values.getLength() - 1).getTextContent());
+    }
+
+    private void applySetQueryParameters(PolicyContext context, Element section) {
+        for (Element element : policies(section, "set-query-parameter")) {
             String name = element.getAttribute("name");
             if (name.isBlank()) {
                 continue;
@@ -279,20 +367,19 @@ public class ApiManagementGateway {
             if ("skip".equalsIgnoreCase(action) && context.queryParams().containsKey(name)) {
                 continue;
             }
-            NodeList values = element.getElementsByTagName("value");
-            if (values.getLength() > 0) {
-                context.queryParams().put(name, resolveNamedValues(context.scope(),
-                        values.item(values.getLength() - 1).getTextContent()));
+            String value = lastValue(context, element);
+            if (value != null) {
+                context.queryParams().put(name, value);
             }
         }
     }
 
-    private void applyReturnResponse(PolicyContext context, Document doc) {
-        NodeList nodes = doc.getElementsByTagName("return-response");
-        if (nodes.getLength() == 0) {
+    private void applyReturnResponse(PolicyContext context, Element section) {
+        List<Element> nodes = policies(section, "return-response");
+        if (nodes.isEmpty()) {
             return;
         }
-        Element element = (Element) nodes.item(nodes.getLength() - 1);
+        Element element = nodes.getLast();
         NodeList statuses = element.getElementsByTagName("set-status");
         int statusCode = 200;
         if (statuses.getLength() > 0) {
@@ -302,8 +389,13 @@ public class ApiManagementGateway {
                 statusCode = Integer.parseInt(code);
             }
         }
-        NodeList bodies = element.getElementsByTagName("set-body");
         context.returnStatusCode(statusCode);
+        context.returnHeaders().clear();
+        NodeList headers = element.getElementsByTagName("set-header");
+        for (int i = 0; i < headers.getLength(); i++) {
+            applySetHeader(context, context.returnHeaders(), (Element) headers.item(i));
+        }
+        NodeList bodies = element.getElementsByTagName("set-body");
         if (bodies.getLength() > 0) {
             context.returnBody(resolveNamedValues(context.scope(),
                     bodies.item(bodies.getLength() - 1).getTextContent()));
@@ -382,7 +474,7 @@ public class ApiManagementGateway {
                 response.type("application/json");
             }
         }
-        policy.headers().forEach(response::header);
+        policy.returnHeaders().forEach(response::header);
         return response.build();
     }
 
@@ -482,6 +574,8 @@ public class ApiManagementGateway {
         private String suffix;
         private final Map<String, String> headers;
         private final Map<String, String> queryParams;
+        private final List<ApiManagementProxy.ResponseHeaderAction> responseHeaders = new ArrayList<>();
+        private final Map<String, String> returnHeaders = new LinkedHashMap<>();
         private Integer returnStatusCode;
         private String returnBody;
 
@@ -520,6 +614,14 @@ public class ApiManagementGateway {
 
         private Map<String, String> queryParams() {
             return queryParams;
+        }
+
+        private List<ApiManagementProxy.ResponseHeaderAction> responseHeaders() {
+            return responseHeaders;
+        }
+
+        private Map<String, String> returnHeaders() {
+            return returnHeaders;
         }
 
         private Integer returnStatusCode() {
