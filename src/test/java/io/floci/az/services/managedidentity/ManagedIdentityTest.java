@@ -551,4 +551,19 @@ class ManagedIdentityTest {
                 .body("value", hasSize(1))
                 .body("value[0].name", equalTo("fic-lower"));
     }
+
+    @Test
+    void anIdentityNamedLikeTheCredentialTypeIsStillAnIdentity() {
+        given().contentType("application/json").body("{\"location\": \"eastus\"}")
+                .when().put(BASE + "/federatedidentitycredentials" + API)
+                .then().statusCode(201)
+                .body("name", equalTo("federatedidentitycredentials"))
+                .body("type", equalTo("Microsoft.ManagedIdentity/userAssignedIdentities"));
+
+        given().when().get(BASE + "/federatedidentitycredentials" + API)
+                .then().statusCode(200)
+                .body("name", equalTo("federatedidentitycredentials"));
+        given().when().delete(BASE + "/federatedidentitycredentials" + API)
+                .then().statusCode(200);
+    }
 }
