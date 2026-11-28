@@ -138,6 +138,13 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     private final ArmResourceStore<MonitorResource> diagnosticSettings;
     private final ArmResourceStore<Map<String, Object>> components;
     private final ArmResourceStore<BillingFeatures> billingFeatures;
+
+    /**
+     * Held by a component PUT and DELETE and by a billing features PUT. A billing PUT checks that its component
+     * exists and writes in one hold, so a DELETE between the two cannot leave billing features without a component,
+     * which a component created again under the same name would then answer with instead of the defaults.
+     */
+    private final Object componentWrites = new Object();
     private final EmulatorConfig config;
     private final long maxDecodedBodyBytes;
     /**
@@ -550,8 +557,11 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
 
         if ("PUT".equals(method)) {
             Map<String, Object> body = parseBody(req);
-            Map<String, Object> component = components.createOrUpdate(id,
-                existing -> componentDocument(req, id, body, existing.orElse(null))).stored().value();
+            Map<String, Object> component;
+            synchronized (componentWrites) {
+                component = components.createOrUpdate(id,
+                    existing -> componentDocument(req, id, body, existing.orElse(null))).stored().value();
+            }
             return Response.ok(component).type(MediaType.APPLICATION_JSON).build();
         } else if ("GET".equals(method)) {
             return components.get(id)
@@ -563,10 +573,12 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                 .map(component -> Response.ok(component.value()).type(MediaType.APPLICATION_JSON).build())
                 .orElseGet(() -> resourceNotFound(id, COMPONENT_TYPE));
         } else if ("DELETE".equals(method)) {
-            if (components.delete(id).isEmpty()) {
-                return Response.noContent().build();
+            synchronized (componentWrites) {
+                if (components.delete(id).isEmpty()) {
+                    return Response.noContent().build();
+                }
+                billingFeatures.delete(billingFeaturesId(id));
             }
-            billingFeatures.delete(billingFeaturesId(id));
             return Response.ok().build();
         }
         return Response.status(405).build();
@@ -635,20 +647,31 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
      * {@code ResetTime} and {@code MaxHistoryCap}. A component that does not exist answers 404.
      */
     private Response handleBillingFeatures(AzureRequest req, String method, ArmResourceId componentId) {
-        if (components.get(componentId).isEmpty()) {
-            return resourceNotFound(componentId, COMPONENT_TYPE);
-        }
         ArmResourceId id = billingFeaturesId(componentId);
-        Map<String, Object> current = billingFeatures.get(id).map(stored -> stored.value().features())
-            .orElseGet(MonitorHandler::defaultBillingFeatures);
         if ("GET".equals(method)) {
-            return Response.ok(current).type(MediaType.APPLICATION_JSON).build();
+            if (components.get(componentId).isEmpty()) {
+                return resourceNotFound(componentId, COMPONENT_TYPE);
+            }
+            return Response.ok(currentBillingFeatures(id)).type(MediaType.APPLICATION_JSON).build();
         } else if ("PUT".equals(method)) {
-            Map<String, Object> features = billingFeaturesDocument(parseBody(req), current);
-            billingFeatures.put(new BillingFeatures(id.id(), features));
+            Map<String, Object> body = parseBody(req);
+            Map<String, Object> features;
+            synchronized (componentWrites) {
+                if (components.get(componentId).isEmpty()) {
+                    return resourceNotFound(componentId, COMPONENT_TYPE);
+                }
+                features = billingFeaturesDocument(body, currentBillingFeatures(id));
+                billingFeatures.put(new BillingFeatures(id.id(), features));
+            }
             return Response.ok(features).type(MediaType.APPLICATION_JSON).build();
         }
         return Response.status(405).build();
+    }
+
+    /** The stored billing features under {@code id}, or the defaults of a new component. */
+    private Map<String, Object> currentBillingFeatures(ArmResourceId id) {
+        return billingFeatures.get(id).map(stored -> stored.value().features())
+            .orElseGet(MonitorHandler::defaultBillingFeatures);
     }
 
     private static ArmResourceId billingFeaturesId(ArmResourceId componentId) {
