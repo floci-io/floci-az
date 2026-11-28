@@ -758,3 +758,17 @@ resource "azurerm_linux_function_app" "func" {
     }
   }
 }
+
+# A system topic for the storage account's events, with a system-assigned identity: azurerm reads
+# back its source, topic type, metric resource id and principal, and a plan after apply checks them.
+resource "azurerm_eventgrid_system_topic" "st" {
+  name                   = "floci-test-systopic"
+  resource_group_name    = azurerm_resource_group.rg.name
+  location               = azurerm_resource_group.rg.location
+  source_arm_resource_id = azurerm_storage_account.sa.id
+  topic_type             = "Microsoft.Storage.StorageAccounts"
+
+  identity {
+    type = "SystemAssigned"
+  }
+}

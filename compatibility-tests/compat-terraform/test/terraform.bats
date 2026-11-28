@@ -606,6 +606,21 @@ setup() {
     assert_output --partial "No changes"
 }
 
+@test "Terraform: event grid system topic created for the storage account with a system-assigned identity" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.EventGrid/systemTopics/floci-test-systopic?api-version=2025-02-15"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.source | ascii_downcase | endswith("/storageaccounts/flocitestsa")')" "true"
+    assert_equal "$(echo "$output" | jq -r '.properties.topicType')" "Microsoft.Storage.StorageAccounts"
+    assert_equal "$(echo "$output" | jq -r '.identity.principalId | length > 0')" "true"
+}
+
+@test "Terraform: a plan after apply leaves the event grid system topic unchanged" {
+    cd "$TF_DIR"
+    run terraform plan -input=false -no-color -detailed-exitcode -target=azurerm_eventgrid_system_topic.st
+    assert_success
+    assert_output --partial "No changes"
+}
+
 # Runs last: the destroy in teardown_file ignores failures, and leaves nothing to do when this passes.
 @test "Terraform: destroying everything removes the resource group and purges the key vault and the API Management service" {
     cd "$TF_DIR"
