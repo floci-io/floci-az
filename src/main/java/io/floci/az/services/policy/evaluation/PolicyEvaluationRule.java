@@ -45,7 +45,7 @@ public class PolicyEvaluationRule implements ArmRequestRule {
     private static final Logger LOG = Logger.getLogger(PolicyEvaluationRule.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Set<String> KEPT_CLAIMS = Set.of("oid", "appid", "azp", "idtyp", "tid", "upn", "name",
-        "preferred_username", "sub", "acrs");
+        "preferred_username", "sub", "acrs", "groups");
 
     private final PolicyEngine engine;
     private final PolicyEvaluationLog log;
