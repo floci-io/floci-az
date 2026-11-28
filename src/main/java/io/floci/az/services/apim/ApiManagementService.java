@@ -382,7 +382,9 @@ public class ApiManagementService implements GlobalNameSource {
 
     private synchronized Response createOrUpdateService(AzureRequest request, ArmResourceId requested) {
         Map<String, Object> body = parseBody(request);
-        Optional<Response> badIdentity = malformedIdentity(body);
+        // A restore ignores every other property (the spec's ApiManagementServiceBaseProperties.restore), so a stray
+        // identity on it is not validated.
+        Optional<Response> badIdentity = isRestore(body) ? Optional.empty() : malformedIdentity(body);
         if (badIdentity.isPresent()) {
             return badIdentity.get();
         }
