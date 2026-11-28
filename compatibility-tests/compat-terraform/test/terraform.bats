@@ -574,6 +574,38 @@ setup() {
     assert_failure
 }
 
+@test "Terraform: linux function app created with its plan, identity and settings" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Web/sites/floci-test-func?api-version=2023-12-01"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.serverFarmId | ascii_downcase | endswith("/serverfarms/floci-test-func-plan")')" "true"
+    assert_equal "$(echo "$output" | jq -r '.identity.type')" "SystemAssigned"
+    assert_equal "$(echo "$output" | jq -r '.identity.principalId | length > 0')" "true"
+
+    run curl -sf -X POST -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Web/sites/floci-test-func/config/appsettings/list?api-version=2023-12-01"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.FLOCI_TEST_MODE')" "compat"
+}
+
+@test "Terraform: application insights component created with its connection string and daily cap" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Insights/components/floci-test-appi?api-version=2020-02-02"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.ConnectionString | startswith("InstrumentationKey=")')" "true"
+
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Insights/components/floci-test-appi/currentbillingfeatures?api-version=2015-05-01"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.DataVolumeCap.Cap')" "5"
+}
+
+@test "Terraform: a plan after apply leaves the function app, its plan and the application insights component unchanged" {
+    cd "$TF_DIR"
+    run terraform plan -input=false -no-color -detailed-exitcode \
+        -target=azurerm_service_plan.func -target=azurerm_application_insights.appi \
+        -target=azurerm_linux_function_app.func
+    assert_success
+    assert_output --partial "No changes"
+}
+
 # Runs last: the destroy in teardown_file ignores failures, and leaves nothing to do when this passes.
 @test "Terraform: destroying everything removes the resource group and purges the key vault and the API Management service" {
     cd "$TF_DIR"
