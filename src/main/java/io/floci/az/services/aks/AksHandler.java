@@ -181,7 +181,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, StoreIndexSo
 
         // ── LIST all clusters in subscription ──────────────────────────────
         // subscriptions/{sub}/providers/Microsoft.ContainerService/managedClusters
-        if (tail.equalsIgnoreCase("managedClusters") && !fullPath.contains("/resourceGroups/")) {
+        if (tail.equalsIgnoreCase("managedClusters") && !ArmPaths.containsIgnoreCase(fullPath, "/resourceGroups/")) {
             return handleListSubscription(fullPath);
         }
 
@@ -194,7 +194,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         // ── Credential endpoints ────────────────────────────────────────────
         // managedClusters/{name}/listClusterAdminCredential
         // managedClusters/{name}/listClusterUserCredential
-        if (tail.matches("managedClusters/[^/]+/listCluster(?:Admin|User)Credential") && "POST".equals(method)) {
+        if (tail.matches("(?i:managedClusters)/[^/]+/listCluster(?:Admin|User)Credential") && "POST".equals(method)) {
             String clusterName = segment(tail, 1);
             String sub = extractSubscriptionId(fullPath);
             String rg = extractResourceGroup(fullPath);
@@ -203,7 +203,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         }
 
         // ── Agent pool list ─────────────────────────────────────────────────
-        if (tail.matches("managedClusters/[^/]+/agentPools") && "GET".equals(method)) {
+        if (tail.matches("(?i:managedClusters)/[^/]+/(?i:agentPools)") && "GET".equals(method)) {
             String clusterName = segment(tail, 1);
             String sub = extractSubscriptionId(fullPath);
             String rg = extractResourceGroup(fullPath);
@@ -211,7 +211,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         }
 
         // ── Agent pool CRUD ─────────────────────────────────────────────────
-        if (tail.matches("managedClusters/[^/]+/agentPools/[^/]+")) {
+        if (tail.matches("(?i:managedClusters)/[^/]+/(?i:agentPools)/[^/]+")) {
             String clusterName = segment(tail, 1);
             String poolName = segment(tail, 3);
             String sub = extractSubscriptionId(fullPath);
@@ -220,7 +220,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         }
 
         // ── Single cluster CRUD ─────────────────────────────────────────────
-        if (tail.matches("managedClusters/[^/]+")) {
+        if (tail.matches("(?i:managedClusters)/[^/]+")) {
             String clusterName = segment(tail, 1);
             String sub = extractSubscriptionId(fullPath);
             String rg = extractResourceGroup(fullPath);

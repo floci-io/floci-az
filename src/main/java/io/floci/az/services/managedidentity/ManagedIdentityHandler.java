@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Microsoft.ManagedIdentity handler. Serves both planes for {@code serviceType="managedidentity"}:
@@ -53,6 +54,12 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
     private static final Logger LOG = Logger.getLogger(ManagedIdentityHandler.class);
 
     private static final String PROVIDER_MARKER = "/providers/Microsoft.ManagedIdentity/";
+    /**
+     * The federated credential child type, matched at its own position after the identity name, so an identity
+     * whose name happens to be {@code federatedIdentityCredentials} is still an identity.
+     */
+    private static final Pattern FEDERATED_CREDENTIALS =
+            Pattern.compile("/userAssignedIdentities/[^/]+/federatedIdentityCredentials(/|$)", Pattern.CASE_INSENSITIVE);
     private static final String IDENTITY_TYPE = ManagedIdentityStore.IDENTITY_TYPE;
     private static final String FIC_TYPE = ManagedIdentityStore.CREDENTIAL_TYPE;
 
@@ -133,7 +140,7 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
             if (ArmPaths.indexOfIgnoreCase(path, PROVIDER_MARKER + "identities/default") >= 0) {
                 return getSystemAssignedIdentity(req, path, method);
             }
-            if (path.contains("/federatedIdentityCredentials")) {
+            if (FEDERATED_CREDENTIALS.matcher(path).find()) {
                 return handleFederatedCredential(req, path, method);
             }
             if (ArmPaths.indexOfIgnoreCase(path, PROVIDER_MARKER + "userAssignedIdentities") >= 0) {

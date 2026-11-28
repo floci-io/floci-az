@@ -252,4 +252,20 @@ class RedisHandlerTest {
         given().when().delete(id + API).then().statusCode(anyOf(is(200), is(202), is(204)));
         given().when().get(BASE + "/redis/idcache" + API).then().statusCode(404);
     }
+
+    @Test
+    @DisplayName("A lowercased resourceGroups segment lists the resource group, not the subscription")
+    void aLowercasedResourceGroupsSegmentListsTheResourceGroup() {
+        given().contentType("application/json").body(CREATE_BODY)
+            .put(BASE + "/redis/rg-cache" + API).then().statusCode(201);
+        given().contentType("application/json").body(CREATE_BODY)
+            .put("/subscriptions/" + SUB + "/resourceGroups/other-rg/providers/Microsoft.Cache/redis/other-cache" + API)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/subscriptions/" + SUB + "/resourcegroups/" + RG + "/providers/Microsoft.Cache/redis" + API)
+            .then().statusCode(200)
+            .body("value", hasSize(1))
+            .body("value[0].name", equalTo("rg-cache"));
+    }
 }

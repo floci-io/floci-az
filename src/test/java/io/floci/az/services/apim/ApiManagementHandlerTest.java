@@ -909,4 +909,28 @@ class ApiManagementHandlerTest {
                 .body("headers.x-layers", equalTo("service"))
                 .body("headers.x-api", equalTo("orders"));
     }
+
+    @Test
+    void serviceAndChildTypeSegmentsMatchInAnyCase() {
+        String lowered = "/subscriptions/" + SUB + "/resourceGroups/" + RG + "/providers/Microsoft.ApiManagement/SERVICE/"
+                + SERVICE;
+        given().contentType("application/json")
+                .body("{\"location\":\"westeurope\",\"properties\":{\"publisherEmail\":\"a@b.c\","
+                        + "\"publisherName\":\"unit\"}}")
+                .when().put(lowered + API)
+                .then().statusCode(200)
+                .body("name", equalTo(SERVICE));
+        given().contentType("application/json")
+                .body("{\"properties\":{\"displayName\":\"lower\",\"path\":\"lower\"}}")
+                .when().put(lowered + "/APIS/lower-api" + API)
+                .then().statusCode(200);
+
+        given().when().get(SERVICE_ID + API).then().statusCode(200).body("name", equalTo(SERVICE));
+        given().when().get(SERVICE_ID + "/apis/lower-api" + API).then().statusCode(200)
+                .body("name", equalTo("lower-api"));
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
+                        + "/providers/Microsoft.ApiManagement/service" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1));
+    }
 }

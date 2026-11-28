@@ -190,12 +190,13 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
         }
 
         // ── List in subscription ───────────────────────────────────────────────
-        if (tail.matches("virtualMachines(?:[?].*)?") && !fullPath.contains("/resourceGroups/")) {
+        if (tail.matches("(?i:virtualMachines)(?:[?].*)?")
+                && !ArmPaths.containsIgnoreCase(fullPath, "/resourceGroups/")) {
             return handleListSubscription(extractSubscriptionId(fullPath), expandsInstanceView(req));
         }
 
         // ── List in resource group ──────────────────────────────────────────────
-        if (tail.matches("virtualMachines(?:[?].*)?") && "GET".equals(method)) {
+        if (tail.matches("(?i:virtualMachines)(?:[?].*)?") && "GET".equals(method)) {
             return handleListByResourceGroup(extractSubscriptionId(fullPath),
                     extractResourceGroup(fullPath), expandsInstanceView(req));
         }
@@ -204,18 +205,18 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
         String rg = extractResourceGroup(fullPath);
 
         // ── instanceView ──────────────────────────────────────────────────────
-        if (tail.matches("virtualMachines/[^/]+/instanceView(?:[?].*)?") && "GET".equals(method)) {
+        if (tail.matches("(?i:virtualMachines)/[^/]+/instanceView(?:[?].*)?") && "GET".equals(method)) {
             return handleInstanceView(sub, rg, segment(tail, 1));
         }
 
         // ── Power actions ───────────────────────────────────────────────────────
-        if (tail.matches("virtualMachines/[^/]+/(start|powerOff|deallocate|restart|redeploy|reapply)(?:[?].*)?")
+        if (tail.matches("(?i:virtualMachines)/[^/]+/(start|powerOff|deallocate|restart|redeploy|reapply)(?:[?].*)?")
                 && "POST".equals(method)) {
             return handlePowerAction(sub, rg, segment(tail, 1), segment(tail, 2), req);
         }
 
         // ── Single VM CRUD ────────────────────────────────────────────────────────
-        if (tail.matches("virtualMachines/[^/]+(?:[?].*)?")) {
+        if (tail.matches("(?i:virtualMachines)/[^/]+(?:[?].*)?")) {
             String vmName = segment(tail, 1);
             return switch (method) {
                 case "GET"    -> handleGet(sub, rg, vmName, expandsInstanceView(req));

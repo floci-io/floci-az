@@ -95,7 +95,7 @@ public class EventGridService {
             return notFound(path);
         }
         String[] seg = split(stripQuery(path.substring(idx + EG_MARKER.length())));
-        if (seg.length == 0 || !"topics".equals(seg[0])) {
+        if (seg.length == 0 || !"topics".equalsIgnoreCase(seg[0])) {
             return notFound(path);
         }
 

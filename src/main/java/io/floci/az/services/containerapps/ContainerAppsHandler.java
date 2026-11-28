@@ -128,38 +128,38 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
 
         LOG.debugv("Container Apps ARM request: {0} {1}", method, path);
 
-        if (tail.matches("managedEnvironments/[^/]+/checkNameAvailability")) {
+        if (tail.matches("(?i:managedEnvironments)/[^/]+/checkNameAvailability")) {
             return checkNameAvailability(method, subscription, resourceGroup, segment(tail, 1), request);
         }
         if ("managedEnvironments".equalsIgnoreCase(tail)) {
             return handleEnvironmentCollection(method, subscription, resourceGroup,
-                    path.contains("/resourceGroups/"));
+                    ArmPaths.containsIgnoreCase(path, "/resourceGroups/"));
         }
-        if (tail.matches("managedEnvironments/[^/]+/storages")) {
+        if (tail.matches("(?i:managedEnvironments)/[^/]+/(?i:storages)")) {
             return Response.ok(Map.of("value", List.of())).build();
         }
-        if (tail.matches("managedEnvironments/[^/]+")) {
+        if (tail.matches("(?i:managedEnvironments)/[^/]+")) {
             return handleEnvironment(method, subscription, resourceGroup, segment(tail, 1), request);
         }
         if ("containerApps".equalsIgnoreCase(tail)) {
             return handleAppCollection(method, subscription, resourceGroup,
-                    path.contains("/resourceGroups/"));
+                    ArmPaths.containsIgnoreCase(path, "/resourceGroups/"));
         }
-        if (tail.matches("containerApps/[^/]+/listSecrets") && "POST".equals(method)) {
+        if (tail.matches("(?i:containerApps)/[^/]+/listSecrets") && "POST".equals(method)) {
             return listSecrets(subscription, resourceGroup, segment(tail, 1));
         }
-        if (tail.matches("containerApps/[^/]+/revisions")) {
+        if (tail.matches("(?i:containerApps)/[^/]+/(?i:revisions)")) {
             return listRevisions(method, subscription, resourceGroup, segment(tail, 1));
         }
-        if (tail.matches("containerApps/[^/]+/revisions/[^/]+/(activate|deactivate|restart)")) {
+        if (tail.matches("(?i:containerApps)/[^/]+/(?i:revisions)/[^/]+/(activate|deactivate|restart)")) {
             return revisionAction(method, subscription, resourceGroup, segment(tail, 1),
                     segment(tail, 3), segment(tail, 4));
         }
-        if (tail.matches("containerApps/[^/]+/revisions/[^/]+")) {
+        if (tail.matches("(?i:containerApps)/[^/]+/(?i:revisions)/[^/]+")) {
             return getRevision(method, subscription, resourceGroup,
                     segment(tail, 1), segment(tail, 3));
         }
-        if (tail.matches("containerApps/[^/]+")) {
+        if (tail.matches("(?i:containerApps)/[^/]+")) {
             return handleApp(method, subscription, resourceGroup, segment(tail, 1), request);
         }
         return ArmErrors.notFound("Unknown Microsoft.App path: " + tail);

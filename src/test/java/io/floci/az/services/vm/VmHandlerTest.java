@@ -200,4 +200,27 @@ class VmHandlerTest {
                 .then().statusCode(200)
                 .body("value.find { it.name == 'vm-idx' }.type", equalTo("Microsoft.Compute/virtualMachines"));
     }
+
+    @Test
+    @DisplayName("Type and resourceGroups segments match in any case")
+    void typeAndResourceGroupSegmentsMatchInAnyCase() {
+        String lowered = "/subscriptions/" + SUB + "/resourcegroups/" + RG + "/providers/Microsoft.Compute";
+        given().contentType("application/json").body(CREATE_BODY)
+                .when().put(lowered + "/virtualmachines/vm-lower" + API)
+                .then().statusCode(201)
+                .body("name", equalTo("vm-lower"))
+                .body("type", equalTo("Microsoft.Compute/virtualMachines"));
+        given().contentType("application/json").body(CREATE_BODY)
+                .when().put("/subscriptions/" + SUB + "/resourceGroups/other-rg/providers/Microsoft.Compute"
+                        + "/virtualMachines/vm-other" + API)
+                .then().statusCode(201);
+
+        given().when().get(BASE + "/virtualMachines/vm-lower" + API)
+                .then().statusCode(200)
+                .body("name", equalTo("vm-lower"));
+        given().when().get(lowered + "/virtualmachines" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", equalTo("vm-lower"));
+    }
 }
