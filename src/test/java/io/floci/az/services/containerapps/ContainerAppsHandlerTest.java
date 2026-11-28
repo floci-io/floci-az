@@ -389,4 +389,26 @@ public class ContainerAppsHandlerTest {
         return given().get(ENVIRONMENT_URL).then().statusCode(200)
                 .extract().path("properties.defaultDomain");
     }
+
+    @Test
+    void typeAndResourceGroupSegmentsMatchInAnyCase() {
+        String lowered = "/subscriptions/" + SUB + "/resourcegroups/" + RG + "/providers/Microsoft.App";
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"properties\":{\"zoneRedundant\":false}}")
+                .put(lowered + "/managedenvironments/" + ENVIRONMENT + "?api-version=2025-07-01").then()
+                .statusCode(201)
+                .body("name", equalTo(ENVIRONMENT))
+                .body("type", equalTo("Microsoft.App/managedEnvironments"));
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"properties\":{\"zoneRedundant\":false}}")
+                .put("/subscriptions/" + SUB + "/resourceGroups/other-rg/providers/Microsoft.App"
+                        + "/managedEnvironments/other-env?api-version=2025-07-01").then()
+                .statusCode(201);
+
+        given().get(ENVIRONMENT_URL).then().statusCode(200).body("name", equalTo(ENVIRONMENT));
+        given().get(lowered + "/managedenvironments?api-version=2025-07-01").then()
+                .statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", equalTo(ENVIRONMENT));
+    }
 }

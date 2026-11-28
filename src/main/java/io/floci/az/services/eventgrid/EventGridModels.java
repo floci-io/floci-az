@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Domain objects for Azure Event Grid Custom Topics and webhook event subscriptions.
@@ -30,6 +31,20 @@ public final class EventGridModels {
     public static final String SCHEMA_CLOUD_EVENT = "CloudEventSchemaV1_0";
     public static final String SCHEMA_CUSTOM = "CustomEventSchema";
 
+    /** A topic's {@code publicNetworkAccess} when the write sent none, the spec's default. */
+    public static final String PUBLIC_NETWORK_ACCESS_ENABLED = "Enabled";
+
+    /**
+     * A custom topic as its writes left it. A topic stored before {@code tags} and the network and auth settings were
+     * kept reads them as null, which answers as the spec's defaults.
+     *
+     * @param tags                the tags the last write sent, or null for none
+     * @param identity            the managed identity, as {@code ArmIdentities} resolved it, or null for none
+     * @param publicNetworkAccess {@code Enabled}, {@code Disabled} or {@code SecuredByPerimeter}; null for the default
+     * @param disableLocalAuth    whether access keys and SAS tokens are refused; null for the default, false
+     * @param inboundIpRules      the {@code InboundIpRule}s, as sent; null for none
+     * @param inputSchemaMapping  the {@code InputSchemaMapping}, as sent; null for none
+     */
     public record Topic(
             String subscriptionId,
             String resourceGroup,
@@ -37,11 +52,23 @@ public final class EventGridModels {
             String location,
             String inputSchema,
             String key1,
-            String key2) {
+            String key2,
+            Map<String, Object> tags,
+            Map<String, Object> identity,
+            String publicNetworkAccess,
+            Boolean disableLocalAuth,
+            List<Object> inboundIpRules,
+            Map<String, Object> inputSchemaMapping) {
 
         public String resourceId() {
             return "/subscriptions/" + subscriptionId + "/resourceGroups/" + resourceGroup
                     + "/providers/Microsoft.EventGrid/topics/" + name;
+        }
+
+        /** The same topic with these access keys. */
+        public Topic withKeys(String newKey1, String newKey2) {
+            return new Topic(subscriptionId, resourceGroup, name, location, inputSchema, newKey1, newKey2, tags,
+                    identity, publicNetworkAccess, disableLocalAuth, inboundIpRules, inputSchemaMapping);
         }
     }
 

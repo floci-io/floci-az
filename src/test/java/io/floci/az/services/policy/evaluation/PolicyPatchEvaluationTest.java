@@ -1,6 +1,6 @@
 package io.floci.az.services.policy.evaluation;
 
-import io.floci.az.testing.RedisMockedProfile;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.ValidatableResponse;
@@ -18,7 +18,7 @@ import static org.hamcrest.Matchers.isOneOf;
  * properties, so they show every case; mocked mode keeps Docker out of it.
  */
 @QuarkusTest
-@TestProfile(RedisMockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("Policy evaluation of a PATCH: the stored resource merged with the patch")
 class PolicyPatchEvaluationTest {
 

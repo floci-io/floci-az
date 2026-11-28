@@ -398,4 +398,27 @@ class AciHandlerTest {
                 .then().statusCode(200)
                 .body("value", hasSize(0));
     }
+
+    @Test
+    @DisplayName("Type and resourceGroups segments match in any case")
+    void typeAndResourceGroupSegmentsMatchInAnyCase() {
+        String lowered = "/subscriptions/" + SUB + "/resourcegroups/" + RG + "/providers/Microsoft.ContainerInstance";
+        given().contentType("application/json").body(MINIMAL_BODY)
+                .when().put(lowered + "/containergroups/cg-lower" + API)
+                .then().statusCode(201)
+                .body("name", equalTo("cg-lower"))
+                .body("type", equalTo("Microsoft.ContainerInstance/containerGroups"));
+        given().contentType("application/json").body(MINIMAL_BODY)
+                .when().put("/subscriptions/" + SUB + "/resourceGroups/other-rg/providers/Microsoft.ContainerInstance"
+                        + "/containerGroups/cg-other" + API)
+                .then().statusCode(201);
+
+        given().when().get(BASE + "/containerGroups/cg-lower" + API)
+                .then().statusCode(200)
+                .body("name", equalTo("cg-lower"));
+        given().when().get(lowered + "/containergroups" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", equalTo("cg-lower"));
+    }
 }

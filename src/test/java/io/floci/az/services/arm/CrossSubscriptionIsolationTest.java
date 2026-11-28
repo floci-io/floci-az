@@ -1,7 +1,7 @@
 package io.floci.az.services.arm;
 
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.DisplayName;
@@ -11,7 +11,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * name becomes free again once the owner deletes it.
  */
 @QuarkusTest
-@TestProfile(CrossSubscriptionIsolationTest.NoDocker.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("Same resource names in two subscriptions")
 class CrossSubscriptionIsolationTest {
 
@@ -42,21 +41,6 @@ class CrossSubscriptionIsolationTest {
     private static final String SUB_B = "bbbbbbbb-2222-2222-2222-222222222222";
     private static final String LOC = "{\"location\":\"eastus\"}";
     private static final String SQL_ADMIN = "\"administratorLogin\":\"a\",\"administratorLoginPassword\":\"P@ssw0rd1234\"";
-
-    /** Every backing service in ARM-state-only mode, so no case needs Docker. */
-    public static class NoDocker implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci-az.services.redis.mocked", "true",
-                    "floci-az.services.acr.mocked", "true",
-                    "floci-az.services.postgres.mocked", "true",
-                    "floci-az.services.mysql.mocked", "true",
-                    "floci-az.services.maria-db.mocked", "true",
-                    "floci-az.services.aks.mocked", "true",
-                    "floci-az.services.sql.data-plane.provider", "none");
-        }
-    }
 
     record Kind(String label, String type, String name, String api, String body) {
         String path(String sub, String rg) {

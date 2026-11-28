@@ -815,25 +815,33 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             node.path("privateDnsZoneArmResourceId").asText(null), node.path("publicNetworkAccess").asText(null));
     }
 
-    /** The network an update leaves: a PUT replaces it, a PATCH merges what it sends, an omitted one is kept. */
+    /**
+     * The network an update leaves. An omitted block is kept. The subnet and private DNS zone ids an update leaves out
+     * are kept on a PUT as on a PATCH: the 2025-08-01 {@code Network} definition says an update only has to send them
+     * "if you want to change the value". {@code publicNetworkAccess} is merged on a PATCH and replaced on a PUT.
+     */
     private static PostgresState.Network updatedNetwork(JsonNode node, PostgresState.Network stored, boolean isPatch) {
         PostgresState.Network sent = network(node);
         if (sent == null) {
             return stored;
         }
-        if (!isPatch || stored == null) {
+        if (stored == null) {
             return sent;
         }
+        String publicAccess = sent.publicNetworkAccess() != null || !isPatch
+            ? sent.publicNetworkAccess() : stored.publicNetworkAccess();
         return new PostgresState.Network(
             sent.delegatedSubnetResourceId() != null ? sent.delegatedSubnetResourceId() : stored.delegatedSubnetResourceId(),
             sent.privateDnsZoneArmResourceId() != null
                 ? sent.privateDnsZoneArmResourceId() : stored.privateDnsZoneArmResourceId(),
-            sent.publicNetworkAccess() != null ? sent.publicNetworkAccess() : stored.publicNetworkAccess());
+            publicAccess);
     }
 
     /**
-     * {@code properties.network} as stored. A server created without one, or without {@code publicNetworkAccess},
-     * reads back public access on, which is what floci-az answered for every server before it stored the block.
+     * {@code properties.network} as stored. A server stored without {@code publicNetworkAccess} reads back public
+     * access off when it is integrated into a delegated subnet, since the 2025-08-01 spec supports public access
+     * "only for servers that are not integrated into a virtual network", and on otherwise, which is what floci-az
+     * answered for every server before it stored the block.
      */
     private static Map<String, Object> networkResponse(PostgresState.Network network) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -842,7 +850,11 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             putIfPresent(result, "privateDnsZoneArmResourceId", network.privateDnsZoneArmResourceId());
         }
         String publicAccess = network == null ? null : network.publicNetworkAccess();
-        result.put("publicNetworkAccess", publicAccess != null ? publicAccess : "Enabled");
+        if (publicAccess == null) {
+            boolean vnetIntegrated = network != null && network.delegatedSubnetResourceId() != null;
+            publicAccess = vnetIntegrated ? "Disabled" : "Enabled";
+        }
+        result.put("publicNetworkAccess", publicAccess);
         return result;
     }
 

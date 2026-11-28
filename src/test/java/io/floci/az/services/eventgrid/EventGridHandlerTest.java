@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +22,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -173,6 +177,132 @@ class EventGridHandlerTest {
             .then().statusCode(200)
             .body("key1", notNullValue())
             .body("key2", notNullValue());
+    }
+
+    @Test
+    @DisplayName("a topic with no settings answers the spec's defaults")
+    void aTopicWithNoSettingsAnswersTheDefaults() {
+        createTopic();
+        given().when().get(TOPIC_BASE + API)
+            .then().statusCode(200)
+            .body("properties.publicNetworkAccess", equalTo("Enabled"))
+            .body("properties.disableLocalAuth", equalTo(false))
+            .body("properties.inboundIpRules", hasSize(0))
+            .body("$", not(hasKey("identity")))
+            .body("$", not(hasKey("tags")));
+    }
+
+    @Test
+    @DisplayName("a topic PUT stores tags, identity, network access, local auth, IP rules and the schema mapping")
+    void everyTopicSettingRoundTrips() {
+        String body = "{\"location\":\"eastus\",\"tags\":{\"env\":\"dev\"},\"identity\":{\"type\":\"SystemAssigned\"},"
+                + "\"properties\":{\"inputSchema\":\"CustomEventSchema\",\"publicNetworkAccess\":\"Disabled\","
+                + "\"disableLocalAuth\":true,\"inboundIpRules\":[{\"ipMask\":\"10.0.0.0/16\",\"action\":\"Allow\"}],"
+                + "\"inputSchemaMapping\":{\"inputSchemaMappingType\":\"Json\",\"properties\":{"
+                + "\"subject\":{\"sourceField\":\"title\"},\"eventType\":{\"defaultValue\":\"Order\"}}}}}";
+        String principal = given().contentType("application/json").body(body)
+            .when().put(TOPIC_BASE + API)
+            .then().statusCode(201)
+            .body("identity.principalId", notNullValue())
+            .extract().path("identity.principalId");
+
+        given().when().get(TOPIC_BASE + API)
+            .then().statusCode(200)
+            .body("tags.env", equalTo("dev"))
+            .body("identity.type", equalTo("SystemAssigned"))
+            .body("identity.principalId", equalTo(principal))
+            .body("identity.tenantId", notNullValue())
+            .body("properties.publicNetworkAccess", equalTo("Disabled"))
+            .body("properties.disableLocalAuth", equalTo(true))
+            .body("properties.inboundIpRules[0].ipMask", equalTo("10.0.0.0/16"))
+            .body("properties.inboundIpRules[0].action", equalTo("Allow"))
+            .body("properties.inputSchemaMapping.inputSchemaMappingType", equalTo("Json"))
+            .body("properties.inputSchemaMapping.properties.subject.sourceField", equalTo("title"))
+            .body("properties.inputSchemaMapping.properties.eventType.defaultValue", equalTo("Order"));
+
+        given().contentType("application/json").body(body)
+            .when().put(TOPIC_BASE + API)
+            .then().statusCode(201)
+            .body("identity.principalId", equalTo(principal));
+
+        // Regenerating a key keeps every other setting.
+        given().contentType("application/json").body("{\"keyName\":\"key2\"}")
+            .when().post(TOPIC_BASE + "/regenerateKey" + API)
+            .then().statusCode(200);
+        given().when().get(TOPIC_BASE + API)
+            .then().statusCode(200)
+            .body("tags.env", equalTo("dev"))
+            .body("identity.principalId", equalTo(principal))
+            .body("properties.disableLocalAuth", equalTo(true));
+    }
+
+    @Test
+    @DisplayName("a topic PATCH merges what it sends and answers 201 with the topic")
+    void aPatchMergesOntoTheStoredTopic() {
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"tags\":{\"env\":\"dev\"},\"properties\":{\"disableLocalAuth\":true,"
+                    + "\"inboundIpRules\":[{\"ipMask\":\"10.0.0.1\",\"action\":\"Allow\"}]}}")
+            .when().put(TOPIC_BASE + API)
+            .then().statusCode(201);
+        String key1 = given().when().post(TOPIC_BASE + "/listKeys" + API).then().extract().path("key1");
+
+        // azurerm sends only what changed, always with a properties object.
+        given().contentType("application/json")
+            .body("{\"tags\":{\"env\":\"prod\"},\"properties\":{\"publicNetworkAccess\":\"Disabled\"}}")
+            .when().patch(TOPIC_BASE + API)
+            .then().statusCode(201)
+            .body("tags.env", equalTo("prod"))
+            .body("properties.provisioningState", equalTo("Succeeded"))
+            .body("properties.publicNetworkAccess", equalTo("Disabled"))
+            .body("properties.disableLocalAuth", equalTo(true))
+            .body("properties.inboundIpRules[0].ipMask", equalTo("10.0.0.1"));
+
+        given().contentType("application/json")
+            .body("{\"identity\":{\"type\":\"SystemAssigned\"},"
+                    + "\"properties\":{\"disableLocalAuth\":false,\"inboundIpRules\":[]}}")
+            .when().patch(TOPIC_BASE + API)
+            .then().statusCode(201);
+
+        given().when().get(TOPIC_BASE + API)
+            .then().statusCode(200)
+            .body("tags.env", equalTo("prod"))
+            .body("identity.type", equalTo("SystemAssigned"))
+            .body("properties.publicNetworkAccess", equalTo("Disabled"))
+            .body("properties.disableLocalAuth", equalTo(false))
+            .body("properties.inboundIpRules", hasSize(0))
+            .body("location", equalTo("eastus"));
+        given().when().post(TOPIC_BASE + "/listKeys" + API).then().body("key1", equalTo(key1));
+    }
+
+    @Test
+    @DisplayName("a topic's tags reach Resource Graph, so a tag filter finds it")
+    void aResourceGraphTagFilterFindsTheTopic() {
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"tags\":{\"env\":\"graph\"}}")
+            .when().put(TOPIC_BASE + API)
+            .then().statusCode(201);
+
+        given().contentType("application/json")
+            .body(Map.of("query", "resources | where type =~ 'Microsoft.EventGrid/topics' and tags.env == 'graph'"
+                    + " | project name, tags", "subscriptions", List.of(SUB)))
+            .when().post("/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01")
+            .then().statusCode(200)
+            .body("count", equalTo(1))
+            .body("data[0].name", equalTo(TOPIC))
+            .body("data[0].tags.env", equalTo("graph"));
+    }
+
+    @Test
+    @DisplayName("a PATCH of a missing topic is 404, and a misspelt identity type is refused")
+    void aPatchOfAMissingTopicIsNotFound() {
+        given().contentType("application/json").body("{\"tags\":{}}")
+            .when().patch(TOPIC_BASE + API)
+            .then().statusCode(404);
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"identity\":{\"type\":\"SystemAsigned\"}}")
+            .when().put(TOPIC_BASE + API)
+            .then().statusCode(400)
+            .body("error.code", equalTo("InvalidRequest"));
     }
 
     @Test
@@ -579,5 +709,25 @@ class EventGridHandlerTest {
         }
         assertTrue(!notifications.isEmpty(), "expected a delivered notification within the timeout");
         return notifications.get(0);
+    }
+
+    @Test
+    @DisplayName("The topics type segment matches in any case")
+    void theTopicsTypeSegmentMatchesInAnyCase() {
+        given()
+            .contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{}}")
+            .when().put("/subscriptions/" + SUB + "/resourceGroups/" + RG + "/providers/Microsoft.EventGrid/Topics/"
+                    + TOPIC + API)
+            .then().statusCode(201)
+            .body("name", equalTo(TOPIC))
+            .body("type", equalTo("Microsoft.EventGrid/topics"));
+
+        given().when().get(TOPIC_BASE + API)
+            .then().statusCode(200)
+            .body("name", equalTo(TOPIC));
+        given().when().get("/subscriptions/" + SUB + "/providers/Microsoft.EventGrid/TOPICS" + API)
+            .then().statusCode(200)
+            .body("value[0].name", equalTo(TOPIC));
     }
 }

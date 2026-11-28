@@ -17,6 +17,7 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
@@ -120,6 +121,21 @@ class ApiManagementDeletedServicesTest {
                 .then().statusCode(200)
                 .body("value.name", hasItem("orders"));
         given().when().get(DELETED + API).then().statusCode(404);
+    }
+
+    @Test
+    void aRestoreIgnoresTheOtherPropertiesItCarries() {
+        createService();
+        given().when().delete(SERVICE_ID + API).then().statusCode(200);
+
+        // "If this flag is specified and set to True all other properties will be ignored", identity included.
+        given().contentType("application/json")
+                .body("{\"location\":\"westus\",\"identity\":{\"type\":\"NotAType\"},"
+                        + "\"properties\":{\"restore\":true}}")
+                .when().put(SERVICE_ID + API)
+                .then().statusCode(200)
+                .body("properties.publisherName", equalTo("Contoso"))
+                .body("identity", nullValue());
     }
 
     @Test

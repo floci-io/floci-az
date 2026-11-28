@@ -1,6 +1,6 @@
 package io.floci.az.services.policyinsights;
 
-import io.floci.az.testing.RedisMockedProfile;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.ValidatableResponse;
@@ -20,7 +20,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
-@TestProfile(RedisMockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("Policy Insights: compliance states from evaluations and scans, queries, summaries, trigger evaluation")
 class PolicyInsightsTest {
 

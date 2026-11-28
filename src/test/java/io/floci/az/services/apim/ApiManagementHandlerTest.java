@@ -200,6 +200,114 @@ class ApiManagementHandlerTest {
     }
 
     @Test
+    void aSystemAssignedIdentityGetsAPrincipalThatARePutKeeps() {
+        String body = "{\"location\":\"westeurope\",\"identity\":{\"type\":\"SystemAssigned\"},"
+                + "\"tags\":{\"env\":\"dev\"},\"properties\":{\"publisherEmail\":\"a@b.c\",\"publisherName\":\"u\"}}";
+        String principal = given().contentType("application/json").body(body)
+                .when().put(SERVICE_ID + API)
+                .then().statusCode(200)
+                .body("identity.type", equalTo("SystemAssigned"))
+                .body("identity.principalId", notNullValue())
+                .body("identity.tenantId", notNullValue())
+                .body("identity", not(hasKey("userAssignedIdentities")))
+                .body("tags.env", equalTo("dev"))
+                .extract().path("identity.principalId");
+
+        given().contentType("application/json").body(body)
+                .when().put(SERVICE_ID + API)
+                .then().statusCode(200)
+                .body("identity.principalId", equalTo(principal));
+
+        given().when().get(SERVICE_ID + API)
+                .then().statusCode(200)
+                .body("identity.type", equalTo("SystemAssigned"))
+                .body("identity.principalId", equalTo(principal))
+                .body("tags.env", equalTo("dev"));
+    }
+
+    @Test
+    void aUserAssignedIdentityAnswersTheIdsOfTheManagedIdentity() {
+        String uami = "/subscriptions/" + SUB + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/apim-uami";
+        Map<String, String> ids = given().contentType("application/json").body("{\"location\":\"westeurope\"}")
+                .when().put(uami + "?api-version=2024-11-30")
+                .then().statusCode(anyOf(is(200), is(201)))
+                .extract().path("properties");
+
+        given().contentType("application/json")
+                .body("{\"location\":\"westeurope\",\"identity\":{\"type\":\"SystemAssigned, UserAssigned\","
+                        + "\"userAssignedIdentities\":{\"" + uami + "\":{}}},"
+                        + "\"properties\":{\"publisherEmail\":\"a@b.c\",\"publisherName\":\"u\"}}")
+                .when().put(SERVICE_ID + API)
+                .then().statusCode(200)
+                .body("identity.type", equalTo("SystemAssigned, UserAssigned"))
+                .body("identity.principalId", notNullValue())
+                .body("identity.userAssignedIdentities.'" + uami + "'.principalId", equalTo(ids.get("principalId")))
+                .body("identity.userAssignedIdentities.'" + uami + "'.clientId", equalTo(ids.get("clientId")));
+    }
+
+    @Test
+    void anIdentityOfNoneIsNoIdentityAndAMisspeltTypeIsRefused() {
+        given().contentType("application/json")
+                .body("{\"location\":\"westeurope\",\"identity\":{\"type\":\"None\"}}")
+                .when().put(SERVICE_ID + API)
+                .then().statusCode(200)
+                .body("$", not(hasKey("identity")));
+
+        given().contentType("application/json")
+                .body("{\"location\":\"westeurope\",\"identity\":{\"type\":\"SystemAssignd\"}}")
+                .when().put(SERVICE_ID + API)
+                .then().statusCode(400)
+                .body("error.code", equalTo("ValidationError"));
+    }
+
+    @Test
+    void aPatchMergesTagsAndIdentityOntoTheStoredService() {
+        given().contentType("application/json")
+                .body("{\"location\":\"westeurope\",\"identity\":{\"type\":\"SystemAssigned\"},"
+                        + "\"tags\":{\"env\":\"dev\"},\"sku\":{\"name\":\"Developer\",\"capacity\":1},"
+                        + "\"properties\":{\"publisherEmail\":\"a@b.c\",\"publisherName\":\"unit\"}}")
+                .when().put(SERVICE_ID + API)
+                .then().statusCode(200);
+        String principal = given().when().get(SERVICE_ID + API).then().extract().path("identity.principalId");
+        String etag = given().when().get(SERVICE_ID + API).then().extract().path("etag");
+
+        // azurerm sends only what changed, always with a properties object.
+        given().contentType("application/json")
+                .body("{\"tags\":{\"env\":\"prod\",\"team\":\"api\"},\"properties\":{}}")
+                .when().patch(SERVICE_ID + API)
+                .then().statusCode(200)
+                .body("tags.env", equalTo("prod"))
+                .body("tags.team", equalTo("api"))
+                .body("identity.principalId", equalTo(principal))
+                .body("properties.publisherName", equalTo("unit"))
+                .body("properties.provisioningState", equalTo("Succeeded"))
+                .body("sku.name", equalTo("Developer"))
+                .body("location", equalTo("westeurope"))
+                .body("etag", not(equalTo(etag)));
+
+        given().contentType("application/json")
+                .body("{\"identity\":{\"type\":\"None\"},\"properties\":{\"publisherName\":\"renamed\"}}")
+                .when().patch(SERVICE_ID + API)
+                .then().statusCode(200);
+
+        given().when().get(SERVICE_ID + API)
+                .then().statusCode(200)
+                .body("$", not(hasKey("identity")))
+                .body("tags.env", equalTo("prod"))
+                .body("properties.publisherName", equalTo("renamed"))
+                .body("properties.publisherEmail", equalTo("a@b.c"));
+    }
+
+    @Test
+    void aPatchOfAMissingServiceIsNotFound() {
+        given().contentType("application/json").body("{\"tags\":{}}")
+                .when().patch(SERVICE_ID + API)
+                .then().statusCode(404)
+                .body("error.code", equalTo("ResourceNotFound"));
+    }
+
+    @Test
     void deletingAndPurgingTheServiceRemovesItsChildren() {
         createService();
         createApi("orders", "orders", true);
@@ -884,5 +992,29 @@ class ApiManagementHandlerTest {
     private static String outboundLayer(String scope) {
         return "<set-header name=\"X-Scope\" exists-action=\"override\"><value>" + scope + "</value></set-header>"
                 + "<set-header name=\"X-Trail\" exists-action=\"append\"><value>" + scope + "</value></set-header>";
+    }
+
+    @Test
+    void serviceAndChildTypeSegmentsMatchInAnyCase() {
+        String lowered = "/subscriptions/" + SUB + "/resourceGroups/" + RG + "/providers/Microsoft.ApiManagement/SERVICE/"
+                + SERVICE;
+        given().contentType("application/json")
+                .body("{\"location\":\"westeurope\",\"properties\":{\"publisherEmail\":\"a@b.c\","
+                        + "\"publisherName\":\"unit\"}}")
+                .when().put(lowered + API)
+                .then().statusCode(200)
+                .body("name", equalTo(SERVICE));
+        given().contentType("application/json")
+                .body("{\"properties\":{\"displayName\":\"lower\",\"path\":\"lower\"}}")
+                .when().put(lowered + "/APIS/lower-api" + API)
+                .then().statusCode(200);
+
+        given().when().get(SERVICE_ID + API).then().statusCode(200).body("name", equalTo(SERVICE));
+        given().when().get(SERVICE_ID + "/apis/lower-api" + API).then().statusCode(200)
+                .body("name", equalTo("lower-api"));
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
+                        + "/providers/Microsoft.ApiManagement/service" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1));
     }
 }

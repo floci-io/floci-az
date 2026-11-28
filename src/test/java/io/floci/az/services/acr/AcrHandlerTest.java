@@ -1,6 +1,6 @@
 package io.floci.az.services.acr;
 
-import io.floci.az.testing.AcrMockedProfile;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * <p>Always runs in mocked mode (no registry container) regardless of the default in application.yml.
  */
 @QuarkusTest
-@TestProfile(AcrMockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 public class AcrHandlerTest {
 
     private static final String SUB = "00000000-0000-0000-0000-000000000001";
@@ -235,5 +235,29 @@ public class AcrHandlerTest {
         given().when().get("/subscriptions/" + SUB + "/resources?api-version=2021-04-01")
                 .then().statusCode(200)
                 .body("value.find { it.name == 'acridx' }.type", is("Microsoft.ContainerRegistry/registries"));
+    }
+
+    @Test
+    void typeAndResourceGroupSegmentsMatchInAnyCase() {
+        String lowered = "/subscriptions/" + SUB + "/resourcegroups/" + RG + "/providers/Microsoft.ContainerRegistry";
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"sku\":{\"name\":\"Basic\"}}")
+                .when().put(lowered + "/REGISTRIES/acrlower" + API)
+                .then().statusCode(201)
+                .body("name", is("acrlower"))
+                .body("type", is("Microsoft.ContainerRegistry/registries"));
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"sku\":{\"name\":\"Basic\"}}")
+                .when().put("/subscriptions/" + SUB + "/resourceGroups/other-rg/providers/Microsoft.ContainerRegistry"
+                        + "/registries/acrother" + API)
+                .then().statusCode(201);
+
+        given().when().get(registry("acrlower") + API)
+                .then().statusCode(200)
+                .body("name", is("acrlower"));
+        given().when().get(lowered + "/registries" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", is("acrlower"));
     }
 }

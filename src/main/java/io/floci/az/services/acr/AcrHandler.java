@@ -201,7 +201,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         }
 
         // ── LIST all registries in subscription ────────────────────────────
-        if (tail.equalsIgnoreCase("registries") && !fullPath.contains("/resourceGroups/")) {
+        if (tail.equalsIgnoreCase("registries") && !ArmPaths.containsIgnoreCase(fullPath, "/resourceGroups/")) {
             return handleListSubscription(fullPath);
         }
 
@@ -211,29 +211,29 @@ public class AcrHandler implements AzureServiceHandler, Resettable, StoreIndexSo
         }
 
         // ── Credential actions ─────────────────────────────────────────────
-        if (tail.matches("registries/[^/]+/listCredentials") && "POST".equals(method)) {
+        if (tail.matches("(?i:registries)/[^/]+/listCredentials") && "POST".equals(method)) {
             return handleListCredentials(extractSubscriptionId(fullPath), extractResourceGroup(fullPath),
                     segment(tail, 1));
         }
-        if (tail.matches("registries/[^/]+/regenerateCredential") && "POST".equals(method)) {
+        if (tail.matches("(?i:registries)/[^/]+/regenerateCredential") && "POST".equals(method)) {
             return handleRegenerateCredential(extractSubscriptionId(fullPath), extractResourceGroup(fullPath),
                     segment(tail, 1), req);
         }
-        if (tail.matches("registries/[^/]+/listUsages")) {
+        if (tail.matches("(?i:registries)/[^/]+/listUsages")) {
             return handleListUsages(extractSubscriptionId(fullPath), extractResourceGroup(fullPath),
                     segment(tail, 1));
         }
-        if (tail.matches("registries/[^/]+/importImage") && "POST".equals(method)) {
+        if (tail.matches("(?i:registries)/[^/]+/importImage") && "POST".equals(method)) {
             // Image import is a no-op stub: accept and report success.
             return Response.status(202).build();
         }
-        if (tail.matches("registries/[^/]+/replications")) {
+        if (tail.matches("(?i:registries)/[^/]+/(?i:replications)")) {
             // The azurerm provider lists geo-replications during Read; the emulator has none.
             return Response.ok(Map.of("value", List.of())).type("application/json").build();
         }
 
         // ── Single registry CRUD ───────────────────────────────────────────
-        if (tail.matches("registries/[^/]+")) {
+        if (tail.matches("(?i:registries)/[^/]+")) {
             String registryName = segment(tail, 1);
             String sub = extractSubscriptionId(fullPath);
             String rg = extractResourceGroup(fullPath);

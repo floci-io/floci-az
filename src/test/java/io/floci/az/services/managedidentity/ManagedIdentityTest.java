@@ -522,4 +522,48 @@ class ManagedIdentityTest {
                 .then().statusCode(405)
                 .body("error", equalTo("method_not_allowed"));
     }
+
+    @Test
+    void typeSegmentsMatchInAnyCase() {
+        String lowered = "/subscriptions/" + SUB + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ManagedIdentity/userassignedidentities";
+        given().contentType("application/json").body("{\"location\": \"eastus\"}")
+                .when().put(lowered + "/id-lower" + API)
+                .then().statusCode(201)
+                .body("name", equalTo("id-lower"))
+                .body("type", equalTo("Microsoft.ManagedIdentity/userAssignedIdentities"));
+
+        String ficBody = """
+                {"properties": {"issuer": "https://token.actions.githubusercontent.com",
+                                "subject": "repo:org/repo:ref:refs/heads/main",
+                                "audiences": ["api://AzureADTokenExchange"]}}
+                """;
+        given().contentType("application/json").body(ficBody)
+                .when().put(lowered + "/id-lower/federatedidentitycredentials/fic-lower" + API)
+                .then().statusCode(201)
+                .body("name", equalTo("fic-lower"));
+
+        given().when().get(BASE + "/id-lower" + API)
+                .then().statusCode(200)
+                .body("name", equalTo("id-lower"));
+        given().when().get(BASE + "/id-lower/federatedIdentityCredentials" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", equalTo("fic-lower"));
+    }
+
+    @Test
+    void anIdentityNamedLikeTheCredentialTypeIsStillAnIdentity() {
+        given().contentType("application/json").body("{\"location\": \"eastus\"}")
+                .when().put(BASE + "/federatedidentitycredentials" + API)
+                .then().statusCode(201)
+                .body("name", equalTo("federatedidentitycredentials"))
+                .body("type", equalTo("Microsoft.ManagedIdentity/userAssignedIdentities"));
+
+        given().when().get(BASE + "/federatedidentitycredentials" + API)
+                .then().statusCode(200)
+                .body("name", equalTo("federatedidentitycredentials"));
+        given().when().delete(BASE + "/federatedidentitycredentials" + API)
+                .then().statusCode(200);
+    }
 }

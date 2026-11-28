@@ -1,6 +1,6 @@
 package io.floci.az.services.postgres;
 
-import io.floci.az.testing.PostgresMockedProfile;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,7 +18,7 @@ import static org.hamcrest.Matchers.*;
  * without Docker.
  */
 @QuarkusTest
-@TestProfile(PostgresMockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("PostgresHandler — mocked mode (no Docker)")
 @SuppressWarnings("unused")
 class PostgresHandlerMockedTest {
@@ -50,7 +50,7 @@ class PostgresHandlerMockedTest {
     }
 
     @Test
-    @DisplayName("network reads back what the PUT set, PATCH merges it, and a server created without one is public")
+    @DisplayName("network reads back what was set, an update keeps the VNet ids it omits, and a server created without one is public")
     void networkReadsBackWhatWasSet() {
         createServer("pgpublic");
         given().when().get(BASE + "/flexibleServers/pgpublic" + API)
@@ -86,7 +86,7 @@ class PostgresHandlerMockedTest {
             .body("properties.network.privateDnsZoneArmResourceId", equalTo(zone))
             .body("properties.network.publicNetworkAccess", equalTo("Enabled"));
 
-        // A PUT replaces the network: the ids it leaves out are gone, unlike a PATCH.
+        // An update only sends the VNet ids to change them, so a PUT that leaves them out keeps them.
         given().contentType("application/json")
             .body(SERVER_BODY.replace("\"version\":\"16\",",
                 "\"version\":\"16\",\"network\":{\"publicNetworkAccess\":\"Disabled\"},"))
@@ -95,8 +95,24 @@ class PostgresHandlerMockedTest {
         given().when().get(BASE + "/flexibleServers/pgvnet" + API)
             .then().statusCode(200)
             .body("properties.network.publicNetworkAccess", equalTo("Disabled"))
-            .body("properties.network", not(hasKey("delegatedSubnetResourceId")))
-            .body("properties.network", not(hasKey("privateDnsZoneArmResourceId")));
+            .body("properties.network.delegatedSubnetResourceId", equalTo(subnet))
+            .body("properties.network.privateDnsZoneArmResourceId", equalTo(zone));
+    }
+
+    @Test
+    @DisplayName("a server in a delegated subnet created without publicNetworkAccess reads back public access Disabled")
+    void delegatedSubnetServerDefaultsPublicAccessDisabled() {
+        String subnet = "/subscriptions/" + SUB + "/resourceGroups/" + RG
+            + "/providers/Microsoft.Network/virtualNetworks/vnet/subnets/pgdefault";
+        String vnetBody = SERVER_BODY.replace("\"version\":\"16\",", "\"version\":\"16\",\"network\":{"
+            + "\"delegatedSubnetResourceId\":\"" + subnet + "\"},");
+        given().contentType("application/json").body(vnetBody)
+            .when().put(BASE + "/flexibleServers/pgvnetdefault" + API)
+            .then().statusCode(202);
+        given().when().get(BASE + "/flexibleServers/pgvnetdefault" + API)
+            .then().statusCode(200)
+            .body("properties.network.delegatedSubnetResourceId", equalTo(subnet))
+            .body("properties.network.publicNetworkAccess", equalTo("Disabled"));
     }
 
     @Test

@@ -156,6 +156,13 @@ setup() {
     assert_output --partial "https://127.0.0.1:1/eventgrid"
 }
 
+@test "Terraform: event grid topic reads back its tags and local auth setting" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.EventGrid/topics/floci-test-egtopic"
+    assert_success
+    assert_output --partial '"env":"compat"'
+    assert_output --partial '"disableLocalAuth":true'
+}
+
 @test "Terraform: a plan after apply leaves the event grid topic and subscription unchanged" {
     cd "$TF_DIR"
     run terraform plan -input=false -no-color -detailed-exitcode \
