@@ -126,7 +126,8 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             }
         } else if (path.startsWith("Tables")) {
             if ("GET".equalsIgnoreCase(method)) {
-                response = listTables(request);
+                String tableName = extractTableNameFromTablesPath(path);
+                response = tableName.isEmpty() ? listTables(request) : getTable(request, tableName);
             } else if ("POST".equalsIgnoreCase(method)) {
                 response = mutate(() -> createTable(request));
             } else if ("DELETE".equalsIgnoreCase(method)) {
@@ -273,13 +274,37 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             // Azure table names "preserve the case with which they were created, but are case-insensitive when
             // used": the key is lowercase, and the record keeps the created spelling for Query Tables.
             store.put(key, new StoredObject(req.TableName(), new byte[0], Map.of(), Instant.EPOCH, ""));
+            // Create Table honours Prefer as Insert Entity does: return-no-content answers 204, which is what
+            // azurerm's azurerm_storage_table asks for and accepts.
+            String prefer = request.headers().getHeaderString("Prefer");
+            if ("return-no-content".equalsIgnoreCase(prefer != null ? prefer.trim() : "")) {
+                return Response.noContent()
+                        .header("Preference-Applied", "return-no-content")
+                        .build();
+            }
             return Response.status(Response.Status.CREATED)
                     .type(MediaType.APPLICATION_JSON)
                     .entity(new TableModel.TableItem(req.TableName()))
+                    .header("Preference-Applied", "return-content")
                     .build();
         } catch (IOException e) {
             return Response.serverError().build();
         }
+    }
+
+    /**
+     * Query Tables for one table, {@code GET /Tables('name')}: the table in the spelling it was created with, or
+     * {@code 404 ResourceNotFound} when there is none, as Azure and Azurite answer. azurerm reads it to check that
+     * an {@code azurerm_storage_table} does not exist before creating it, and on every refresh.
+     */
+    private Response getTable(AzureRequest request, String tableName) {
+        return store.get(nsKey(request.accountName(), tableName))
+                .map(record -> Response.ok(new TableModel.TableItem(
+                                record.key() == null || record.key().isEmpty() ? tableName : record.key()))
+                        .type(MediaType.APPLICATION_JSON)
+                        .build())
+                .orElseGet(() -> new AzureErrorResponse("ResourceNotFound", "The specified resource does not exist.")
+                        .toODataResponse(Response.Status.NOT_FOUND.getStatusCode()));
     }
 
     private Response listTables(AzureRequest request) {

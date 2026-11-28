@@ -11,7 +11,7 @@ authentication.
 
 ## Features
 
-- **Tables**: Create, Delete, List; duplicate create returns `409 TableAlreadyExists`. Table names are case-insensitive, as on Azure: `MyTable` and `mytable` are one table, listed in the spelling it was created with
+- **Tables**: Create (`201` with the table, or `204` under `Prefer: return-no-content`), Delete, List, and Query one table (`GET /Tables('name')`, `404 ResourceNotFound` when it does not exist, which azurerm's `azurerm_storage_table` relies on); duplicate create returns `409 TableAlreadyExists`. Table names are case-insensitive, as on Azure: `MyTable` and `mytable` are one table, listed in the spelling it was created with
 - **Entities**: Insert, Update (replace/merge), Upsert, Delete, Get by
   `PartitionKey` + `RowKey`; missing entity returns the Azure `404 ResourceNotFound` shape, and
   any entity operation or `$batch` change against a table that was never created (or was deleted)

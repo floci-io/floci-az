@@ -17,6 +17,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
@@ -79,6 +80,62 @@ public class TableServiceTest {
             .statusCode(200)
             .header("Content-Type", startsWith("application/json"))
             .body("value.TableName", hasItem("mytable"));
+    }
+
+    @Test
+    void creatingATableHonoursPrefer() {
+        given()
+            .contentType("application/json")
+            .header("Prefer", "return-no-content")
+            .body("{\"TableName\":\"Quiet\"}")
+            .when().post("/{account}/Tables", ACCOUNT)
+            .then()
+            .statusCode(204)
+            .header("Preference-Applied", "return-no-content");
+        given()
+            .contentType("application/json")
+            .header("Prefer", "return-content")
+            .body("{\"TableName\":\"Loud\"}")
+            .when().post("/{account}/Tables", ACCOUNT)
+            .then()
+            .statusCode(201)
+            .header("Preference-Applied", "return-content")
+            .body("TableName", equalTo("Loud"));
+        given()
+            .when().get("/{account}/Tables('Quiet')", ACCOUNT)
+            .then().statusCode(200).body("TableName", equalTo("Quiet"));
+    }
+
+    @Test
+    void queryingOneTableAnswersItOrNotFound() {
+        given()
+            .when().get("/{account}/Tables('NotYet')", ACCOUNT)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "ResourceNotFound")
+            .body("'odata.error'.code", equalTo("ResourceNotFound"));
+
+        createTable("AuditEvents");
+        createTable("Other");
+
+        given()
+            .when().get("/{account}/Tables('AuditEvents')", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .header("Content-Type", startsWith("application/json"))
+            .body("TableName", equalTo("AuditEvents"))
+            .body("value", nullValue());
+        // Table names are case-insensitive when used, and keep the spelling they were created with.
+        given()
+            .when().get("/{account}/Tables('auditevents')", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .body("TableName", equalTo("AuditEvents"));
+        given()
+            .when().get("/{account}/Tables", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .body("value.TableName", hasItems("AuditEvents", "Other"));
     }
 
     // The JSON error path carries the same crash class: the Azure SDK for C++ calls json::parse on the
