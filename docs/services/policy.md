@@ -198,7 +198,7 @@ receives a PATCH.
    narrow them, and an unexpired exemption for the assignment (matching the reference id when it names
    one) removes it. An exemption's `userPrincipalId` and `groupPrincipalId` selectors exempt a caller
    rather than a resource: they are matched against the `oid` and the `groups` claim of the request's
-   bearer token.
+   bearer token. On an assignment these two kinds select nothing.
 2. Each assigned definition, or each member of an assigned set definition, has its parameters resolved
    (assignment values, then set-definition values, then declared defaults) and its effect resolved:
    an `overrides` entry of kind `policyEffect` wins over the definition's `then.effect`, which may

@@ -40,6 +40,7 @@ public class PolicyEngine {
 
     private static final String MANAGEMENT_GROUPS = "providers/microsoft.management/managementgroups/";
     private static final String RESOURCE_GROUP_TYPE = "Microsoft.Resources/subscriptions/resourceGroups";
+    private static final Set<String> IDENTITY_SELECTORS = Set.of("userprincipalid", "groupprincipalid");
 
     /**
      * Request-time facts the rule hands the engine.
@@ -209,7 +210,7 @@ public class PolicyEngine {
                         || (request.tagsOnly() && !inspectsTags(candidate, base))) {
                     continue;
                 }
-                if (isExempt(candidate, resourceKey, content, resourceType, request.identity())) {
+                if (isExempt(candidate, resourceKey, content, resourceType, request.readOnly() ? null : request.identity())) {
                     evaluations.add(evaluation(candidate, false, true));
                     continue;
                 }
@@ -285,7 +286,7 @@ public class PolicyEngine {
             }
         }
         // The identity selectors belong to exemptions: on an assignment they select nothing.
-        return selectorsAdmit(properties(assignment).get("resourceSelectors"), content, resourceType, Map.of());
+        return selectorsAdmit(properties(assignment).get("resourceSelectors"), content, resourceType, null);
     }
 
     /** A scope covers a resource at or below it; a management group covers every subscription (no hierarchy). */
@@ -299,7 +300,12 @@ public class PolicyEngine {
         return resourceKey.equals(scopeKey) || resourceKey.startsWith(scopeKey + "/");
     }
 
-    /** Resource selectors admit a resource when any selector set matches it in full; none means all resources. */
+    /**
+     * Resource selectors admit a resource when any selector set matches it in full; none means all resources.
+     *
+     * @param identity the caller's claims, or null when there is no caller to exempt: an identity selector then
+     *                 matches nothing, whichever of {@code in} and {@code notIn} it uses
+     */
     static boolean selectorsAdmit(Object resourceSelectors, Map<String, Object> content, String resourceType,
                                   Map<String, Object> identity) {
         if (!(resourceSelectors instanceof List<?> sets) || sets.isEmpty()) {
@@ -332,6 +338,9 @@ public class PolicyEngine {
         String kind = String.valueOf(ResourceFields.get(selector, "kind")).toLowerCase(Locale.ROOT);
         Object in = ResourceFields.get(selector, "in");
         Object notIn = ResourceFields.get(selector, "notIn");
+        if (identity == null && IDENTITY_SELECTORS.contains(kind)) {
+            return false;
+        }
         Object subject = switch (kind) {
             case "resourcelocation" -> ResourceFields.normalizeLocation(content.get("location"));
             case "resourcetype" -> resourceType;

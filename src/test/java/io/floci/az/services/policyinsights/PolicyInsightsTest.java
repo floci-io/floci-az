@@ -166,6 +166,25 @@ class PolicyInsightsTest {
     }
 
     @Test
+    void scansApplyNoIdentityExemption() {
+        storageAccount("weaksa", "TLS1_0");
+
+        for (String selector : List.of(
+                "{\"kind\": \"userPrincipalId\", \"in\": [\"user-1\"]}", "{\"kind\": \"userPrincipalId\", \"notIn\": [\"user-1\"]}",
+                "{\"kind\": \"groupPrincipalId\", \"in\": [\"group-1\"]}", "{\"kind\": \"groupPrincipalId\", \"notIn\": [\"group-1\"]}")) {
+            given().contentType("application/json")
+                    .body("{\"properties\": {\"policyAssignmentId\": \"" + ASSIGNMENT + "\", \"exemptionCategory\": \"Waiver\","
+                            + " \"resourceSelectors\": [{\"name\": \"callers\", \"selectors\": [" + selector + "]}]}}")
+                    .when().put(RG_SCOPE + AUTH + "/policyExemptions/callers?api-version=2022-07-01-preview")
+                    .then().statusCode(isOneOf(200, 201));
+            given().when().post(RG_SCOPE + "/providers/Microsoft.PolicyInsights/policyStates/latest/triggerEvaluation" + INSIGHTS_API)
+                    .then().statusCode(202);
+            query(RG_SCOPE + "/providers/Microsoft.Storage/storageAccounts/weaksa", "").statusCode(200)
+                    .body("'@odata.count'", equalTo(1)).body("value[0].complianceState", equalTo("NonCompliant"));
+        }
+    }
+
+    @Test
     void scansReadTheFullResourceBody() {
         // A Redis cache's index entry carries no properties; the scan must read the cache itself.
         String cache = nonSslCache();
