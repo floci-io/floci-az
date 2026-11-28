@@ -25,14 +25,20 @@ public final class ApiManagementModels {
      * One API Management service, as its PUT stored it.
      *
      * @param id         the ARM id, in the casing of the request that created the service
+     * @param tags       the tags the request sent, or null when no write has sent any
+     * @param identity   the managed identity, as {@code ArmIdentities} resolved it, or null for none
      * @param properties the service properties, defaults included
      * @param sku        the SKU the request sent, or the default one
      */
     @RegisterForReflection
-    public record ApimService(String id, String name, String location, String etag,
-                              Map<String, Object> properties, Map<String, Object> sku) {
+    public record ApimService(String id, String name, String location, String etag, Map<String, Object> tags,
+                              Map<String, Object> identity, Map<String, Object> properties, Map<String, Object> sku) {
 
-        /** The ARM body: the same fields, in the order the service has always answered with. */
+        /**
+         * The ARM body: the same fields, in the order the service has always answered with. {@code tags} and
+         * {@code identity} appear only when the service has them, so a service stored before they were kept answers
+         * as it did.
+         */
         public Map<String, Object> toArm() {
             Map<String, Object> resource = new LinkedHashMap<>();
             resource.put("id", id);
@@ -41,9 +47,15 @@ public final class ApiManagementModels {
             if (location != null) {
                 resource.put("location", location);
             }
+            if (tags != null) {
+                resource.put("tags", tags);
+            }
             resource.put("etag", etag);
             resource.put("properties", properties);
             resource.put("sku", sku);
+            if (identity != null) {
+                resource.put("identity", identity);
+            }
             return resource;
         }
     }

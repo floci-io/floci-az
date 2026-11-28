@@ -14,8 +14,12 @@ in-process.
 
 ## Supported
 
-- **Management service** resources: create, get, list (by resource group and across the subscription), delete, and
-  `checkNameAvailability`.
+- **Management service** resources: create, get, update (`PATCH`), list (by resource group and across the
+  subscription), delete, and `checkNameAvailability`. A service keeps its `tags` and its managed `identity`.
+  A `SystemAssigned` identity gets a `principalId`, kept across later writes, and the `tenantId`; each entry of
+  `userAssignedIdentities` answers the `principalId` and `clientId` of that Managed Identity resource. A `PATCH`
+  replaces the tags, identity, SKU fields and properties it sends and keeps the rest, and answers `200` with the
+  service at once, which the long-running-operation pollers of the SDKs and azurerm read as finished.
 - **API** resources: create, get, list, delete.
 - **Operation** resources: create, get, list, delete.
 - **Policy** resources at service, product, API, and operation scope. The gateway applies them in that order; a product policy applies to a request made with a subscription key of that product, and goes when the product is deleted.
