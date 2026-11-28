@@ -40,4 +40,14 @@ public final class MonitorModels {
     @RegisterForReflection
     public record DeletedWorkspace(String id, Instant deletedAt, MonitorResource workspace) {
     }
+
+    /**
+     * An Application Insights component's billing features ({@code .../components/{name}/currentbillingfeatures}).
+     *
+     * @param id       the record's key, the component id with {@code /currentbillingfeatures} appended
+     * @param features the document {@code ComponentCurrentBillingFeatures_Get} answers with
+     */
+    @RegisterForReflection
+    public record BillingFeatures(String id, Map<String, Object> features) {
+    }
 }

@@ -68,6 +68,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Devices/IotHubs/eventHubEndpoints/ConsumerGroups                     RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.EventGrid/eventSubscriptions                                         EXTENSION       OPTIONAL  PROVIDER_SERVICE
         Microsoft.EventGrid/topics                                                     RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
+        Microsoft.Insights/components                                                  RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.Insights/dataCollectionEndpoints                                     RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.Insights/dataCollectionRules                                         RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.Insights/diagnosticSettings                                          EXTENSION       OPTIONAL  PROVIDER_SERVICE

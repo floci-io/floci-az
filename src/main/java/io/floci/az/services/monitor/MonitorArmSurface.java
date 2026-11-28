@@ -22,8 +22,8 @@ public class MonitorArmSurface implements ArmSurfaceProvider {
     /**
      * The {@code workspaceName} parameter of {@code Workspaces_CreateOrUpdate} (the same at 2022-10-01, 2023-09-01
      * and 2025-07-01): 4 to 63 letters, digits and hyphens, starting and ending with a letter or digit, as
-     * {@code resource-name-rules.md} says too. Neither source gives a rule for data collection endpoints, rules or
-     * diagnostic settings, so they declare none.
+     * {@code resource-name-rules.md} says too. Neither source gives a rule for data collection endpoints, rules,
+     * diagnostic settings or Application Insights components, so they declare none.
      */
     static final NameRule WORKSPACE_NAME = new NameRule(4, 63, Pattern.compile("[A-Za-z0-9][A-Za-z0-9-]+[A-Za-z0-9]"),
         "InvalidResourceName",
@@ -34,6 +34,7 @@ public class MonitorArmSurface implements ArmSurfaceProvider {
         new ArmSurface(INSIGHTS, ArmLane.PROVIDER_SERVICE, List.of(
             ArmResourceType.resourceGroup(INSIGHTS, "dataCollectionEndpoints", LocationPolicy.REQUIRED),
             ArmResourceType.resourceGroup(INSIGHTS, "dataCollectionRules", LocationPolicy.REQUIRED),
+            ArmResourceType.resourceGroup(INSIGHTS, "components", LocationPolicy.REQUIRED),
             new ArmResourceType(INSIGHTS, "diagnosticSettings", ArmScopeKind.EXTENSION, LocationPolicy.OPTIONAL))),
         new ArmSurface(OPERATIONAL_INSIGHTS, ArmLane.PROVIDER_SERVICE, List.of(
             ArmResourceType.resourceGroup(OPERATIONAL_INSIGHTS, "workspaces", LocationPolicy.REQUIRED)

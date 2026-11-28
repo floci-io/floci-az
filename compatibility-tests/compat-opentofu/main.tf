@@ -777,3 +777,48 @@ resource "azurerm_iothub_consumer_group" "iothub_cg" {
 output "iothub_consumer_group_id" {
   value = azurerm_iothub_consumer_group.iothub_cg.id
 }
+
+# A Linux function app on a consumption plan, with a system-assigned identity and the Application
+# Insights component it reports to. azurerm reads the app back through its config documents,
+# publishing credentials and basic auth policies, and the component through its billing features;
+# a plan after apply checks that both read back what was sent.
+resource "azurerm_service_plan" "func" {
+  name                = "floci-test-func-plan"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  os_type             = "Linux"
+  sku_name            = "Y1"
+}
+
+resource "azurerm_application_insights" "appi" {
+  name                 = "floci-test-appi"
+  location             = azurerm_resource_group.rg.location
+  resource_group_name  = azurerm_resource_group.rg.name
+  application_type     = "web"
+  daily_data_cap_in_gb = 5
+}
+
+resource "azurerm_linux_function_app" "func" {
+  name                       = "floci-test-func"
+  resource_group_name        = azurerm_resource_group.rg.name
+  location                   = azurerm_resource_group.rg.location
+  service_plan_id            = azurerm_service_plan.func.id
+  storage_account_name       = azurerm_storage_account.sa.name
+  storage_account_access_key = azurerm_storage_account.sa.primary_access_key
+
+  app_settings = {
+    FLOCI_TEST_MODE = "compat"
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  site_config {
+    application_insights_connection_string = azurerm_application_insights.appi.connection_string
+
+    application_stack {
+      python_version = "3.11"
+    }
+  }
+}
