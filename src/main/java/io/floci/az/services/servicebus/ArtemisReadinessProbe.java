@@ -43,6 +43,26 @@ public final class ArtemisReadinessProbe {
     record Timing(long attemptMillis, long retryPauseMillis) {
     }
 
+    /** The clock and the pause the probe uses, so tests can run the deadline logic on virtual time. */
+    interface Ticker {
+        /** The real monotonic clock and {@link Thread#sleep(long)}. */
+        Ticker SYSTEM = new Ticker() {
+            @Override
+            public long nanoTime() {
+                return System.nanoTime();
+            }
+
+            @Override
+            public void sleep(long millis) throws InterruptedException {
+                Thread.sleep(millis);
+            }
+        };
+
+        long nanoTime();
+
+        void sleep(long millis) throws InterruptedException;
+    }
+
     private ArtemisReadinessProbe() {
     }
 
@@ -53,7 +73,12 @@ public final class ArtemisReadinessProbe {
 
     /** {@link #awaitAmqp(EndpointInfo, int)} with a sub-second budget, so tests need not wait out whole seconds. */
     static void awaitAmqp(EndpointInfo endpoint, Duration timeout, Timing timing) {
-        await(endpoint, "AMQP", timeout, timing, ArtemisReadinessProbe::exchangeProtocolHeader);
+        awaitAmqp(endpoint, timeout, timing, Ticker.SYSTEM);
+    }
+
+    /** {@link #awaitAmqp(EndpointInfo, Duration, Timing)} measuring the budget with {@code ticker}. */
+    static void awaitAmqp(EndpointInfo endpoint, Duration timeout, Timing timing, Ticker ticker) {
+        await(endpoint, "AMQP", timeout, timing, ticker, ArtemisReadinessProbe::exchangeProtocolHeader);
     }
 
     /**
@@ -66,8 +91,13 @@ public final class ArtemisReadinessProbe {
 
     /** {@link #awaitAmqps(EndpointInfo, String, int)} with a sub-second budget, for tests. */
     static void awaitAmqps(EndpointInfo endpoint, String certPem, Duration timeout, Timing timing) {
+        awaitAmqps(endpoint, certPem, timeout, timing, Ticker.SYSTEM);
+    }
+
+    /** {@link #awaitAmqps(EndpointInfo, String, Duration, Timing)} measuring the budget with {@code ticker}. */
+    static void awaitAmqps(EndpointInfo endpoint, String certPem, Duration timeout, Timing timing, Ticker ticker) {
         SSLSocketFactory factory = trusting(certPem);
-        await(endpoint, "AMQPS", timeout, timing, socket -> {
+        await(endpoint, "AMQPS", timeout, timing, ticker, socket -> {
             try (SSLSocket tls = (SSLSocket) factory.createSocket(
                     socket, endpoint.host(), endpoint.port(), false)) {
                 tls.startHandshake();
@@ -81,14 +111,14 @@ public final class ArtemisReadinessProbe {
     }
 
     private static void await(EndpointInfo endpoint, String label, Duration timeout, Timing timing,
-                              Exchange exchange) {
-        long deadline = System.nanoTime() + timeout.toNanos();
+                              Ticker ticker, Exchange exchange) {
+        long deadline = ticker.nanoTime() + timeout.toNanos();
         IOException lastFailure = null;
-        while (System.nanoTime() < deadline) {
+        while (ticker.nanoTime() < deadline) {
             try (Socket socket = new Socket()) {
                 socket.connect(new InetSocketAddress(InetAddress.getByName(endpoint.host()), endpoint.port()),
-                        attemptMillis(deadline, timing));
-                socket.setSoTimeout(attemptMillis(deadline, timing));
+                        attemptMillis(deadline, timing, ticker));
+                socket.setSoTimeout(attemptMillis(deadline, timing, ticker));
                 exchange.run(socket);
                 return;
             } catch (IOException e) {
@@ -96,7 +126,7 @@ public final class ArtemisReadinessProbe {
                 lastFailure = e;
             }
             try {
-                Thread.sleep(Math.min(timing.retryPauseMillis(), remainingMillis(deadline)));
+                ticker.sleep(Math.min(timing.retryPauseMillis(), remainingMillis(deadline, ticker)));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("Interrupted waiting for Artemis " + label + " on " + endpoint, e);
@@ -116,8 +146,8 @@ public final class ArtemisReadinessProbe {
         }
     }
 
-    private static int attemptMillis(long deadline, Timing timing) {
-        return Math.toIntExact(Math.max(1L, Math.min(timing.attemptMillis(), remainingMillis(deadline))));
+    private static int attemptMillis(long deadline, Timing timing, Ticker ticker) {
+        return Math.toIntExact(Math.max(1L, Math.min(timing.attemptMillis(), remainingMillis(deadline, ticker))));
     }
 
     /** Whole seconds as {@code 5s}, as the message read before sub-second budgets existed; otherwise {@code 300ms}. */
@@ -125,8 +155,8 @@ public final class ArtemisReadinessProbe {
         return timeout.toMillisPart() == 0 ? timeout.toSeconds() + "s" : timeout.toMillis() + "ms";
     }
 
-    private static long remainingMillis(long deadline) {
-        return Math.max(0L, TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()));
+    private static long remainingMillis(long deadline, Ticker ticker) {
+        return Math.max(0L, TimeUnit.NANOSECONDS.toMillis(deadline - ticker.nanoTime()));
     }
 
     private static SSLSocketFactory trusting(String certPem) {
