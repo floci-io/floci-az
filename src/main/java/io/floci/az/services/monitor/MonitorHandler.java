@@ -71,11 +71,6 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     private static final Pattern DCR_PATTERN = Pattern.compile(
         "subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/Microsoft\\.Insights/dataCollectionRules/([^/?]+)", Pattern.CASE_INSENSITIVE);
 
-    /** Matches any resource path with a diagnostic-settings extension resource appended. */
-    private static final Pattern DIAG_SETTINGS_PATTERN = Pattern.compile(
-        "(.+)/providers/microsoft\\.insights/diagnosticsettings(?:/([^/?]+))?",
-        Pattern.CASE_INSENSITIVE);
-
     /** The workspaces, data collection endpoints and rules a resource group or subscription lists. */
     private static final Pattern COLLECTION_PATTERN = Pattern.compile(
         "subscriptions/([^/]+)(?:/resourceGroups/([^/]+))?/providers/"
@@ -98,7 +93,6 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     static final Duration SOFT_DELETE_RETENTION = Duration.ofDays(14);
     static final String DCE_TYPE = "Microsoft.Insights/dataCollectionEndpoints";
     static final String DCR_TYPE = "Microsoft.Insights/dataCollectionRules";
-    static final String DIAGNOSTIC_SETTINGS_TYPE = "Microsoft.Insights/diagnosticSettings";
 
     /**
      * Before the stores, the handler kept lookups from a workspace's customerId and a rule's immutableId to their
@@ -149,7 +143,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             MonitorResource::id, key -> key.startsWith("dce/"));
         this.rules = ArmResourceStore.create(factory, "monitor", DCR_TYPE, MonitorResource.class,
             MonitorResource::id, key -> key.startsWith("dcr/"));
-        this.diagnosticSettings = ArmResourceStore.create(factory, "monitor", DIAGNOSTIC_SETTINGS_TYPE,
+        this.diagnosticSettings = ArmResourceStore.create(factory, "monitor", DiagnosticSettings.TYPE,
             MonitorResource.class, MonitorResource::id, key -> key.startsWith("diag/"));
         this.config = config;
         this.maxDecodedBodyBytes = maxBodySize.asLongValue();
@@ -291,13 +285,12 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     }
 
     /**
-     * Returns true when the path contains an Azure diagnostic-settings extension resource
-     * ({@code /providers/microsoft.insights/diagnosticSettings[/{name}]}).
-     * The check is case-insensitive to match both the az CLI and SDKs.
+     * Returns true when the path addresses Azure diagnostic settings or their categories, extension resources of a
+     * resource or a subscription ({@code /providers/microsoft.insights/diagnosticSettings[/{name}]},
+     * {@code .../diagnosticSettingsCategories}). The check is case-insensitive to match both the az CLI and SDKs.
      */
     public static boolean isDiagnosticSettingsPath(String path) {
-        if (path == null) return false;
-        return DIAG_SETTINGS_PATTERN.matcher(path).find();
+        return DiagnosticSettings.matches(path);
     }
 
     /** The id of the resource {@code matched} addresses: the matched part of the path, in the client's casing. */
@@ -847,129 +840,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     // -------------------------------------------------------------------------
 
     private Response handleDiagnosticSettingsArm(AzureRequest req, String path, String method) {
-        Matcher m = DIAG_SETTINGS_PATTERN.matcher(path);
-        if (!m.find()) {
-            return Response.status(400).entity("Invalid diagnosticSettings path").build();
-        }
-        String resourceUri = m.group(1);
-        String settingsName = m.group(2);
-        Optional<ArmResourceId> target = ArmResourceId.parse(resourceUri);
-        if (target.isEmpty()) {
-            return Response.status(400).entity("Invalid diagnosticSettings path").build();
-        }
-
-        if ("GET".equals(method) && settingsName == null) {
-            // The settings extend one resource: the scope of their id is that resource's id
-            String targetKey = target.get().canonicalKey();
-            List<MonitorResource> settings = diagnosticSettings.all().stream()
-                .filter(stored -> stored.id().scope() != null && targetKey.equals(stored.id().scope().canonicalKey()))
-                .map(ArmResourceStore.Stored::value)
-                .toList();
-            return Response.ok(Map.of("value", settings)).type(MediaType.APPLICATION_JSON).build();
-        }
-
-        if (settingsName == null) {
-            return Response.status(400).entity("diagnosticSettings name is required for this operation").build();
-        }
-
-        ArmResourceId id = resourceId(m.group(0));
-
-        return switch (method) {
-            case "PUT" -> {
-                Map<String, Object> body = parseBody(req);
-                Object rawProps = body.get("properties");
-                if (rawProps != null && !(rawProps instanceof Map<?, ?>)) {
-                    yield Response.status(400).entity("'properties' must be an object").build();
-                }
-                Map<String, Object> props = bodyProperties(body);
-                Map<String, Object> settingProps = buildDiagnosticSettingsProperties(props, resourceUri);
-                MonitorResource setting = diagnosticSettings.createOrUpdate(id, existing -> new MonitorResource(
-                    existing.map(MonitorResource::id).orElse(id.id()),
-                    existing.map(MonitorResource::name).orElse(settingsName),
-                    DIAGNOSTIC_SETTINGS_TYPE, null, null, settingProps)).stored().value();
-
-                LOG.infof("Diagnostic settings configured: resource=%s name=%s", resourceUri, settingsName);
-                yield Response.ok(setting).type(MediaType.APPLICATION_JSON).build();
-            }
-            case "GET" -> {
-                Optional<ArmResourceStore.Stored<MonitorResource>> setting = diagnosticSettings.get(id);
-                if (setting.isEmpty()) {
-                    yield Response.status(404)
-                        .entity(Map.of("error", Map.of("code", "ResourceNotFound",
-                            "message", "Diagnostic settings '" + settingsName + "' not found")))
-                        .build();
-                }
-                yield Response.ok(setting.get().value()).type(MediaType.APPLICATION_JSON).build();
-            }
-            case "DELETE" -> {
-                diagnosticSettings.delete(id);
-                yield Response.ok().build();
-            }
-            default -> Response.status(405).build();
-        };
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> buildDiagnosticSettingsProperties(Map<String, Object> inputProps,
-                                                                   String resourceUri) {
-        Map<String, Object> props = new LinkedHashMap<>();
-
-        // Event Hub destination — the primary DSF audit log sink
-        Object ehRuleId = inputProps.get("eventHubAuthorizationRuleId");
-        if (ehRuleId != null) props.put("eventHubAuthorizationRuleId", ehRuleId);
-        Object ehName = inputProps.get("eventHubName");
-        if (ehName != null) props.put("eventHubName", ehName);
-
-        // Log Analytics workspace destination
-        Object workspaceId = inputProps.get("workspaceId");
-        if (workspaceId != null) props.put("workspaceId", workspaceId);
-
-        // Storage account destination
-        Object storageAccountId = inputProps.get("storageAccountId");
-        if (storageAccountId != null) props.put("storageAccountId", storageAccountId);
-
-        // Log categories — preserve as-is, defaulting to audit-log categories per resource type
-        List<Map<String, Object>> logs;
-        Object rawLogs = inputProps.get("logs");
-        if (rawLogs instanceof List<?> l) {
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> typed = (List<Map<String, Object>>) l;
-            logs = typed;
-        } else {
-            logs = defaultLogCategories(resourceUri);
-        }
-        props.put("logs", logs);
-
-        // Metrics — preserve as-is (DSF only uses logs)
-        Object metrics = inputProps.get("metrics");
-        props.put("metrics", metrics != null ? metrics : List.of());
-
-        return props;
-    }
-
-    private List<Map<String, Object>> defaultLogCategories(String resourceUri) {
-        String lc = resourceUri.toLowerCase();
-        List<String> categories;
-        if (lc.contains("microsoft.dbformysql")) {
-            categories = List.of("MySqlAuditLogs", "MySqlSlowLogs");
-        } else if (lc.contains("microsoft.dbformariadb")) {
-            categories = List.of("MySqlAuditLogs", "MySqlSlowLogs");
-        } else if (lc.contains("microsoft.dbforpostgresql")) {
-            categories = List.of("PostgreSQLLogs");
-        } else if (lc.contains("microsoft.sql")) {
-            categories = List.of("SQLSecurityAuditEvents", "SQLInsights", "AutomaticTuning");
-        } else {
-            categories = List.of("AuditEvent");
-        }
-        return categories.stream()
-            .map(cat -> {
-                Map<String, Object> log = new LinkedHashMap<>();
-                log.put("category", cat);
-                log.put("enabled", true);
-                log.put("retentionPolicy", Map.of("enabled", false, "days", 0));
-                return log;
-            })
-            .toList();
+        Map<String, Object> body = "PUT".equals(method) ? parseBody(req) : Map.of();
+        return new DiagnosticSettings(diagnosticSettings, config.strictDiagnosticSettings()).handle(path, method, body);
     }
 
     public synchronized void clear() {

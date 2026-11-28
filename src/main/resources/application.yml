@@ -132,6 +132,10 @@ floci-az:
     # strict-search-keys: true      # FLOCI_AZ_PARITY_OVERRIDES_STRICT_SEARCH_KEYS; default on from strict.
     #                               # The Azure AI Search data plane serves declared services only, and an
     #                               # api-key must be one of the service's admin keys
+    # strict-diagnostic-settings: true # FLOCI_AZ_PARITY_OVERRIDES_STRICT_DIAGNOSTIC_SETTINGS; default on from strict.
+    #                               # A diagnostic setting with a category its scope does not offer, retention,
+    #                               # or a data sink another setting of the resource uses for the same category
+    #                               # is refused as Azure refuses it
     # strict-locations: true        # FLOCI_AZ_PARITY_OVERRIDES_STRICT_LOCATIONS; default on from strict.
     #                               # A resource PUT naming a location the cloud does not offer is
     #                               # 400 NoRegisteredProviderFound

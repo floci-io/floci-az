@@ -197,6 +197,15 @@ public interface EmulatorConfig {
     }
 
     /**
+     * Whether a diagnostic setting is refused as Azure refuses it: a category the scope does not offer, retention
+     * asked for, or a data sink another setting of the resource already uses for the same category. On from
+     * {@code parity: strict}; {@code parity-overrides.strict-diagnostic-settings} overrides it either way.
+     */
+    default boolean strictDiagnosticSettings() {
+        return parityOverrides().strictDiagnosticSettings().orElse(parity().includes(ParityLevel.STRICT));
+    }
+
+    /**
      * {@code floci-az.parity-overrides}: each switch is unset by default and then follows {@link #parity()}.
      * Later phases add their own switches here.
      */
@@ -236,6 +245,9 @@ public interface EmulatorConfig {
 
         /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictSearchKeys()}. */
         Optional<Boolean> strictSearchKeys();
+
+        /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictDiagnosticSettings()}. */
+        Optional<Boolean> strictDiagnosticSettings();
     }
 
     /** The cloud a tenant lives in when nothing else names one. */

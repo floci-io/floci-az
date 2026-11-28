@@ -22,7 +22,8 @@ the **Log Analytics query API** (read them back with a subset of KQL), all in-pr
   Delete, List in a resource group or across the subscription; an `immutableId` is generated when not supplied, kept across
   redeploys, and used to route ingestion
 - **Diagnostic settings**: `{resourceUri}/providers/Microsoft.Insights/diagnosticSettings/{name}` on any
-  resource: CreateOrUpdate, Get, Delete, and List for the resource they extend
+  resource, and on a subscription for the Activity Log: CreateOrUpdate, Get, Delete, and List for the resource or
+  subscription they extend; see [Diagnostic settings](#diagnostic-settings)
 - **Resource ids** compare case-insensitively, as in ARM: a PUT through another casing of the same id
   updates the one resource, and the id keeps the casing it was created with. Workspaces, data
   collection endpoints and rules and diagnostic settings persist under the `monitor` storage mode
@@ -173,6 +174,42 @@ curl -s "http://localhost:4577/subscriptions/00000000-0000-0000-0000-00000000000
   `Microsoft.Authorization/policies/{effect}/action` entries through `ActivityLog.recordPolicyEffect`,
   with the `properties.policies` JSON the Policy category carries.
 - Any `api-version` is accepted, the stable `2015-04-01` and the `2017-03-01-preview` alike.
+
+## Diagnostic settings
+
+A setting is kept as it was sent and answered in the shape Azure answers it. Nothing is made up: a setting sent
+with a destination and no `logs` or `metrics` is accepted, as Azure accepts it, and has no categories.
+
+- **On a resource**: every property is written. The destinations (`storageAccountId`, `serviceBusRuleId`,
+  `workspaceId`, `eventHubAuthorizationRuleId`, `eventHubName`) and `logAnalyticsDestinationType` are `null` when
+  unset, `logs` and `metrics` are `[]` when not sent, each log entry carries `category`, `categoryGroup`, `enabled`
+  and `retentionPolicy` (`{"enabled": false, "days": 0}` when not sent), each metric entry `category`, `enabled`
+  and `retentionPolicy`, and `location`, `kind`, `tags` and `identity` are `null`.
+- **On a subscription** (`/subscriptions/{id}/providers/Microsoft.Insights/diagnosticSettings/{name}`, the Activity
+  Log's export): the id is `/subscriptions/{id}/providers/microsoft.insights/diagnosticSettings/{name}`, `location`
+  is `global`, and only the properties that were sent are written. A read lists every Activity Log category,
+  `Security`, `Administrative`, `ServiceHealth`, `Alert`, `Recommendation`, `Policy`, `Autoscale` and
+  `ResourceHealth`, those not sent as `"enabled": false`.
+- **A missing setting** answers `404` with `{"code": "ResourceNotFound", "message": "The diagnostic setting
+  '{name}' doesn't exist."}`. This text is taken from Azure CLI output of 2021; no later capture was found.
+- **Categories**: `diagnosticSettingsCategories` on a subscription answers `400 ResourceTypeNotSupported`
+  (`The resource type '/' does not support diagnostic settings.`), as Azure does. The categories of each resource
+  type are not modelled: on a resource it answers `404`.
+
+With `floci-az.parity-overrides.strict-diagnostic-settings` (on from `parity: strict`), a setting is refused as Azure
+refuses it, with the flat `{"code": ..., "message": ...}` body:
+
+| Refused | Answer |
+|---|---|
+| A subscription log `category` that is not one of the eight Activity Log categories (a category group name sent as `category` included) | `400 BadRequest`, `Category '{category}' is not supported.` |
+| A log or metric entry with `retentionPolicy.enabled: true` | `400 BadRequest`, `Diagnostic settings does not support retention for new diagnostic settings.` |
+| A data sink (`storageAccountId`, `workspaceId`, `eventHubAuthorizationRuleId`, `serviceBusRuleId`, `marketplacePartnerId`) that another setting of the same resource or subscription already uses for an enabled category this one enables | `409 Conflict`, `Data sink '{sink}' is already used in diagnostic setting '{other}' for category '{category}'. Data sinks can't be reused in different settings on the same category for the same resource.` |
+
+Not refused, in any mode, because no Azure answer could be found for them: a setting with no destination, a sixth
+setting on one resource (Azure allows five), a destination that does not exist, a log entry with both `category`
+and `categoryGroup` or a setting mixing category groups with categories, `metrics` on a subscription setting, and
+the read of a setting saved without categories (Azure may answer it `404`). A resource's category or category group
+is not checked against its type.
 
 ## Supported KQL subset
 
