@@ -11,7 +11,8 @@ import static org.hamcrest.Matchers.equalTo;
 
 @QuarkusTest
 @TestProfile(StrictNamesProfile.class)
-@DisplayName("Event Grid: parity-overrides.strict-names refuses topic and event subscription names outside Azure's rule")
+@DisplayName("Event Grid: parity-overrides.strict-names refuses topic, system topic and event subscription names "
+    + "outside Azure's rule")
 class EventGridStrictNamesTest {
 
     private static final String BASE =
@@ -42,5 +43,19 @@ class EventGridStrictNamesTest {
         }
         given().contentType("application/json").body(SUBSCRIPTION_BODY)
             .when().put(subscriptions + "good-subscription" + API).then().statusCode(201);
+    }
+
+    @Test
+    void aSystemTopicNameOutsideTheRuleIsRefusedAndAValidOneIsCreated() {
+        String systemTopics = "/subscriptions/sub-names/resourceGroups/rg/providers/Microsoft.EventGrid/systemTopics/";
+        String body = "{\"location\":\"eastus\",\"properties\":{\"source\":\"/subscriptions/sub-names/"
+            + "resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/names\","
+            + "\"topicType\":\"Microsoft.Storage.StorageAccounts\"}}";
+        for (String bad : new String[] {"ab", "dot.ted", "s".repeat(129)}) {
+            given().contentType("application/json").body(body).when().put(systemTopics + bad + API)
+                .then().statusCode(400).body("error.code", equalTo("InvalidResourceName"));
+        }
+        given().contentType("application/json").body(body).when().put(systemTopics + "s".repeat(128) + API)
+            .then().statusCode(201);
     }
 }

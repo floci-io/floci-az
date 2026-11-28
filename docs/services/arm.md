@@ -354,7 +354,7 @@ The rest depends on the parity overrides:
 | Resource PUT under a missing group | the resource is created, no group appears | `resource-group-semantics`: the group is created once the resource is (only after a `2xx`), in the location the resource reports, else the cloud's default location. `strict-resource-groups`: refused with `404 ResourceGroupNotFound` before the resource's handler runs, as is a read, an action or a delete of a resource under a missing group |
 | `DELETE` | `200`; only the group is removed, a missing group is `200` too | `resource-group-delete`: see below |
 | Persistence | in memory, lost on restart | `resource-group-semantics` or `strict-resource-groups`: kept in the directory store, so they follow `storage.services.directory.mode` |
-| Generic listings (`.../resources`) | as before: Event Grid topics, Log Analytics workspaces, data collection endpoints and rules, and Communication and Email services are not listed | `resource-group-delete`: listed, so Terraform's `prevent_deletion_if_contains_resources` sees what a delete would remove |
+| Generic listings (`.../resources`) | as before: Event Grid topics and system topics, Log Analytics workspaces, data collection endpoints and rules, and Communication and Email services are not listed | `resource-group-delete`: listed, so Terraform's `prevent_deletion_if_contains_resources` sees what a delete would remove |
 
 Under `resource-group-delete` a `DELETE` of a group is the long-running operation the spec declares:
 
@@ -488,6 +488,7 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 | `Microsoft.Devices/IotHubs` | 3 to 50 letters, digits and hyphens, not all digits, not starting or ending with a hyphen |
 | `Microsoft.Devices/IotHubs/eventHubEndpoints/ConsumerGroups` | 1 to 50 letters, digits, hyphens, periods and underscores, or `$Default`; checked with or without `strict-names` |
 | `Microsoft.EventGrid/eventSubscriptions` | 3 to 64 letters, digits and hyphens |
+| `Microsoft.EventGrid/systemTopics` | 3 to 128 letters, digits and hyphens |
 | `Microsoft.EventGrid/topics` | 3 to 50 letters, digits and hyphens |
 | `Microsoft.KeyVault/managedHSMs` | 3 to 24 letters, digits and hyphens, starting with a letter, ending with a letter or digit, no consecutive hyphens |
 | `Microsoft.KeyVault/vaults` | 3 to 24 letters, digits and hyphens, starting with a letter, ending with a letter or digit, no consecutive hyphens |

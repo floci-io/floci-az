@@ -67,6 +67,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Devices/IotHubs                                                      RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.Devices/IotHubs/eventHubEndpoints/ConsumerGroups                     RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.EventGrid/eventSubscriptions                                         EXTENSION       OPTIONAL  PROVIDER_SERVICE
+        Microsoft.EventGrid/systemTopics                                               RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.EventGrid/topics                                                     RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.Insights/components                                                  RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.Insights/dataCollectionEndpoints                                     RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
@@ -176,6 +177,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Devices/IotHubs    3-50    IOTHUB    409    Conflict
         Microsoft.Devices/IotHubs/eventHubEndpoints/ConsumerGroups    1-50    null    0    null
         Microsoft.EventGrid/eventSubscriptions    3-64    null    0    null
+        Microsoft.EventGrid/systemTopics    3-128    null    0    null
         Microsoft.EventGrid/topics    3-50    null    0    null
         Microsoft.KeyVault/managedHSMs    3-24    MHSM    409    Conflict
         Microsoft.KeyVault/vaults    3-24    KEYVAULT    409    VaultAlreadyExists

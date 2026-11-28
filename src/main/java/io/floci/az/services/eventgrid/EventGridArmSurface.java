@@ -33,10 +33,20 @@ public class EventGridArmSurface implements ArmSurfaceProvider {
         "InvalidResourceName",
         "The resource name '%s' is invalid: an event subscription name is 3 to 64 letters, digits and hyphens.");
 
+    /**
+     * {@code resource-name-rules.md}: 3 to 128 alphanumerics and hyphens; azurerm validates the same
+     * ({@code ^[-a-zA-Z0-9]{3,128}$}). The spec declares no pattern for {@code systemTopicName}.
+     */
+    static final NameRule SYSTEM_TOPIC_NAME = new NameRule(3, 128, Pattern.compile("[A-Za-z0-9-]+"),
+        "InvalidResourceName",
+        "The resource name '%s' is invalid: a system topic name is 3 to 128 letters, digits and hyphens.");
+
     private static final List<ArmSurface> SURFACES = List.of(
         new ArmSurface(NAMESPACE, ArmLane.PROVIDER_SERVICE, List.of(
             ArmResourceType.resourceGroup(NAMESPACE, "topics", LocationPolicy.REQUIRED)
                 .withName(TOPIC_NAME),
+            ArmResourceType.resourceGroup(NAMESPACE, "systemTopics", LocationPolicy.REQUIRED)
+                .withName(SYSTEM_TOPIC_NAME),
             new ArmResourceType(NAMESPACE, "eventSubscriptions", ArmScopeKind.EXTENSION, LocationPolicy.OPTIONAL)
                 .withName(EVENT_SUBSCRIPTION_NAME))));
 
