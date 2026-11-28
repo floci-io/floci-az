@@ -19,6 +19,7 @@ import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.monitor.MonitorModels.BillingFeatures;
 import io.floci.az.services.monitor.MonitorModels.DeletedWorkspace;
 import io.floci.az.services.monitor.MonitorModels.MonitorResource;
 import io.floci.az.services.monitor.activitylog.ActivityLogEndpoint;
@@ -71,16 +72,26 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     private static final Pattern DCR_PATTERN = Pattern.compile(
         "subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/Microsoft\\.Insights/dataCollectionRules/([^/?]+)", Pattern.CASE_INSENSITIVE);
 
+    /**
+     * An Application Insights component ({@code Components_*}), or its billing features with
+     * {@code /currentbillingfeatures} ({@code ComponentCurrentBillingFeatures_*}): group 1 the component's path,
+     * group 2 the billing features segment. Any other path under a component answers 404.
+     */
+    private static final Pattern COMPONENT_PATTERN = Pattern.compile(
+        "(subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.Insights/components/[^/?]+)"
+            + "(/currentbillingfeatures)?/?(?:\\?.*)?",
+        Pattern.CASE_INSENSITIVE);
+
     /** Matches any resource path with a diagnostic-settings extension resource appended. */
     private static final Pattern DIAG_SETTINGS_PATTERN = Pattern.compile(
         "(.+)/providers/microsoft\\.insights/diagnosticsettings(?:/([^/?]+))?",
         Pattern.CASE_INSENSITIVE);
 
-    /** The workspaces, data collection endpoints and rules a resource group or subscription lists. */
+    /** The workspaces, data collection endpoints and rules and components a resource group or subscription lists. */
     private static final Pattern COLLECTION_PATTERN = Pattern.compile(
         "subscriptions/([^/]+)(?:/resourceGroups/([^/]+))?/providers/"
             + "(Microsoft\\.OperationalInsights/workspaces|Microsoft\\.Insights/dataCollectionEndpoints"
-            + "|Microsoft\\.Insights/dataCollectionRules)/?(?:\\?.*)?",
+            + "|Microsoft\\.Insights/dataCollectionRules|Microsoft\\.Insights/components)/?(?:\\?.*)?",
         Pattern.CASE_INSENSITIVE);
 
     /** {@code DeletedWorkspaces_List} and {@code DeletedWorkspaces_ListByResourceGroup}. */
@@ -99,6 +110,11 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     static final String DCE_TYPE = "Microsoft.Insights/dataCollectionEndpoints";
     static final String DCR_TYPE = "Microsoft.Insights/dataCollectionRules";
     static final String DIAGNOSTIC_SETTINGS_TYPE = "Microsoft.Insights/diagnosticSettings";
+    static final String COMPONENT_TYPE = "Microsoft.Insights/components";
+
+    /** The type path of a component's billing features record key: the component id with this segment appended. */
+    static final String BILLING_FEATURES_TYPE = "Microsoft.Insights/components/currentbillingfeatures";
+    private static final String BILLING_FEATURES = "currentbillingfeatures";
 
     /**
      * Before the stores, the handler kept lookups from a workspace's customerId and a rule's immutableId to their
@@ -120,6 +136,15 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     private final ArmResourceStore<MonitorResource> endpoints;
     private final ArmResourceStore<MonitorResource> rules;
     private final ArmResourceStore<MonitorResource> diagnosticSettings;
+    private final ArmResourceStore<Map<String, Object>> components;
+    private final ArmResourceStore<BillingFeatures> billingFeatures;
+
+    /**
+     * Held by a component PUT and DELETE and by a billing features PUT. A billing PUT checks that its component
+     * exists and writes in one hold, so a DELETE between the two cannot leave billing features without a component,
+     * which a component created again under the same name would then answer with instead of the defaults.
+     */
+    private final Object componentWrites = new Object();
     private final EmulatorConfig config;
     private final long maxDecodedBodyBytes;
     /**
@@ -151,6 +176,10 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             MonitorResource::id, key -> key.startsWith("dcr/"));
         this.diagnosticSettings = ArmResourceStore.create(factory, "monitor", DIAGNOSTIC_SETTINGS_TYPE,
             MonitorResource.class, MonitorResource::id, key -> key.startsWith("diag/"));
+        this.components = ArmResourceStore.create(factory, "monitor", COMPONENT_TYPE, documentType(),
+            document -> String.valueOf(document.get("id")), key -> false);
+        this.billingFeatures = ArmResourceStore.create(factory, "monitor", BILLING_FEATURES_TYPE,
+            BillingFeatures.class, BillingFeatures::id, key -> false);
         this.config = config;
         this.maxDecodedBodyBytes = maxBodySize.asLongValue();
     }
@@ -234,15 +263,19 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             return handleDceArm(req, path, method);
         } else if (ArmPaths.hasProviderType(path, "Microsoft.Insights", "dataCollectionRules")) {
             return handleDcrArm(req, path, method);
+        } else if (ArmPaths.hasProviderType(path, "Microsoft.Insights", "components")) {
+            return handleComponentArm(req, path, method);
         } else if (isDiagnosticSettingsPath(path)) {
             return handleDiagnosticSettingsArm(req, path, method.toUpperCase());
         }
         return ArmErrors.notFound("Resource not found: " + path);
     }
 
-    /** The workspaces, data collection endpoints or rules in a resource group, or in a whole subscription. */
+    /** The workspaces, data collection endpoints, rules or components in a resource group, or a whole subscription. */
     private Response listCollection(String type, ArmScope scope) {
-        List<MonitorResource> value = storeOf(type).list(scope).stream().map(ArmResourceStore.Stored::value).toList();
+        List<?> value = COMPONENT_TYPE.equalsIgnoreCase(type)
+            ? components.list(scope).stream().map(ArmResourceStore.Stored::value).toList()
+            : storeOf(type).list(scope).stream().map(ArmResourceStore.Stored::value).toList();
         return Response.ok(Map.of("value", value)).type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -277,17 +310,20 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     }
 
     /**
-     * Workspaces, data collection endpoints and rules in a subscription, or in one of its resource groups.
-     * Diagnostic settings are extension resources and are not listed.
+     * Workspaces, data collection endpoints and rules and components in a subscription, or in one of its resource
+     * groups. Diagnostic settings are extension resources and are not listed.
      */
     @Override
     public List<Map<String, Object>> indexEntries(ArmScope scope) {
-        return Stream.of(workspaces, endpoints, rules)
+        Stream<Map<String, Object>> monitorResources = Stream.of(workspaces, endpoints, rules)
                 .flatMap(resources -> resources.list(scope).stream())
                 .map(ArmResourceStore.Stored::value)
                 .map(resource -> ArmResources.indexEntry(resource.id(), resource.name(), resource.type(),
-                    resource.location(), null))
-                .toList();
+                    resource.location(), null));
+        Stream<Map<String, Object>> componentEntries = components.list(scope).stream()
+                .map(ArmResourceStore.Stored::value)
+                .map(ArmResources::indexEntry);
+        return Stream.concat(monitorResources, componentEntries).toList();
     }
 
     /**
@@ -303,6 +339,11 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     /** The id of the resource {@code matched} addresses: the matched part of the path, in the client's casing. */
     private static ArmResourceId resourceId(String matched) {
         return ArmResourceId.parse("/" + matched).orElseThrow();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Class<Map<String, Object>> documentType() {
+        return (Class<Map<String, Object>>) (Class<?>) Map.class;
     }
 
     @SuppressWarnings("unchecked")
@@ -491,6 +532,192 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             return Response.ok().build();
         }
         return Response.status(405).build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Application Insights components ARM CRUD
+    // -------------------------------------------------------------------------
+
+    /**
+     * {@code Microsoft.Insights/components/{name}}: an Application Insights component as an ARM document, with no
+     * telemetry behind it. A PUT replaces the component's {@code kind}, {@code tags} and writable {@code properties}
+     * with the ones it sends, and adds the read-only ones Azure fills in. {@code AppId}, {@code InstrumentationKey} and
+     * {@code CreationDate} are generated by the first PUT and kept by every later one. PATCH replaces the tags only
+     * ({@code Components_UpdateTags}). {@code .../currentbillingfeatures} is the component's billing features.
+     */
+    private Response handleComponentArm(AzureRequest req, String path, String method) {
+        Matcher m = COMPONENT_PATTERN.matcher(path);
+        if (!m.matches()) {
+            return ArmErrors.notFound("Resource not found: " + path);
+        }
+        ArmResourceId id = resourceId(m.group(1));
+        if (m.group(2) != null) {
+            return handleBillingFeatures(req, method, id);
+        }
+
+        if ("PUT".equals(method)) {
+            Map<String, Object> body = parseBody(req);
+            Map<String, Object> component;
+            synchronized (componentWrites) {
+                component = components.createOrUpdate(id,
+                    existing -> componentDocument(req, id, body, existing.orElse(null))).stored().value();
+            }
+            return Response.ok(component).type(MediaType.APPLICATION_JSON).build();
+        } else if ("GET".equals(method)) {
+            return components.get(id)
+                .map(component -> Response.ok(component.value()).type(MediaType.APPLICATION_JSON).build())
+                .orElseGet(() -> resourceNotFound(id, COMPONENT_TYPE));
+        } else if ("PATCH".equals(method)) {
+            Map<String, Object> body = parseBody(req);
+            return components.update(id, existing -> withTags(existing, bodyTags(body)))
+                .map(component -> Response.ok(component.value()).type(MediaType.APPLICATION_JSON).build())
+                .orElseGet(() -> resourceNotFound(id, COMPONENT_TYPE));
+        } else if ("DELETE".equals(method)) {
+            synchronized (componentWrites) {
+                if (components.delete(id).isEmpty()) {
+                    return Response.noContent().build();
+                }
+                billingFeatures.delete(billingFeaturesId(id));
+            }
+            return Response.ok().build();
+        }
+        return Response.status(405).build();
+    }
+
+    /**
+     * The component a PUT stores. The writable properties are the request's, with the defaults the 2020-02-02 API
+     * gives ({@code Application_Type: web}, {@code Flow_Type: Bluefield}, {@code Request_Source: rest},
+     * {@code IngestionMode: LogAnalytics}, public network access {@code Enabled}) and the 90-day retention Azure
+     * answers with when none is sent. {@code ConnectionString} carries the instrumentation key and application id
+     * only: floci-az receives no telemetry, so it names no ingestion endpoint, and the SDKs accept the key alone.
+     */
+    private Map<String, Object> componentDocument(AzureRequest req, ArmResourceId id, Map<String, Object> body,
+                                                  Map<String, Object> existing) {
+        Map<String, Object> kept = existing == null ? Map.of() : ArmJson.cast(existing.get("properties"));
+        String name = existing == null ? id.name() : String.valueOf(existing.get("name"));
+        String instrumentationKey = ArmJson.string(kept, "InstrumentationKey", UUID.randomUUID().toString());
+        String appId = ArmJson.string(kept, "AppId", UUID.randomUUID().toString());
+
+        Map<String, Object> properties = bodyProperties(body);
+        properties.putIfAbsent("Application_Type", "web");
+        properties.putIfAbsent("Flow_Type", "Bluefield");
+        properties.putIfAbsent("Request_Source", "rest");
+        properties.putIfAbsent("RetentionInDays", 90);
+        properties.putIfAbsent("IngestionMode", "LogAnalytics");
+        properties.putIfAbsent("publicNetworkAccessForIngestion", "Enabled");
+        properties.putIfAbsent("publicNetworkAccessForQuery", "Enabled");
+        properties.put("ApplicationId", name);
+        properties.put("AppId", appId);
+        properties.put("InstrumentationKey", instrumentationKey);
+        properties.put("ConnectionString", "InstrumentationKey=" + instrumentationKey + ";ApplicationId=" + appId);
+        properties.put("CreationDate", ArmJson.string(kept, "CreationDate", Instant.now().toString()));
+        if (req.scope() != null && req.scope().tenantId() != null) {
+            properties.put("TenantId", req.scope().tenantId());
+        }
+        properties.put("provisioningState", "Succeeded");
+
+        Map<String, Object> component = new LinkedHashMap<>();
+        component.put("id", existing == null ? id.id() : String.valueOf(existing.get("id")));
+        component.put("name", name);
+        component.put("type", COMPONENT_TYPE);
+        component.put("location", bodyLocation(body, defaults.defaultLocation(req.scope())));
+        component.put("kind", ArmJson.string(body, "kind", String.valueOf(properties.get("Application_Type"))));
+        Map<String, Object> tags = bodyTags(body);
+        if (tags != null) {
+            component.put("tags", tags);
+        }
+        component.put("properties", properties);
+        return component;
+    }
+
+    /** The component with {@code tags} for its tags, or unchanged when the PATCH sends none. */
+    private static Map<String, Object> withTags(Map<String, Object> component, Map<String, Object> tags) {
+        if (tags == null) {
+            return component;
+        }
+        Map<String, Object> updated = new LinkedHashMap<>(component);
+        updated.put("tags", tags);
+        return updated;
+    }
+
+    /**
+     * {@code .../components/{name}/currentbillingfeatures} (2015-05-01): GET answers the stored features, or the
+     * defaults of a new component; PUT replaces the writable ones ({@code CurrentBillingFeatures} and the cap,
+     * warning threshold and notification switches of {@code DataVolumeCap}) and keeps the read-only
+     * {@code ResetTime} and {@code MaxHistoryCap}. A component that does not exist answers 404.
+     */
+    private Response handleBillingFeatures(AzureRequest req, String method, ArmResourceId componentId) {
+        ArmResourceId id = billingFeaturesId(componentId);
+        if ("GET".equals(method)) {
+            if (components.get(componentId).isEmpty()) {
+                return resourceNotFound(componentId, COMPONENT_TYPE);
+            }
+            return Response.ok(currentBillingFeatures(id)).type(MediaType.APPLICATION_JSON).build();
+        } else if ("PUT".equals(method)) {
+            Map<String, Object> body = parseBody(req);
+            Map<String, Object> features;
+            synchronized (componentWrites) {
+                if (components.get(componentId).isEmpty()) {
+                    return resourceNotFound(componentId, COMPONENT_TYPE);
+                }
+                features = billingFeaturesDocument(body, currentBillingFeatures(id));
+                billingFeatures.put(new BillingFeatures(id.id(), features));
+            }
+            return Response.ok(features).type(MediaType.APPLICATION_JSON).build();
+        }
+        return Response.status(405).build();
+    }
+
+    /** The stored billing features under {@code id}, or the defaults of a new component. */
+    private Map<String, Object> currentBillingFeatures(ArmResourceId id) {
+        return billingFeatures.get(id).map(stored -> stored.value().features())
+            .orElseGet(MonitorHandler::defaultBillingFeatures);
+    }
+
+    private static ArmResourceId billingFeaturesId(ArmResourceId componentId) {
+        return ArmResourceId.parse(componentId.id() + "/" + BILLING_FEATURES).orElseThrow();
+    }
+
+    /**
+     * A new component's billing features: the Basic plan with a 100 GB daily cap (azurerm's
+     * {@code daily_data_cap_in_gb} default), warning at 90% and notifications on, as the API's example answers.
+     */
+    private static Map<String, Object> defaultBillingFeatures() {
+        Map<String, Object> cap = new LinkedHashMap<>();
+        cap.put("Cap", 100.0);
+        cap.put("ResetTime", 0);
+        cap.put("WarningThreshold", 90);
+        cap.put("StopSendNotificationWhenHitThreshold", false);
+        cap.put("StopSendNotificationWhenHitCap", false);
+        cap.put("MaxHistoryCap", 100.0);
+        Map<String, Object> features = new LinkedHashMap<>();
+        features.put("CurrentBillingFeatures", List.of("Basic"));
+        features.put("DataVolumeCap", cap);
+        return features;
+    }
+
+    /** The billing features a PUT of {@code body} leaves: its writable fields over the defaults, the read-only kept. */
+    private static Map<String, Object> billingFeaturesDocument(Map<String, Object> body, Map<String, Object> current) {
+        Map<String, Object> features = defaultBillingFeatures();
+        if (body.get("CurrentBillingFeatures") instanceof List<?> plans) {
+            features.put("CurrentBillingFeatures", List.copyOf(plans));
+        }
+        Map<String, Object> cap = new LinkedHashMap<>(ArmJson.cast(features.get("DataVolumeCap")));
+        Map<String, Object> sent = ArmJson.cast(body.get("DataVolumeCap"));
+        for (String writable : List.of("Cap", "WarningThreshold", "StopSendNotificationWhenHitThreshold",
+                "StopSendNotificationWhenHitCap")) {
+            if (sent.containsKey(writable)) {
+                cap.put(writable, sent.get(writable));
+            }
+        }
+        Map<String, Object> currentCap = ArmJson.cast(current.get("DataVolumeCap"));
+        for (String readOnly : List.of("ResetTime", "MaxHistoryCap")) {
+            if (currentCap.containsKey(readOnly)) {
+                cap.put(readOnly, currentCap.get(readOnly));
+            }
+        }
+        features.put("DataVolumeCap", cap);
+        return features;
     }
 
     // -------------------------------------------------------------------------
@@ -978,6 +1205,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         endpoints.clear();
         rules.clear();
         diagnosticSettings.clear();
+        components.clear();
+        billingFeatures.clear();
         store.clear();
         rulesByImmutableId = null;
         workspacesByCustomerId = null;

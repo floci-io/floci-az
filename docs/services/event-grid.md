@@ -18,6 +18,12 @@ receives events and pushes them to subscriber **webhook** endpoints.
 - **Event subscriptions**: classic scoped `eventSubscriptions` with a **WebHook** destination,
   `filter` (`subjectBeginsWith`, `subjectEndsWith`, `includedEventTypes`, `isSubjectCaseSensitive`),
   and `retryPolicy`
+- **System topics**: `Microsoft.EventGrid/systemTopics` CreateOrUpdate, Get, Update (tags and identity), Delete,
+  and List (by resource group and by subscription). `properties.source` and `topicType` are required on create and
+  cannot change afterwards; `metricResourceId` is generated once, and a `SystemAssigned` identity gets a
+  `principalId` and `tenantId` that later writes keep, so role assignments to it stay valid. floci-az raises no
+  events from the resources it emulates, so nothing is delivered through a system topic, and event subscriptions on
+  a system topic (`systemTopics/{name}/eventSubscriptions`) are not served yet
 - **Publish**: `POST /api/events` accepts a JSON array of events in the **Event Grid** or
   **CloudEvents 1.0** schema
 - **Delivery**: events are fanned out asynchronously to matching subscribers, retried per the
@@ -43,6 +49,13 @@ POST   .../topics/{name}/listKeys
 POST   .../topics/{name}/regenerateKey         # body: {"keyName":"key1"|"key2"}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/topics
 GET    /subscriptions/{sub}/providers/Microsoft.EventGrid/topics
+
+PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/systemTopics/{name}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/systemTopics/{name}
+PATCH  /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/systemTopics/{name}
+DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/systemTopics/{name}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.EventGrid/systemTopics
+GET    /subscriptions/{sub}/providers/Microsoft.EventGrid/systemTopics
 
 PUT    {topicId}/providers/Microsoft.EventGrid/eventSubscriptions/{name}
 GET    {topicId}/providers/Microsoft.EventGrid/eventSubscriptions/{name}

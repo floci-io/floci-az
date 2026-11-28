@@ -39,7 +39,7 @@ class MonitorDisabledTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"Microsoft.OperationalInsights/workspaces", "Microsoft.Insights/dataCollectionEndpoints",
-        "Microsoft.Insights/dataCollectionRules"})
+        "Microsoft.Insights/dataCollectionRules", "Microsoft.Insights/components"})
     void aPutOfAMonitorTypeAnswersNotFound(String type) {
         given().contentType(ContentType.JSON).body("{\"location\":\"eastus\",\"properties\":{}}")
             .when().put(GROUP + type + "/off" + API)
