@@ -12,6 +12,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -63,7 +64,7 @@ public class ApiManagementProxy {
             }
             proxyRequest.headers().forEach(builder::header);
             HttpResponse<byte[]> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
-            Map<String, List<String>> headers = backendResponseHeaders(response);
+            Map<String, List<String>> headers = forwardedResponseHeaders(response.headers().map());
             for (ResponseHeaderAction action : proxyRequest.responseHeaders()) {
                 action.applyTo(headers);
             }
@@ -79,13 +80,26 @@ public class ApiManagementProxy {
     }
 
     /**
-     * The backend's response headers the gateway passes on to the caller, keyed case-insensitively; the hop-by-hop
-     * and framing headers are left for the gateway's own connection to set.
+     * The backend's response headers the gateway passes on to the caller, keyed case-insensitively. The hop-by-hop
+     * and framing headers are left for the gateway's own connection to set, and so is every header the backend's
+     * {@code Connection} header names (RFC 9110 section 7.6.1), since those belong to that connection alone.
      */
-    private static Map<String, List<String>> backendResponseHeaders(HttpResponse<byte[]> response) {
+    static Map<String, List<String>> forwardedResponseHeaders(Map<String, List<String>> backendHeaders) {
+        Set<String> dropped = new HashSet<>(NOT_FORWARDED);
+        backendHeaders.forEach((name, values) -> {
+            if ("connection".equalsIgnoreCase(name)) {
+                for (String value : values) {
+                    for (String token : value.split(",")) {
+                        if (!token.isBlank()) {
+                            dropped.add(token.trim().toLowerCase(Locale.ROOT));
+                        }
+                    }
+                }
+            }
+        });
         Map<String, List<String>> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-        response.headers().map().forEach((name, values) -> {
-            if (!name.startsWith(":") && !NOT_FORWARDED.contains(name.toLowerCase(Locale.ROOT))) {
+        backendHeaders.forEach((name, values) -> {
+            if (!name.startsWith(":") && !dropped.contains(name.toLowerCase(Locale.ROOT))) {
                 headers.computeIfAbsent(name, k -> new ArrayList<>()).addAll(values);
             }
         });
@@ -126,27 +140,32 @@ public class ApiManagementProxy {
 
     /**
      * An {@code <outbound>} set-header policy, applied to the backend's response headers before they reach the
-     * caller: {@code override} replaces, {@code skip} keeps an existing header, {@code append} adds a value and
-     * {@code delete} removes the header.
+     * caller: {@code override} replaces, {@code skip} keeps an existing header, {@code append} adds its values and
+     * {@code delete} removes the header. Each {@code <value>} element is one header value, so a policy can set
+     * several (two {@code Set-Cookie} lines, for example).
      */
-    public record ResponseHeaderAction(String name, String existsAction, String value) {
+    public record ResponseHeaderAction(String name, String existsAction, List<String> values) {
+
+        public ResponseHeaderAction {
+            values = List.copyOf(values);
+        }
 
         void applyTo(Map<String, List<String>> headers) {
             switch (existsAction) {
                 case "delete" -> headers.remove(name);
                 case "skip" -> {
-                    if (!headers.containsKey(name) && value != null) {
-                        headers.put(name, new ArrayList<>(List.of(value)));
+                    if (!headers.containsKey(name) && !values.isEmpty()) {
+                        headers.put(name, new ArrayList<>(values));
                     }
                 }
                 case "append" -> {
-                    if (value != null) {
-                        headers.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
+                    if (!values.isEmpty()) {
+                        headers.computeIfAbsent(name, k -> new ArrayList<>()).addAll(values);
                     }
                 }
                 default -> {
-                    if (value != null) {
-                        headers.put(name, new ArrayList<>(List.of(value)));
+                    if (!values.isEmpty()) {
+                        headers.put(name, new ArrayList<>(values));
                     }
                 }
             }

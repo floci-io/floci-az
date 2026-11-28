@@ -332,8 +332,17 @@ public class ApiManagementGateway {
             }
             String action = element.getAttribute("exists-action");
             context.responseHeaders().add(new ApiManagementProxy.ResponseHeaderAction(name,
-                    action.isBlank() ? "override" : action.toLowerCase(Locale.ROOT), lastValue(context, element)));
+                    action.isBlank() ? "override" : action.toLowerCase(Locale.ROOT), allValues(context, element)));
         }
+    }
+
+    private List<String> allValues(PolicyContext context, Element element) {
+        NodeList values = element.getElementsByTagName("value");
+        List<String> resolved = new ArrayList<>();
+        for (int i = 0; i < values.getLength(); i++) {
+            resolved.add(resolveNamedValues(context.scope(), values.item(i).getTextContent()));
+        }
+        return resolved;
     }
 
     private String lastValue(PolicyContext context, Element element) {

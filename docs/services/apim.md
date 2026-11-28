@@ -45,7 +45,7 @@ The policy engine intentionally supports a focused subset:
 
 - `<set-header>` with `exists-action="override" | skip | append | delete`: in `<inbound>` and `<backend>` it sets
   the request header sent to the backend; in `<outbound>` it sets, appends to or deletes a header of the backend's
-  response before it reaches the caller
+  response before it reaches the caller, one header value per `<value>` element (so two `Set-Cookie` lines stay two)
 - `<set-query-parameter>` with `exists-action="override" | skip | delete`, in `<inbound>` and `<backend>`
 - `<rewrite-uri template="...">`, in `<inbound>`
 - `<set-backend-service base-url="...">` and `<set-backend-service backend-id="...">`, in `<inbound>` and `<backend>`
@@ -56,7 +56,8 @@ The policy engine intentionally supports a focused subset:
 Each policy acts only in the sections listed above; the same element elsewhere is ignored, and `<on-error>` is not
 interpreted. Scopes compose outermost first (service, product, API, operation) in every section, which matches the
 usual placement of `<base />` at the start of each section. The gateway passes the backend's response headers on to
-the caller, except the hop-by-hop and framing ones (`Connection`, `Content-Length`, `Transfer-Encoding` and the like).
+the caller, except the hop-by-hop and framing ones (`Connection`, `Content-Length`, `Transfer-Encoding` and the like) and any
+header the backend's `Connection` header names.
 
 ## Deleted services
 

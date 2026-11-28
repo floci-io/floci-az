@@ -844,6 +844,20 @@ class ApiManagementHandlerTest {
     }
 
     @Test
+    void anOutboundSetHeaderSendsEveryValue() throws IOException {
+        createService();
+        createApi("orders", "orders", true);
+        putPolicy("/apis/orders", "",
+                "<set-header name=\"Set-Cookie\" exists-action=\"override\">"
+                        + "<value>a=1</value><value>b=2</value></set-header>");
+
+        List<String> cookies = given().when().get(GATEWAY + "/orders/x")
+                .then().statusCode(201)
+                .extract().headers().getValues("Set-Cookie");
+        assertEquals(List.of("a=1", "b=2"), cookies);
+    }
+
+    @Test
     void outboundPoliciesComposeOutermostScopeFirst() throws IOException {
         createService();
         createApi("orders", "orders", true);
