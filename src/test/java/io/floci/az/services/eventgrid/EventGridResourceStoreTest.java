@@ -92,7 +92,7 @@ class EventGridResourceStoreTest {
     void entriesStoredUnderTheOldKeysAreServedDeliveredToAndMoveOnTheirFirstWrite() throws Exception {
         String topicId = topic("Sub-Legacy", "RG-Legacy", "legacy-topic");
         Topic legacyTopic = new Topic("Sub-Legacy", "RG-Legacy", "legacy-topic", "eastus",
-            EventGridModels.SCHEMA_EVENT_GRID, "k1", "k2");
+            EventGridModels.SCHEMA_EVENT_GRID, "k1", "k2", null, null, null, null, null, null);
         EventSubscription legacySubscription = new EventSubscription("legacy-sub", topicId,
             "http://127.0.0.1:" + webhook.getAddress().getPort() + "/hook", EventGridModels.SCHEMA_EVENT_GRID,
             Filter.empty(), new RetryPolicy(1, 1440), null, null);

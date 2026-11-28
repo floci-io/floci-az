@@ -19,12 +19,14 @@ import io.floci.az.services.eventgrid.EventGridModels.EventSubscription;
 import io.floci.az.services.eventgrid.EventGridModels.Filter;
 import io.floci.az.services.eventgrid.EventGridModels.RetryPolicy;
 import io.floci.az.services.eventgrid.EventGridModels.Topic;
+import io.floci.az.services.managedidentity.ArmIdentities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,10 +65,11 @@ public class EventGridService {
     private final EmulatorConfig config;
     private final EventGridDelivery delivery;
     private final CloudDefaults defaults;
+    private final ArmIdentities identities;
 
     @Inject
     public EventGridService(StorageFactory factory, EmulatorConfig config, EventGridDelivery delivery,
-                            CloudDefaults defaults) {
+                            CloudDefaults defaults, ArmIdentities identities) {
         this.topics = ArmResourceStore.create(factory, "eventgrid", TOPIC_TYPE, Topic.class, Topic::resourceId,
                 key -> key.startsWith(LEGACY_TOPIC_PREFIX));
         this.subscriptions = ArmResourceStore.create(factory, "eventgrid", SUBSCRIPTION_TYPE, EventSubscription.class,
@@ -74,6 +77,7 @@ public class EventGridService {
         this.config = config;
         this.delivery = delivery;
         this.defaults = defaults;
+        this.identities = identities;
     }
 
     // ── ARM dispatch ──────────────────────────────────────────────────────────
@@ -111,6 +115,7 @@ public class EventGridService {
         if (seg.length == 2) {
             return switch (method) {
                 case "PUT" -> createOrUpdateTopic(req, sub, rg, topicName);
+                case "PATCH" -> updateTopic(req, sub, rg, topicName);
                 case "GET" -> getTopic(sub, rg, topicName);
                 case "DELETE" -> deleteTopic(sub, rg, topicName);
                 default -> Response.status(405).build();
@@ -128,21 +133,81 @@ public class EventGridService {
 
     // ── Topics ─────────────────────────────────────────────────────────────────
 
+    /**
+     * {@code Topics_CreateOrUpdate}: the PUT replaces everything it can set, keeping only the access keys and a
+     * system-assigned identity's principal.
+     */
     private Response createOrUpdateTopic(AzureRequest req, String sub, String rg, String name) {
         Map<String, Object> body = parseBody(req);
+        Optional<Response> badIdentity = malformedIdentity(body);
+        if (badIdentity.isPresent()) {
+            return badIdentity.get();
+        }
         Map<String, Object> properties = cast(body.get("properties"));
         String inputSchema = stringOr(properties.get("inputSchema"), EventGridModels.SCHEMA_EVENT_GRID);
         String location = stringOr(body.get("location"), config.services().eventGrid().defaultRegion()
                 .orElseGet(() -> defaults.defaultLocation(req.scope())));
 
-        Topic topic = topics.createOrUpdate(topicId(sub, rg, name), existing -> existing
-                .map(t -> new Topic(t.subscriptionId(), t.resourceGroup(), t.name(), location, inputSchema,
-                        t.key1(), t.key2()))
-                .orElseGet(() -> new Topic(sub, rg, name, location, inputSchema, generateKey(), generateKey())))
+        Topic topic = topics.createOrUpdate(topicId(sub, rg, name), existing -> new Topic(
+                existing.map(Topic::subscriptionId).orElse(sub), existing.map(Topic::resourceGroup).orElse(rg),
+                existing.map(Topic::name).orElse(name), location, inputSchema,
+                existing.map(Topic::key1).orElseGet(EventGridService::generateKey),
+                existing.map(Topic::key2).orElseGet(EventGridService::generateKey),
+                tags(body.get("tags")),
+                identities.resolve(body.get("identity"), existing.map(Topic::identity).orElse(null), req.scope()),
+                stringOr(properties.get("publicNetworkAccess"), null),
+                properties.get("disableLocalAuth") instanceof Boolean disabled ? disabled : null,
+                inboundIpRules(properties.get("inboundIpRules")),
+                properties.get("inputSchemaMapping") instanceof Map<?, ?> mapping
+                        ? new LinkedHashMap<>(cast(mapping)) : null))
                 .stored().value();
         LOG.infov("ARM: created Event Grid topic {0} (schema={1})", name, inputSchema);
         // Topics_CreateOrUpdate declares only 201 (2025-02-15).
         return Response.status(201).entity(topicJson(topic)).build();
+    }
+
+    /**
+     * {@code Topics_Update}: the tags, identity, {@code publicNetworkAccess}, {@code disableLocalAuth} and
+     * {@code inboundIpRules} the body carries replace the stored ones, and everything it leaves out stays. The
+     * operation is long-running; of the two codes the spec declares, {@code 201} carries the topic, and its
+     * {@code provisioningState: Succeeded} is terminal, so a client's poller finishes at once.
+     */
+    private Response updateTopic(AzureRequest req, String sub, String rg, String name) {
+        Map<String, Object> body = parseBody(req);
+        Optional<Response> badIdentity = malformedIdentity(body);
+        if (badIdentity.isPresent()) {
+            return badIdentity.get();
+        }
+        Map<String, Object> properties = cast(body.get("properties"));
+        return topics.update(topicId(sub, rg, name), t -> new Topic(t.subscriptionId(), t.resourceGroup(), t.name(),
+                        t.location(), t.inputSchema(), t.key1(), t.key2(),
+                        body.containsKey("tags") ? tags(body.get("tags")) : t.tags(),
+                        body.containsKey("identity")
+                                ? identities.resolve(body.get("identity"), t.identity(), req.scope()) : t.identity(),
+                        properties.containsKey("publicNetworkAccess")
+                                ? stringOr(properties.get("publicNetworkAccess"), null) : t.publicNetworkAccess(),
+                        properties.get("disableLocalAuth") instanceof Boolean disabled
+                                ? disabled : t.disableLocalAuth(),
+                        properties.containsKey("inboundIpRules")
+                                ? inboundIpRules(properties.get("inboundIpRules")) : t.inboundIpRules(),
+                        t.inputSchemaMapping()))
+                .<Response>map(stored -> {
+                    LOG.infov("ARM: updated Event Grid topic {0}", name);
+                    return Response.status(201).entity(topicJson(stored.value())).build();
+                })
+                .orElseGet(() -> notFound("topics/" + name));
+    }
+
+    private static Map<String, Object> tags(Object sent) {
+        return sent == null ? null : new LinkedHashMap<>(cast(sent));
+    }
+
+    private static List<Object> inboundIpRules(Object sent) {
+        return sent instanceof List<?> rules ? new ArrayList<>(rules) : null;
+    }
+
+    private static Optional<Response> malformedIdentity(Map<String, Object> body) {
+        return ArmIdentities.malformed(body.get("identity"), "an Event Grid topic").map(EventGridService::badRequest);
     }
 
     private Response getTopic(String sub, String rg, String name) {
@@ -170,10 +235,8 @@ public class EventGridService {
         }
         String keyName = stringOr(parseBody(req).get("keyName"), "key1");
         Optional<Stored<Topic>> updated = topics.update(topicId(sub, rg, name), t -> "key2".equalsIgnoreCase(keyName)
-                ? new Topic(t.subscriptionId(), t.resourceGroup(), t.name(), t.location(), t.inputSchema(),
-                        t.key1(), generateKey())
-                : new Topic(t.subscriptionId(), t.resourceGroup(), t.name(), t.location(), t.inputSchema(),
-                        generateKey(), t.key2()));
+                ? t.withKeys(t.key1(), generateKey())
+                : t.withKeys(generateKey(), t.key2()));
         return updated
                 .<Response>map(s -> Response.ok(Map.of("key1", s.value().key1(), "key2", s.value().key2())).build())
                 .orElseGet(() -> notFound("topics/" + name));
@@ -308,8 +371,18 @@ public class EventGridService {
     public List<Map<String, Object>> topicIndexEntries(String sub, String rg) {
         return topics.list(new ArmScope(sub, rg)).stream()
                 .map(Stored::value)
-                .map(t -> ArmResources.indexEntry(t.resourceId(), t.name(), TOPIC_TYPE, t.location(), null))
+                .map(t -> ArmResources.indexEntry(t.resourceId(), t.name(), TOPIC_TYPE, t.location(), indexTags(t.tags())))
                 .toList();
+    }
+
+    /** The topic's tags as the resource index carries them (string values), or null for none. */
+    private static Map<String, String> indexTags(Map<String, Object> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return null;
+        }
+        Map<String, String> strings = new LinkedHashMap<>();
+        tags.forEach((key, value) -> strings.put(key, value == null ? "" : String.valueOf(value)));
+        return strings;
     }
 
     /**
@@ -339,13 +412,25 @@ public class EventGridService {
         properties.put("provisioningState", "Succeeded");
         properties.put("endpoint", topicEndpoint(t.name()));
         properties.put("inputSchema", t.inputSchema());
-        properties.put("publicNetworkAccess", "Enabled");
+        if (t.inputSchemaMapping() != null) {
+            properties.put("inputSchemaMapping", t.inputSchemaMapping());
+        }
+        properties.put("publicNetworkAccess", t.publicNetworkAccess() == null
+                ? EventGridModels.PUBLIC_NETWORK_ACCESS_ENABLED : t.publicNetworkAccess());
+        properties.put("inboundIpRules", t.inboundIpRules() == null ? List.of() : t.inboundIpRules());
+        properties.put("disableLocalAuth", Boolean.TRUE.equals(t.disableLocalAuth()));
 
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("id", t.resourceId());
         resource.put("name", t.name());
         resource.put("type", "Microsoft.EventGrid/topics");
         resource.put("location", t.location());
+        if (t.tags() != null) {
+            resource.put("tags", t.tags());
+        }
+        if (t.identity() != null) {
+            resource.put("identity", t.identity());
+        }
         resource.put("properties", properties);
         return resource;
     }
@@ -446,7 +531,7 @@ public class EventGridService {
     }
 
     private static ArmResourceId topicId(String sub, String rg, String name) {
-        return armId(new Topic(sub, rg, name, null, null, null, null).resourceId());
+        return armId("/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/" + TOPIC_TYPE + "/" + name);
     }
 
     private static ArmResourceId eventSubscriptionId(String topicResourceId, String name) {

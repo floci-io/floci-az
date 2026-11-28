@@ -91,6 +91,11 @@ resource "azurerm_eventgrid_topic" "egt" {
   name                = "floci-test-egtopic"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
+  local_auth_enabled  = false
+
+  tags = {
+    env = "compat"
+  }
 }
 
 # The webhook is unreachable on purpose: the validation handshake fails quietly and the subscription is still created.
