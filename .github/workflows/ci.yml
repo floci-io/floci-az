@@ -61,9 +61,9 @@ jobs:
         github.event.action != 'edited'
       )
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@v6.1.0
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -83,7 +83,7 @@ jobs:
       # compatibility-tests/sdk-test-java/pom.xml, a project this workflow never builds,
       # and an unrelated change there would bust the key.
       - id: maven-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('pom.xml') }}
@@ -139,7 +139,7 @@ jobs:
       # `on.push.branches` is [main] only in this workflow, so `push` means main.
       # `always()` so a failed test run still saves the dependencies it resolved.
       # Skipped on an exact hit: the key is immutable, so saving it again only fails to reserve it.
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/save@v6.1.0
         if: >-
           always() && matrix.shard == '1' && github.event_name == 'push'
           && steps.maven-cache.outputs.cache-hit != 'true'
@@ -149,7 +149,7 @@ jobs:
 
       - name: Upload shard manifest and results
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: shard-${{ matrix.shard }}
           path: |
@@ -178,7 +178,7 @@ jobs:
         )
       )
     steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/download-artifact@v8.0.2
         with:
           pattern: shard-*
           path: shards
@@ -221,7 +221,7 @@ jobs:
       # Runs after a failed shard too, which is when the summary matters most.
       - name: Test summary
         if: always()
-        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2
+        uses: test-summary/action@v2.6
         with:
           paths: 'shards/shard-*/target/surefire-reports/TEST-*.xml'
 

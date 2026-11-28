@@ -46,7 +46,7 @@ jobs:
       # Block scalars below are literal (|), not folded (>): folding joins Markdown
       # bullets onto one line. One paragraph per line, because GitHub renders a
       # single newline in a comment as a hard line break.
-      - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
+      - uses: actions/first-interaction@v3.1.0
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -71,7 +71,7 @@ jobs:
       # apart from "repeat contributor, only their prior PR is indexed": both read
       # as total_count <= 1 while the just-opened PR is not indexed yet. Instead,
       # look at the returned items and skip only if one of them is NOT this PR.
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - uses: actions/github-script@v9.0.0
         with:
           script: |
             const { data } = await github.rest.search.issuesAndPullRequests({

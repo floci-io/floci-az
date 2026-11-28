@@ -33,7 +33,7 @@ jobs:
     # A fork inherits the schedule; it has no reason to spend minutes on it.
     if: github.event_name != 'schedule' || !github.event.repository.fork
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
 
       - name: Build image
         run: docker build -f docker/Dockerfile.native -t floci-az:dockerfile-native .
