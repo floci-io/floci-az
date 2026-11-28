@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -271,6 +272,24 @@ class EventGridHandlerTest {
             .body("properties.inboundIpRules", hasSize(0))
             .body("location", equalTo("eastus"));
         given().when().post(TOPIC_BASE + "/listKeys" + API).then().body("key1", equalTo(key1));
+    }
+
+    @Test
+    @DisplayName("a topic's tags reach Resource Graph, so a tag filter finds it")
+    void aResourceGraphTagFilterFindsTheTopic() {
+        given().contentType("application/json")
+            .body("{\"location\":\"eastus\",\"tags\":{\"env\":\"graph\"}}")
+            .when().put(TOPIC_BASE + API)
+            .then().statusCode(201);
+
+        given().contentType("application/json")
+            .body(Map.of("query", "resources | where type =~ 'Microsoft.EventGrid/topics' and tags.env == 'graph'"
+                    + " | project name, tags", "subscriptions", List.of(SUB)))
+            .when().post("/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01")
+            .then().statusCode(200)
+            .body("count", equalTo(1))
+            .body("data[0].name", equalTo(TOPIC))
+            .body("data[0].tags.env", equalTo("graph"));
     }
 
     @Test

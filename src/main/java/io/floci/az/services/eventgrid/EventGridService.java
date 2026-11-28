@@ -371,8 +371,18 @@ public class EventGridService {
     public List<Map<String, Object>> topicIndexEntries(String sub, String rg) {
         return topics.list(new ArmScope(sub, rg)).stream()
                 .map(Stored::value)
-                .map(t -> ArmResources.indexEntry(t.resourceId(), t.name(), TOPIC_TYPE, t.location(), null))
+                .map(t -> ArmResources.indexEntry(t.resourceId(), t.name(), TOPIC_TYPE, t.location(), indexTags(t.tags())))
                 .toList();
+    }
+
+    /** The topic's tags as the resource index carries them (string values), or null for none. */
+    private static Map<String, String> indexTags(Map<String, Object> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return null;
+        }
+        Map<String, String> strings = new LinkedHashMap<>();
+        tags.forEach((key, value) -> strings.put(key, value == null ? "" : String.valueOf(value)));
+        return strings;
     }
 
     /**
