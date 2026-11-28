@@ -1,13 +1,12 @@
 package io.floci.az.services.mysql;
 
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -17,17 +16,10 @@ import static org.hamcrest.Matchers.*;
  * Exercises the full server + child-resource CRUD surface without Docker.
  */
 @QuarkusTest
-@TestProfile(MySqlHandlerMockedTest.MockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("MySqlHandler — mocked mode (no Docker)")
 @SuppressWarnings("unused")
 class MySqlHandlerMockedTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.mysql.mocked", "true");
-        }
-    }
 
     private static final String SUB  = "test-sub-mysql-mocked";
     private static final String RG   = "test-rg-mysql-mocked";

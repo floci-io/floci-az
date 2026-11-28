@@ -1,6 +1,6 @@
 package io.floci.az.services.managedidentity;
 
-import io.floci.az.testing.AcrMockedProfile;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.Test;
@@ -13,7 +13,7 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
-@TestProfile(AcrMockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 class UserAssignedIdentityRuleTest {
 
     private static final String RG = "/subscriptions/sub-uairule/resourceGroups/rg-uairule";

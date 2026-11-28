@@ -1,6 +1,6 @@
 package io.floci.az.services.postgres;
 
-import io.floci.az.testing.PostgresMockedProfile;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,7 +15,7 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 
 @QuarkusTest
-@TestProfile(PostgresMockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("PostgreSQL flexible servers: Entra-only authentication and Microsoft Entra administrators")
 class PostgresEntraAuthTest {
 

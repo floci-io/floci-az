@@ -1,6 +1,6 @@
 package io.floci.az.services.acr;
 
-import io.floci.az.testing.AcrMockedProfile;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * <p>Always runs in mocked mode (no registry container) regardless of the default in application.yml.
  */
 @QuarkusTest
-@TestProfile(AcrMockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 public class AcrHandlerTest {
 
     private static final String SUB = "00000000-0000-0000-0000-000000000001";

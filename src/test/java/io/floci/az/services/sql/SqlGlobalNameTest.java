@@ -5,6 +5,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
@@ -17,7 +18,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
-@TestProfile(SqlHandlerMockedTest.MockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("SQL: a server name is a global name held in the name registry")
 class SqlGlobalNameTest {
 

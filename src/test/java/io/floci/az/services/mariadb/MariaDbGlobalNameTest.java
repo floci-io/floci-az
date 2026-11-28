@@ -4,6 +4,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
@@ -16,7 +17,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
-@TestProfile(MariaDbHandlerMockedTest.MockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("MariaDB: a server name is owned through the global name registry")
 class MariaDbGlobalNameTest {
 

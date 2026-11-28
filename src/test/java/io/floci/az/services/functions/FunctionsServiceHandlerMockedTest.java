@@ -1,7 +1,7 @@
 package io.floci.az.services.functions;
 
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,17 +23,10 @@ import static org.hamcrest.Matchers.*;
  * return a synthetic 200 stub instead of executing user code.
  */
 @QuarkusTest
-@TestProfile(FunctionsServiceHandlerMockedTest.MockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("FunctionsServiceHandler — mocked mode (no Docker)")
 @SuppressWarnings("unused")
 class FunctionsServiceHandlerMockedTest {
-
-    public static class MockedProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.services.functions.mocked", "true");
-        }
-    }
 
     private static final String FN = "/devstoreaccount1-functions";
 

@@ -1,6 +1,6 @@
 package io.floci.az.services.postgres;
 
-import io.floci.az.testing.PostgresMockedProfile;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,7 +18,7 @@ import static org.hamcrest.Matchers.*;
  * without Docker.
  */
 @QuarkusTest
-@TestProfile(PostgresMockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("PostgresHandler — mocked mode (no Docker)")
 @SuppressWarnings("unused")
 class PostgresHandlerMockedTest {

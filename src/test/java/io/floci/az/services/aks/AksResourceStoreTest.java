@@ -6,6 +6,7 @@ import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.aks.AksModels.ManagedCluster;
+import io.floci.az.testing.NoDockerProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
@@ -23,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
-@TestProfile(AksHandlerTest.MockedProfile.class)
+@TestProfile(NoDockerProfile.class)
 @DisplayName("AKS: one store keyed by canonical id")
 class AksResourceStoreTest {
 
